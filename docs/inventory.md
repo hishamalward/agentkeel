@@ -1,5 +1,8 @@
 # Inventory: where every framework element comes from
 
+> **Revision note (2026-08-23, spec rev 2).** Dispositions below are the extraction audit and stand. `docs/spec.md` §2 then proposes changes to the framework itself (rules dropped, hooks added); where a row says `verbatim` or `generalize` but §2 drops the element (INDEX, CANON, two-mode plans, verification as a gate), §2 wins once the owner rules on it.
+
+
 Clean-room audit for `agentkeel`, written 2026-08-23 before any README or hook. Every element the
 public repo may contain is listed here with its source line, whether it is general or specific to
 the Listenality product, and what happens to it. Nothing marked **unsure** ships. Nothing here
