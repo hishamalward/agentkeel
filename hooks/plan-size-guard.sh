@@ -16,9 +16,9 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
 if [ "${1:-}" = "--selftest" ]; then
   T=$(mktemp -d 2>/dev/null || mktemp -d -t agentkeel); mkdir -p "$T/docs/plans" "$T/docs/specs"
-  yes "- task" | head -n 301 > "$T/docs/plans/x-plan.md"
-  yes "- task" | head -n 299 > "$T/docs/plans/y-plan.md"
-  yes "- task" | head -n 900 > "$T/docs/specs/z-spec.md"
+  yes "task line" | head -n 301 > "$T/docs/plans/x-plan.md"
+  yes "task line" | head -n 299 > "$T/docs/plans/y-plan.md"
+  yes "task line" | head -n 900 > "$T/docs/specs/z-spec.md"
   fail=0
   printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/plans/x-plan.md" | "$SELF" >/dev/null 2>&1; [ $? -eq 2 ] || { echo "selftest FAIL: 301 lines allowed" >&2; fail=1; }
   printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/plans/y-plan.md" | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: 299 lines blocked" >&2; fail=1; }
