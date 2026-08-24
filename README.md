@@ -5,23 +5,23 @@
 A framework for shipping production code with AI coding agents: work priced by size, spec-first,
 four gates with named owners, blast radius bounded by hooks.
 
-AI coding agents now write code faster than anyone reviews it. The failures that follow are
-rarely in the code. They are the missing gates: a task that quietly grew from a one-file fix into a
-refactor, a plan reviewed three times before a line was written, a verification step that could
-not fail, a commit that landed on `main` because nothing stood in the way. Writing rules into a
-`CLAUDE.md` does not hold, because the session that drifts is the same session that read the
-rules.
+AI coding agents write code faster than anyone reviews it. The failures that follow are rarely
+in the code. They are the missing gates: a one-file fix that quietly became a refactor, a plan
+reviewed three times before a line was written, a check that could not fail, a commit that landed
+on `main` because nothing stood in the way. Rules in a `CLAUDE.md` do not hold, because the
+session that drifts is the session that read them.
 
-agentkeel is the practice that came out of shipping a real product solo with agents writing the
-code, extracted and made enforceable. Three invariants sit above every rule: every write is
-bounded before it happens, every claim carries its evidence, every loop has a cap and only a
-human re-opens it. Work is sized once, as a declaration the hooks can read. A spec says who
-verifies each success criterion. Four gates each name an owner. The write path is guarded by
-hooks that run in the harness, outside the model's memory.
+agentkeel is the practice from shipping a real product solo with agents writing the code,
+extracted and made enforceable. Three invariants sit above every rule: every write is bounded
+before it happens, every claim carries its evidence, every loop has a cap and only a human
+re-opens it. Work is sized once, as a declaration the hooks read. A spec says who verifies each
+success criterion. Four gates each name an owner. Six small hooks guard the write path from
+inside the harness, outside the model's memory.
 
-The result in practice: a plan gated once instead of three times, seven plan defects caught
-before implementation against zero found in the code afterwards, and a `main` branch that stays
-green because a commit on it is refused unless the work was declared small.
+The result, from practice and from the worked example below: a plan gated once instead of three
+times; seven plan defects caught before implementation against zero found in the code after; a
+`main` that stays green because a commit on it is refused unless the work was declared small; and
+a ship command refused before it ran, with the reason handed back to the agent.
 
 ## The invariants
 
