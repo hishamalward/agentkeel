@@ -1,0 +1,32 @@
+name: validate
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: bash version and syntax
+        run: |
+          bash --version | head -1
+          for f in hooks/*.sh; do bash -n "$f"; done
+      - name: hook selftests
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          for f in hooks/*.py; do python3 "$f" --selftest; done
+          for f in hooks/*.sh; do bash "$f" --selftest; done
+      - name: unit tests
+        run: python3 -m unittest discover -s tests -v
