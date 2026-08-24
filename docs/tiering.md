@@ -28,3 +28,5 @@ Rules:
 - **`small` in a shared tree means explicit paths**: `git commit -m "..." -- <paths>`. A bare
   `git commit` commits the whole index, including whatever another agent had staged.
 - **Expiry** exists so that yesterday's `small` cannot grant today's commit on `main`.
+- **`branch` in the state file is informational.** The guards read the live branch of the tree the
+  call runs in, so declaring on `main` and then creating the branch is fine.
