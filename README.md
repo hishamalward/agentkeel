@@ -288,6 +288,8 @@ python3 -m unittest discover -s tests -v
 
 CI runs the same suite on macOS and Linux, on Python 3.10 and 3.13, plus every hook's `--selftest`.
 
+For whoever owns this next: [docs/how-it-works.html](docs/how-it-works.html) is the tour; [docs/spec.md](docs/spec.md) is the contract.
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
