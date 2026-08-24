@@ -43,6 +43,18 @@ class TierGuard(RepoCase):
         code, err = run_hook(H, self.write("src/a.py"))
         self.assertEqual(code, 2); self.assertIn("draft", err)
 
+    def test_spec_status_with_inline_comment_is_read(self):
+        # found in the worked example: the template's "status: draft   # draft | approved" was read as missing
+        self.declare("large", slug="json-flag"); self.branch("feat/json-flag")
+        os.makedirs(os.path.join(self.repo, "docs", "specs"))
+        with open(os.path.join(self.repo, "docs", "specs", "json-flag-spec.md"), "w") as fh:
+            fh.write("---\nstatus: draft            # draft | approved | superseded\n---\n")
+        code, err = run_hook(H, self.write("src/a.py"))
+        self.assertEqual(code, 2); self.assertIn("status 'draft'", err)
+        with open(os.path.join(self.repo, "docs", "specs", "json-flag-spec.md"), "w") as fh:
+            fh.write("---\nstatus: approved   # ruled by the human\napproved_by: h\n---\n")
+        self.assertEqual(run_hook(H, self.write("src/a.py"))[0], 0)
+
     def test_large_allows_with_approved_spec(self):
         self.declare("large", slug="json-flag"); self.branch("feat/json-flag")
         os.makedirs(os.path.join(self.repo, "docs", "specs"))

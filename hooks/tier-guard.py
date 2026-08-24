@@ -29,7 +29,7 @@ import time
 MAIN_BRANCHES = {"main", "master"}
 ALWAYS_ALLOWED_PREFIXES = ("docs/", ".claude/")
 GIT_COMMIT_RE = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?commit\b")
-STATUS_RE = re.compile(r"^\s*status\s*:\s*([A-Za-z-]+)\s*$", re.MULTILINE)
+STATUS_RE = re.compile(r"^\s*status\s*:\s*([A-Za-z-]+)\s*(?:#.*)?$", re.MULTILINE)  # inline comments allowed
 
 
 def git(cwd, *args):
