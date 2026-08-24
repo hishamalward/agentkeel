@@ -23,13 +23,9 @@ Repo: `github.com/hishamalward/agentkeel`, MIT, v0.1.0 at publish.
   spec-first with success criteria split by who verifies them, a small set of gates with named
   owners, blast radius bounded on every write path, and the sharpest rules enforced by hooks in
   the harness rather than by prose in a CLAUDE.md.
-- **Provenance.** The base is the practice in the owner's personal repos (Listenality's
-  `music_analytics`, `claude-sandbox`, ToilScan); `docs/inventory.md` is the audit trail, row by
-  row. A work version of the same idea exists at Teranet. No Teranet artifact (document, hook, spec
-  template, gate name) has been or will be consulted. Where an *idea* the owner also applied at
-  work is worth having here (a secret-printing guard, per-write-path caps), it is re-implemented
-  from the principle, marked `fresh` in the inventory, and named as such in the README. Whether to
-  mention the lineage at all is the owner's call, not the repo's.
+- **Provenance.** Extracted from the owner's personal repos (Listenality's `music_analytics`,
+  `claude-sandbox`, ToilScan); `docs/inventory.md` is the audit trail, row by row. Elements written
+  fresh from a principle rather than copied from a source are marked `fresh` in the inventory.
 
 ## 2. What is wrong with the practised framework, and what changes
 
@@ -68,7 +64,7 @@ honest and every rule earned its place. Three things are still wrong with it as 
 | C3 | **Four gates, not six, under a strict definition.** A gate is a point where work cannot proceed until a named owner produces named evidence. G1 Spec approval (human) · G2 Plan gate (AI, once, only when a handoff plan exists) · G3 Review (AI, one round; two scopes: per task, and whole branch) · G4 Ship (human decides, AI supplies evidence). | Deletes "Verification" as a gate; it is the evidence rule (I2) every gate consumes. Merges per-task and whole-branch review into one gate with two scopes. | Revision 1 counted six by listing every loop. Verification is not a checkpoint with an owner, it is a property of every claim. The resume says five; the honest count is four plus one rule, and the owner has ruled the resume follows the work. |
 | C4 | **Plans never carry code.** A plan is a task table: task, files it may touch, its check, and whether the check's scope is inside the files it touches. If the deliverable is small enough that the plan would carry the code, there is no plan. | Deletes the two-mode rule (MA:392-403). Keeps `plan-size-guard` with a lower threshold (300 lines) and a cleaner message: "a plan this long is carrying code; cut it to the table". | The size guard, the gate-once rule and the right-sizing rule are three workarounds for one cause: plans that transcribe implementation. Remove the cause and two of the three rules collapse into a table format. The "verification scoped wider than the work" defect (MA:359-367), six of seven plan defects, becomes a required column, not a paragraph of advice. |
 | C5 | **Invert hook priority: write-path guards first.** `write-path-guard.py`: no commit or push to `main`/`master` unless the declared tier is `small`; no `Write`/`Edit` outside the worktree's git top-level (temp dirs allowed); no destructive git (`push --force`, `reset --hard`, `checkout -- .`, `clean -f`, `branch -D`) without `AGENTKEEL_ALLOW_DESTRUCTIVE=1`, which is echoed loudly. | Adds the hook the resume describes and the personal repos never had. | I1 has no teeth today. The plan-gate guard protects a token budget; this protects `main`, which auto-deploys (MA:198-200). |
-| C6 | **A secret-printing guard.** `secret-guard.py` (PreToolUse `Bash`): refuse `cat`/`less`/`head` of `.env*` and key files, bare `env`/`printenv`, `echo $VAR` where VAR matches `KEY\|TOKEN\|SECRET\|PASSWORD`, and `git diff`/`show` of `.env*`. Override `AGENTKEEL_SHOW_SECRETS=1`, echoed. | Adds ~40 lines. Idea re-implemented from principle (§1). | Cheapest hook in the set; the one whose absence is most embarrassing in a repo that calls itself a guardrail. The same instinct as mcpclerk's redaction: the secret may be used, it may not be shown. |
+| C6 | **A secret-printing guard.** `secret-guard.py` (PreToolUse `Bash`): refuse `cat`/`less`/`head` of `.env*` and key files, bare `env`/`printenv`, `echo $VAR` where VAR matches `KEY\|TOKEN\|SECRET\|PASSWORD`, and `git diff`/`show` of `.env*`. Override `AGENTKEEL_SHOW_SECRETS=1`, echoed. | Adds ~40 lines. Written fresh from the principle. | Cheapest hook in the set; the one whose absence is most embarrassing in a repo that calls itself a guardrail. The same instinct as mcpclerk's redaction: the secret may be used, it may not be shown. |
 | C7 | **Keep `plan-gate-guard.py`, state its limits.** Detection stays a heuristic over the prompt; the README says so and shows the dodge. An explicit marker (`[plan-gate]` in the dispatch prompt) is added as the preferred, deterministic trigger. | Generalizes the existing hook; drops the retired path. | It is real practice with a real number behind it (MA:382-390). Honesty about the heuristic is worth more than pretending it is airtight. |
 | C8 | **Three registers, not six.** `docs/specs/<slug>-spec.md` (what we intend; approved before build), `DECISIONS.md` (why; append-only, status index at top, rewrite-in-place of the index row is the only edit to an old entry), `docs/handovers/<slug>.md` (what cannot be derived: goal, ledger, what will bite, next). | Deletes `INDEX.md`, `CANON.md`, `STATUS.md`, `PLAN.md`, `WIP.md`, `audits/`, `design-exploration/` from the framework. A one-line scaling note says when a register may be split (CANON is what DECISIONS grows into past ~50 entries). | Each register is a place for drift and a maintenance rule to forget. Three files with three different verbs (intend, decide, resume) need no router. The artifact-house rules (MA:71-90) are Listenality doc management, not framework. |
 | C9 | **The CLAUDE.md fragment fits in 60 lines.** `templates/CLAUDE.agentkeel.md` is the entire text a using repo pastes: the invariants, the tier command, the four gates, the hook list, the three registers. Everything else is a hook, a template, or a linked doc. | Adds the fragment; replaces the idea that the framework *is* the CLAUDE.md. | The session that drifts is the session that read 429 lines of instructions competing for attention. What must hold is in hooks; what must be remembered fits on one screen. |
@@ -199,14 +195,14 @@ per-file enforcement of the spec's `Changes` list (v0.2: the hook can read the a
 refuse edits outside its blast radius, which is I1 fully mechanised); a dispatch-count cap for G3;
 a multi-repo rollout; per-user identity in hooks; an MCP standards server.
 
-## 11. Rulings needed before the README
+## 11. Rulings (recorded 2026-08-23)
 
-1. **C2, tier as state.** One command per task that every guardrail keys off. The strongest change
-   and the one with friction. Yes / no / only for medium and large (small stays a sentence)?
-2. **C3, four gates.** Verification demoted from gate to rule; review is one gate with two scopes.
-   The resume will say four. Yes / keep six / keep five by another split?
-3. **C4, plans never carry code**, size guard at 300 lines. Yes / keep the two-mode rule?
-4. **C6, secret guard** in v0.1 as a re-implemented idea, with the provenance note in §1. In /
-   v0.2 / leave out entirely?
-5. **C8, three registers**, INDEX and CANON dropped from the framework. Yes / keep INDEX?
-6. **Lineage wording.** Does the README say a work version exists, or say nothing about Teranet?
+1. **C2, tier as state: yes, for all tiers.** If `small` were the silent default, an undeclared
+   session could commit on `main`, which is the unsafe default the hooks exist to remove. One
+   command per task, run by the agent.
+2. **C3, four gates: yes.** Verification is the evidence rule, not a gate. The resume follows.
+3. **C4, plans never carry code, size guard at 300 lines: yes.**
+4. **C6, secret guard: in v0.1.**
+5. **C8, three registers, INDEX and CANON dropped: yes.**
+6. **Lineage: the README says nothing about any work version.** This is new work based on the
+   owner's personal practice.

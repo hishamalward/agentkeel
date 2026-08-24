@@ -6,7 +6,7 @@
 Clean-room audit for `agentkeel`, written 2026-08-23 before any README or hook. Every element the
 public repo may contain is listed here with its source line, whether it is general or specific to
 the Listenality product, and what happens to it. Nothing marked **unsure** ships. Nothing here
-comes from Teranet: the four source trees below were grepped for the word and it does not appear
+comes from any work source: the four source trees below were grepped for the word and it does not appear
 in any of them.
 
 Sources read in full (paths abbreviated below):
@@ -49,7 +49,7 @@ must not ship).
 ## 2. Gates as actually practised
 
 The resume wording says "five quality gates with explicit human or AI owners". That count and that
-table describe the Teranet framework, which is not a source. What the personal repos actually
+table describe a work version that is not a source. What the personal repos actually
 practise is below; the owner is stated in prose in the sources ("founder", "gate agent",
 "implementer", "reviewer"), never as a table. `agentkeel` writes the table from this practice and
 does not pad it to five.
@@ -98,8 +98,8 @@ from the hook (which only fires on `Agent` dispatches, i.e. AI-owned gates). The
 | 4.1 | Plan-gate guard: PreToolUse on `Agent`; counts gate dispatches per plan file in `.claude/state/plan-gates.json`; refuses (exit 2) past the allowance of one round (2 agents); excludes task reviews and branch reviews by pattern | MA-hook-gate:1-100; wired at MA-settings `PreToolUse.matcher: Agent` | General mechanism; the regexes assume `docs/plans/*.md` and the words "gate a/b", "scope audit", "plan review" | generalize: keep mechanism and state file, make the plan path and gate words configurable, drop the `superpowers/plans` legacy path |
 | 4.2 | Plan-size guard: PostToolUse on `Write|Edit`; if a `docs/plans/*plan*.md` exceeds 800 lines, exit 2 with the right-sizing question | MA-hook-size:1-46; MA-settings `PostToolUse.matcher: Write|Edit` | General; the comment cites a third-party plugin by name (`:4`) | generalize: drop the plugin reference, keep the number and the message |
 | 4.3 | Hook payload shape, as consumed by the two hooks: JSON on stdin with `tool_name` and `tool_input` (`tool_input.prompt` for Agent, `tool_input.file_path` for Write/Edit); project root from `CLAUDE_PROJECT_DIR`; exit 2 plus stderr blocks (PreToolUse) or feeds back (PostToolUse) | MA-hook-gate:40-57; MA-hook-size:14-17, 46 | General (harness contract) | verbatim; `tool_input.command` for Bash is not consumed by any existing hook and is captured for real in step 2 before the write-path guard is written |
-| 4.4 | Write-path guard (block commits to main; block edits outside the worktree) | Does not exist in any personal repo. The rules exist as prose: MA:183-185 (explicit-path commits in a shared tree), MA:229 (never nest a worktree), MA:325 (do not merge or push unless asked), SB:153-154 (worktrees in `.claude/worktrees/`, list before branching). The resume attributes an enforcing hook to the Teranet plugin, which is not a source | General principle | **fresh**: written from the principle, no reference to any Teranet code |
-| 4.5 | Never print secrets | SB:157-162 (no secrets in code, `.env.example` only, PAT in env) ; MA:427 | General | verbatim as a rule; **no hook in v0.1** (the resume's "secret-printing" hook is Teranet's; writing one fresh is more than an hour and is listed under "not yet") |
+| 4.4 | Write-path guard (block commits to main; block edits outside the worktree) | Does not exist in any personal repo. The rules exist as prose: MA:183-185 (explicit-path commits in a shared tree), MA:229 (never nest a worktree), MA:325 (do not merge or push unless asked), SB:153-154 (worktrees in `.claude/worktrees/`, list before branching). The resume attributes an enforcing hook to a work plugin that is not a source | General principle | **fresh**: written from the principle, no reference to any external code |
+| 4.5 | Never print secrets | SB:157-162 (no secrets in code, `.env.example` only, PAT in env) ; MA:427 | General | verbatim as a rule; **no hook in v0.1** (the resume's "secret-printing" hook is not from the personal repos; writing one fresh is more than an hour and is listed under "not yet") |
 | 4.6 | Hook tests: none exist in the sources | n/a | n/a | fresh: block and allow payloads per hook, run by `unittest` in CI (pattern from TS `validate.yml:31-39`) |
 
 ## 5. Blast-radius guardrails on write paths
@@ -107,7 +107,7 @@ from the hook (which only fires on `Agent` dispatches, i.e. AI-owned gates). The
 | # | Element | Where it exists today | General? | Disposition |
 |---|---|---|---|---|
 | 5.1 | Scope discipline: do the literal ask, then stop; adjacent problems get one line, never a fix; nothing unprompted (no memories, docs, scripts, refactors) | MA:317-330 | General ("founder ruling, 2026-07-31" is process history, publishable) | verbatim |
-| 5.2 | Surgical changes: every changed line traces to the request; mention unrelated issues, do not fix them | MA:338; SB:89 | General; this quartet (think, simplicity, surgical, verify) reads like a widely circulated CLAUDE.md snippet, origin not certain but certainly not Teranet | **fresh** (rewrite the four principles in the repo's own words rather than republish text of uncertain provenance) |
+| 5.2 | Surgical changes: every changed line traces to the request; mention unrelated issues, do not fix them | MA:338; SB:89 | General; this quartet (think, simplicity, surgical, verify) reads like a widely circulated CLAUDE.md snippet, origin not certain but not from any work source | **fresh** (rewrite the four principles in the repo's own words rather than republish text of uncertain provenance) |
 | 5.3 | Explicit-path commits in a tree you do not own; a bare `git commit` commits the whole index | MA:183-185, 374-376 | General | verbatim |
 | 5.4 | Never point a local server at production; local backend only | MA:186-187 | General principle, product-specific ruling | generalize |
 | 5.5 | Never nest a worktree in a worktree; sibling directory always | MA:229 | General | verbatim |
@@ -116,7 +116,7 @@ from the hook (which only fires on `Agent` dispatches, i.e. AI-owned gates). The
 | 5.8 | Stop rule: a failed verification stops the work; report, do not work around | MA:378-380 | General | verbatim (also gate 2.6) |
 | 5.9 | Anti-rationalization table ("this is too simple to need a design", "one more fix attempt") | SB:97-110 | General | verbatim (house style: no em dashes) |
 | 5.10 | Write safety pattern: read-only preview by default; apply is explicitly authorized; stable IDs; optimistic conflict checks; atomic per-file replacement; recoverable transaction journal; exclusive lock; a new run refuses to start while a journal exists | TS README:46-49, 249-250, 265; `manage_backlog.py:681` (`exclusive_lock`), `:721-764` (journal recovery), `:764` (`apply_transaction`), `:932` (`preview_or_apply`); `toilscan_common.py:310-331` (`atomic_write_*`) | General; own public MIT code | verbatim pattern; described, not vendored |
-| 5.11 | Per-operation caps on writes | Not in the personal sources as a rule (ToilScan caps by design: one backlog, one checkpoint per repo, but no numeric cap). The resume's "per-operation blast-radius caps (`--dev-mode`)" is Teranet work | General principle | fresh, stated as a pattern with no code; flagged in the README as "from principle, not from a shipped hook" |
+| 5.11 | Per-operation caps on writes | Not in the personal sources as a rule (ToilScan caps by design: one backlog, one checkpoint per repo, but no numeric cap). The resume's "per-operation blast-radius caps (`--dev-mode`)" is work practice, not personal-repo practice | General principle | fresh, stated as a pattern with no code; flagged in the README as "from principle, not from a shipped hook" |
 | 5.12 | Security rules: no credentials in code, `.env.example` only, tokens in env, permissions scoped to the repo | SB:157-162 | General | verbatim |
 | 5.13 | Collisions must be loud; absence of configuration preserves today's behaviour; a lock file is a claim, not an authority | MA-spec isolation `:42-60` (principles 1-5) | General | verbatim (principle 1, "a worktree is filesystem isolation only", goes in the isolation pointer, 6.1) |
 
@@ -147,4 +147,4 @@ from the hook (which only fires on `Agent` dispatches, i.e. AI-owned gates). The
 - Two things the resume attributes to the framework are **not** in the personal sources and are
   written fresh from the principle: the write-path hook (4.4) and per-operation caps (5.11). The
   secret-printing hook (4.5) is not written at all in v0.1 and is listed under "not yet".
-- Teranet: zero mentions in any source read; no Teranet path was opened.
+- Work sources: zero mentions in any source read; no path outside the personal repos was opened.
