@@ -24,7 +24,7 @@ When in doubt pick the smaller size. A task never grows on its own: stop and say
 
 **Gates** (work stops until a named owner produces named evidence):
 - G1 Spec approval, human: the human runs `task.py approve <task-id>` in their own terminal.
-  The agent cannot approve a spec, by edit or by command.
+  The agent cannot approve a spec or change an approved one, by edit or by command.
 - G2 Plan gate, AI, once: one plan reviewer plus one scope auditor, prompts marked `[plan-gate]`.
 - G3 Review, AI, one round per scope: per task, then the whole branch.
 - G4 Ship, human decides: tests green on the branch, required checks before main moves.

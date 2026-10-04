@@ -31,11 +31,24 @@ START, END = "<!-- agentkeel:start -->", "<!-- agentkeel:end -->"
 
 
 def atomic_write(path, text):
+    """Write beside the real file (a symlink stays a symlink) and keep its permissions."""
+    path = os.path.realpath(path)
+    mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else 0o644
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".agentkeel-")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
+    os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+def is_ours(path):
+    """A file agentkeel wrote: every hook and core module names agentkeel in its first lines."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            return "agentkeel" in fh.read(2000)
+    except OSError:
+        return False
 
 
 def ours(command):
@@ -84,9 +97,13 @@ def agents_text(current, fragment, remove):
 
 def plan(repo, remove):
     actions = []  # (description, function)
+    skipped = []
     hooks_dir = os.path.join(repo, ".claude", "hooks")
     for name in HOOK_FILES:
         dst = os.path.join(hooks_dir, name)
+        if os.path.exists(dst) and not is_ours(dst):
+            skipped.append(f"{os.path.relpath(dst, repo)} exists and is not agentkeel's; left alone")
+            continue
         if remove:
             if os.path.exists(dst):
                 actions.append((f"remove {os.path.relpath(dst, repo)}", lambda d=dst: os.remove(d)))
@@ -97,8 +114,14 @@ def plan(repo, remove):
                                                   shutil.copy2(s, d), os.chmod(d, 0o755))))
     core = os.path.join(hooks_dir, "agentkeel_core")
     if remove:
+        for name in CORE_FILES:
+            dst = os.path.join(core, name)
+            if os.path.exists(dst) and is_ours(dst):
+                actions.append((f"remove {os.path.relpath(dst, repo)}", lambda d=dst: os.remove(d)))
         if os.path.isdir(core):
-            actions.append((f"remove {os.path.relpath(core, repo)}/", lambda: shutil.rmtree(core)))
+            actions.append((f"remove {os.path.relpath(core, repo)}/ if empty",
+                            lambda: (shutil.rmtree(os.path.join(core, "__pycache__"), ignore_errors=True),
+                                     os.rmdir(core) if not os.listdir(core) else None)))
     else:
         for name in CORE_FILES:
             src, dst = os.path.join(HERE, "hooks", "agentkeel_core", name), os.path.join(core, name)
@@ -107,7 +130,7 @@ def plan(repo, remove):
                                                   shutil.copy2(s, d))))
     for name in OBSOLETE:
         dst = os.path.join(hooks_dir, name)
-        if os.path.exists(dst):
+        if os.path.exists(dst) and is_ours(dst):
             actions.append((f"remove v0.1 hook {os.path.relpath(dst, repo)}", lambda d=dst: os.remove(d)))
 
     settings_path = os.path.join(repo, ".claude", "settings.json")
@@ -130,6 +153,9 @@ def plan(repo, remove):
     current = open(agents_path, encoding="utf-8").read() if os.path.exists(agents_path) else ""
     with open(os.path.join(HERE, "templates", "AGENTS.agentkeel.md"), encoding="utf-8") as fh:
         fragment = fh.read()
+    if (START in current) != (END in current) or (START in current and current.index(END) < current.index(START)):
+        raise SystemExit("install: AGENTS.md has a broken agentkeel block (one marker missing or out of\n"
+                         "order); fix the markers by hand. Nothing changed.")
     text = agents_text(current, fragment, remove)
     if text != current:
         verb = "remove the agentkeel block from" if remove else ("update the agentkeel block in" if START in current
@@ -139,7 +165,7 @@ def plan(repo, remove):
         else:
             actions.append((f"{verb} AGENTS.md{'' if current or remove else ' (new file)'}",
                             lambda: atomic_write(agents_path, text)))
-    return actions
+    return actions, skipped
 
 
 def main(argv=None):
@@ -152,13 +178,15 @@ def main(argv=None):
     if not os.path.isdir(os.path.join(repo, ".git")) and not os.path.isfile(os.path.join(repo, ".git")):
         print(f"install: {repo} is not the top of a git repository", file=sys.stderr)
         return 2
-    actions = plan(repo, args.uninstall)
+    actions, skipped = plan(repo, args.uninstall)
     mode = "apply" if args.apply else "preview (nothing changed; add --apply)"
     print(f"agentkeel {'uninstall' if args.uninstall else 'install'} into {repo}: {mode}")
     for desc, _ in actions:
         print(f"  - {desc}")
     if not actions:
         print("  - nothing to do")
+    for note in skipped:
+        print(f"  ! {note}")
     if args.apply:
         for _, fn in actions:
             fn()

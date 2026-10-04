@@ -1,4 +1,4 @@
-"""Split a shell command line into the simple commands a guard has to judge.
+"""agentkeel core: split a shell command line into the simple commands a guard has to judge.
 
 A guard that reads one regex match per command line misses the second command in
 `git push origin feat && git push origin main`. This module reads the whole line: every
@@ -39,19 +39,32 @@ class SimpleCommand:
         return " ".join(self.argv)
 
 
+QUOTED_RE = re.compile(r"'[^']*'|\"(?:[^\"\\\\]|\\\\.)*\"|\$\(\([^)]*\)\)")
+SHELL_FED_RE = re.compile(r"(?:^|[|;&]\s*)(?:\S*/)?(?:bash|sh|zsh|dash|ksh|eval|xargs)\b")
+
+
 def strip_heredocs(command):
-    """Drop heredoc bodies: text fed to `cat <<EOF` is data, not commands."""
+    """Drop heredoc bodies: text fed to `cat <<EOF` is data, not commands. A body fed to a shell
+    (`bash <<EOF`) is commands, so it is kept. `<<` inside quotes or $((...)) is not a heredoc."""
     lines = command.split("\n")
     out, pending = [], []
     for line in lines:
         if pending:
-            if line.strip() == pending[0]:
+            delim, keep = pending[0]
+            if line.strip() == delim:
                 pending.pop(0)
+            elif keep:
+                out.append(line)
             continue
         out.append(line)
+        spans = [q.span() for q in QUOTED_RE.finditer(line)]
         for m in HEREDOC_RE.finditer(line):
-            if "<<<" not in line[max(0, m.start() - 1):m.start() + 3]:
-                pending.append(m.group(2))
+            if any(a < m.start() < b for a, b in spans):
+                continue  # `<<` inside quotes or $((...)) is not a heredoc
+            if "<<<" in line[max(0, m.start() - 1):m.start() + 3]:
+                continue
+            fed_to_shell = bool(SHELL_FED_RE.search(QUOTED_RE.sub(" ", line[:m.start()])))
+            pending.append((m.group(2), fed_to_shell))
     return "\n".join(out)
 
 
@@ -59,6 +72,7 @@ def tokens(command):
     lex = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
+    lex.commenters = ""  # a `#` comment must not swallow the newline that ends it
     try:
         return list(lex)
     except ValueError:
@@ -72,6 +86,23 @@ def _is_separator(tok):
 
 def _is_redirect(tok):
     return tok and set(tok) <= REDIRECT_CHARS and set(tok) & set("<>")
+
+
+def _split(text):
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _shell_c(argv):
+    """The command string of `bash -c '...'`, `bash -lc '...'`, `sh -ec '...'`; else None."""
+    for i, a in enumerate(argv[1:], start=1):
+        if a.startswith("-") and not a.startswith("--") and "c" in a[1:]:
+            return argv[i + 1] if i + 1 < len(argv) else None
+        if not a.startswith("-"):
+            return None
+    return None
 
 
 def _unwrap(argv, env):
@@ -103,7 +134,14 @@ def _unwrap(argv, env):
                     k, v = argv[0].split("=", 1)
                     env[k] = v
                     argv = argv[1:]
-                elif argv[0] in ("-u", "-C", "-S"):
+                elif argv[0] in ("-S", "--split-string") and len(argv) > 1:
+                    argv = _split(argv[1]) + argv[2:]
+                    break
+                elif argv[0].startswith(("-S", "--split-string=")) and len(argv[0]) > 2:
+                    value = argv[0].split("=", 1)[1] if argv[0].startswith("--") else argv[0][2:]
+                    argv = _split(value) + argv[1:]
+                    break
+                elif argv[0] in ("-u", "-C"):
                     argv = argv[2:]
                 else:
                     argv = argv[1:]
@@ -136,7 +174,7 @@ def commands(command, cwd, _depth=0):
     """Every simple command in `command`, in order, as SimpleCommand(argv, env, cwd)."""
     if _depth > MAX_DEPTH or not command:
         return []
-    command = strip_heredocs(str(command))
+    command = strip_heredocs(str(command).replace("\\\n", " "))
     result = []
     # command substitutions run too: read them as commands of their own
     for m in SUBST_RE.finditer(command):
@@ -157,10 +195,8 @@ def commands(command, cwd, _depth=0):
                     name = os.path.basename(argv[0])
                     if name in ("cd", "pushd"):
                         here = _resolve_cd(argv, here)
-                    elif name in SHELLS and "-c" in argv[1:]:
-                        idx = argv.index("-c")
-                        if idx + 1 < len(argv):
-                            result.extend(commands(argv[idx + 1], here, _depth + 1))
+                    elif name in SHELLS and _shell_c(argv) is not None:
+                        result.extend(commands(_shell_c(argv), here, _depth + 1))
                     elif name == "eval" and len(argv) > 1:
                         result.extend(commands(" ".join(argv[1:]), here, _depth + 1))
                     else:

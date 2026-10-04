@@ -15,8 +15,9 @@ that every gate consumes.
 
 The human reads the spec and rules. The ruling is recorded twice, on purpose: in the spec's
 frontmatter (which the hook reads) and as a `D-NNN` entry (which people read later, when they
-want to know why). The human records it with `task.py approve <task-id>` in their own terminal;
-the guard refuses that command, and any edit that marks a spec approved, from the agent. A spec is never edited after approval except to mark it `superseded`; a change
+want to know why). The human records it with `task.py approve <task-id>` in a terminal of their own;
+the guard refuses that command from the agent, and any agent edit that marks a spec approved or
+changes an approved one other than to mark it `superseded`. A spec is never edited after approval except to mark it `superseded`; a change
 of mind is a new spec or a new decision entry.
 
 ## G2, plan gate

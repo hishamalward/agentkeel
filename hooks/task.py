@@ -15,8 +15,8 @@ separate answers to separate questions. "merge and push" in the human's request 
 
 The record is bound to this session (CLAUDE_CODE_SESSION_ID, or AGENTKEEL_SESSION_ID for other
 hosts) and stored in AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it.
-`approve` is refused when an agent runs it through its shell tool; the human runs it in their
-own terminal (in Claude Code: `! .claude/hooks/task.py approve <task-id>`).
+`approve` is refused when an agent runs it through its shell tool; the human runs it in a
+terminal of their own, outside the agent session.
 """
 import argparse
 import datetime

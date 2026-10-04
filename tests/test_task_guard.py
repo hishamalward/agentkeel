@@ -354,10 +354,16 @@ class LargeAndSpecApproval(RepoCase):
         self.assertEqual(self.hook(edit)[0], 2)
         self.assertEqual(self.hook(self.bash(f".claude/hooks/task.py approve json-flag"))[0], 2)
         self.assertEqual(self.hook(self.bash(f"python3 hooks/task.py approve {self.SPEC}"))[0], 2)
+        self.assertEqual(self.hook(self.bash("python3 -B hooks/task.py approve json-flag"))[0], 2)
 
-    def test_editing_an_approved_spec_body_is_not_a_new_approval(self):
+    def test_approved_spec_changes_only_to_be_superseded(self):
         self.spec(self.APPROVED)
-        self.assertEqual(self.hook(self.write(self.SPEC, content=self.APPROVED + "\nmore\n"))[0], 0)
+        widened = self.APPROVED.replace("`cli.py`, `tests/`", "`cli.py`, `tests/`, `src/`")
+        code, err = self.hook(self.write(self.SPEC, content=widened))
+        self.assertEqual(code, 2); self.assertIn("approved spec", err)
+        self.assertEqual(self.hook(self.write("src/b.py"))[0], 2)
+        superseded = self.APPROVED.replace("status: approved", "status: superseded")
+        self.assertEqual(self.hook(self.write(self.SPEC, content=superseded))[0], 0)
 
     def test_approved_spec_bounds_writes_to_its_changes_list(self):
         self.spec(self.APPROVED)
@@ -373,6 +379,67 @@ class LargeAndSpecApproval(RepoCase):
         self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 2)
         self.spec(self.APPROVED)
         self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 0)
+
+
+class ReviewFindings(RepoCase):
+    """Regression tests for the first review of v0.2 (2026-10-04), one per confirmed finding."""
+
+    def setUp(self):
+        super().setUp()
+        self.declare(); self.branch("feat/x")
+        self.other = os.path.join(self.tmp, "other")
+        git(self.repo, "worktree", "add", "-q", self.other, "-b", "feat/y")
+
+    def blocked(self, command):
+        code, err = self.hook(self.bash(command))
+        self.assertEqual(code, 2, command)
+        self.assertNotIn("internal error", err, command)
+
+    def test_option_without_value_does_not_crash_the_line_through(self):
+        self.blocked("git --git-dir ; git push origin main")
+        self.blocked("git --work-tree && git push origin main")
+        self.blocked("git -C\ngit push origin main")
+
+    def test_worktree_add_of_an_existing_directory_grants_nothing(self):
+        self.assertEqual(self.hook(self.bash(f"git worktree add {self.other}"))[0], 0)
+        self.assertNotIn(self.other, self.record()["worktrees"])
+        self.assertEqual(self.hook(self.write(os.path.join(self.other, "b.py")))[0], 2)
+
+    def test_checkout_main_earlier_in_the_line_counts(self):
+        self.blocked("git checkout main && git merge feat/x")
+        self.blocked("git switch main; git reset --soft HEAD~1")
+        self.blocked("git rebase --onto feat/x HEAD~1 main")
+        self.assertEqual(self.hook(self.bash("git checkout -b feat/z && git commit -m x -- a.py"))[0], 0)
+
+    def test_parser_shapes_that_hid_a_push(self):
+        for c in ("bash -lc 'git push origin main'", "zsh -ic 'git push origin main'",
+                  "bash <<EOF\ngit push origin main\nEOF",
+                  "git commit -m 'a<<b' -- a.py\ngit push origin main",
+                  "echo $((1<<2))\ngit push origin main", "echo hi # note\ngit push origin main",
+                  "git push \\\norigin main", "env -S 'git push origin main'",
+                  "git config alias.p 'push origin main' && git p",
+                  "git -c remote.origin.push=HEAD:refs/heads/main push origin"):
+            self.blocked(c)
+
+    def test_data_heredocs_and_messages_still_pass(self):
+        for c in ("cat > f <<'EOF'\ngit push origin main\nEOF",
+                  'git commit -m "$(cat <<\'EOF\'\nfix: never push to main\nEOF\n)" -- a.py',
+                  "echo '# not a comment' && git status"):
+            self.assertEqual(self.hook(self.bash(c))[0], 0, c)
+
+    def test_merge_permission_alone_cannot_commit_in_a_foreign_worktree(self):
+        self.declare(allow=("merge",))
+        self.blocked(f"git -C {self.other} commit -m m -- b.py")
+        self.blocked(f"GIT_DIR={self.other}/.git git -C {self.other} commit -m m -- b.py")
+
+    def test_package_runner_forms_of_a_build(self):
+        for c in ("npx eas-cli@latest build", "npx --yes eas-cli@latest build -p ios", "pnpm exec eas build",
+                  "npm exec -- eas build", "gh pr merge 12 --merge"):
+            self.blocked(c)
+
+    def test_dry_runs_are_not_the_action(self):
+        for c in ("npm publish --dry-run", "git push --dry-run origin main"):
+            self.assertEqual(self.hook(self.bash(c))[0], 0, c)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktr
 | `review` | writing the `--write-root` folders only (a report page, an audit) |
 | `implement` | editing the task's worktrees, commits with explicit paths, local checks and local builds, pushing its own branch, scratch files in temp folders outside any repository |
 | `merge` | moving a protected branch locally: a commit on it, `merge`, `merge --ff-only`, `reset`, `rebase`, `update-ref`, `fetch . x:main`, `branch -f` |
-| `push` | pushing to a protected branch; deploy commands (`railway up`, `vercel --prod`, `fly deploy`, `netlify deploy --prod`) |
+| `push` | pushing to a protected branch; `gh pr merge`; deploy commands (`railway up`, `vercel --prod`, `fly deploy`, `netlify deploy --prod`) |
 | `distribution-build` | `eas build`, `xcodebuild archive`, `fastlane gym` and similar |
 | `store-submission` | `eas submit`, `eas update`, `npm publish`, `fastlane deliver/pilot/supply` |
 | `paid-job` | the command patterns a repository lists in `agentkeel.json` |
@@ -58,8 +58,8 @@ on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktr
   `HEAD` and whether the tree was dirty. It is a record, not a gate.
 - **The human approves specs**: `task.py approve <task-id>` sets `status: approved`,
   `approved_by` (git `user.name`) and `approved_on`. The guard refuses it when the agent runs it,
-  and refuses an agent edit that would mark a spec approved. In Claude Code the human runs it as
-  `! .claude/hooks/task.py approve <task-id>`.
+  and refuses an agent edit that would mark a spec approved, or change an approved spec other
+  than to mark it `superseded`. The human runs it in a terminal of their own.
 - **`task.py end`** drops the record and lists what the task owned.
 
 ## The repository policy file

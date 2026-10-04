@@ -1,4 +1,4 @@
-"""The task record, the repo policy file, spec approval, and the override log.
+"""agentkeel core: the task record, the repo policy file, spec approval, and the override log.
 
 A task record answers three separate questions (D-004):
 
@@ -33,7 +33,7 @@ DEFAULT_COMMANDS = {
                            r"^fastlane\b.*\b(gym|build_app|build_ios_app|build_android_app)\b"],
     "store-submission": [r"^eas submit\b", r"^eas update\b", r"^npm publish\b", r"^xcrun altool\b.*--upload",
                          r"^fastlane\b.*\b(deliver|pilot|supply|upload_to_app_store|upload_to_testflight|upload_to_play_store)\b"],
-    "push": [r"^railway up\b", r"^vercel\b.*--prod\b", r"^fly deploy\b", r"^netlify deploy\b.*--prod\b"],
+    "push": [r"^gh pr merge\b", r"^railway up\b", r"^vercel\b.*--prod\b", r"^fly deploy\b", r"^netlify deploy\b.*--prod\b"],
     "paid-job": [],
 }
 

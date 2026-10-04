@@ -77,8 +77,8 @@ A `large` task starts with [`templates/spec.md`](templates/spec.md). The parts t
 - **Frontmatter** the hooks read: `status: draft | approved | superseded`, `approved_by`,
   `approved_on`, all inside the leading `---` block (a `status: approved` line pasted into the
   body approves nothing). Until then the task guard refuses edits outside `docs/`; after it, edits
-  outside the `Changes` list. The agent cannot write the approval: the human runs
-  `task.py approve <task-id>` in their own terminal.
+  outside the `Changes` list. The agent cannot write the approval or change an approved spec: the
+  human runs `task.py approve <task-id>` in a terminal of their own.
 - **Rule change clause**: any rule the spec introduces names the rule it replaces, or says in one
   line why nothing existing covers it.
 
@@ -111,9 +111,10 @@ harness before or after a tool call, reads the call as JSON on stdin (shapes cap
 [`docs/hook-payloads.md`](docs/hook-payloads.md)), and allows (exit 0) or blocks with a reason the
 model sees (exit 2). A hook that cannot parse its input allows: a broken guard must never stop
 work on its own. The shared reader in `hooks/agentkeel_core/` splits a command line into every
-simple command (after `&&`, `;`, `|`, newlines, `$(...)`, `bash -c`, `cd`), and reads every git
-global option (`-C`, `-c`, `--git-dir`) and alias, so the second push in a line is judged like the
-first.
+simple command (after `&&`, `;`, `|`, newlines, line continuations, `$(...)`, `bash -c` and
+`bash -lc`, `bash <<EOF`, `env -S`, `eval`, `cd`), follows a `git checkout` earlier in the line,
+and reads every git global option (`-C`, `-c`, `--git-dir`, `GIT_DIR`) and alias, including one
+defined earlier in the same line, so the second push in a line is judged like the first.
 
 | Hook | Event | Refuses |
 |---|---|---|
@@ -136,15 +137,15 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | Protection | Kind | Tested in |
 |---|---|---|
 | No write without a task declared by this session; a second session cannot reuse it | prevents | `test_task_guard.py` (NoTask, SessionBinding) |
-| Writes only inside the task's worktrees and write roots; a review writes only its report folder | prevents | WriteRoots |
+| Writes only inside the task's worktrees and write roots; a review writes only its report folder; `git worktree add` claims only a path that does not exist yet | prevents | WriteRoots, ReviewFindings |
 | Code edits refused on a protected branch (`main`, `master`, or `agentkeel.json`) at every size | prevents | Branches |
 | Commits name their paths (`-- <paths>`), so another agent's staged files never ride along | prevents | Commits |
 | `main` moves locally (commit, merge, ff, reset, rebase, update-ref, `fetch .:main`) only with `merge` | prevents | Shipping |
-| Pushes to `main`, including `+main`, compound lines, `-C`, `-c`, aliases, only with `push` | prevents | Shipping |
-| Force push, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` | prevents, with a logged one-command override | Destructive |
-| `eas build`, `eas submit`, `eas update`, `npm publish`, deploy commands, repo-defined paid jobs only with their permission | prevents, for the listed command shapes | CommandClasses |
+| Pushes to `main`, including `+main`, compound lines, `-C`, `-c`, aliases, `remote.*.push` config, and `gh pr merge`, only with `push` | prevents | Shipping, ReviewFindings |
+| Force push, remote branch delete, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` (the stash is shared by every worktree) | prevents, with a logged one-command override | Destructive |
+| `eas build`, `eas submit`, `eas update`, `npm publish`, deploy commands, repo-defined paid jobs only with their permission (also through `npx`, `pnpm exec`, `npm exec`; a `--dry-run` is not the action) | prevents, for the listed command shapes | CommandClasses |
 | Hook config, `agentkeel.json` and agentkeel state not editable by the agent's file tools | prevents | ProtectedConfig |
-| A large task edits nothing outside `docs/` before approval, then only its `Changes` list; the agent cannot approve | prevents | LargeAndSpecApproval |
+| A large task edits nothing outside `docs/` before approval, then only its `Changes` list; the agent cannot approve a spec or change an approved one (except to mark it superseded) | prevents, for the agent's file tools and `task.py` | LargeAndSpecApproval |
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
 | A third plan-gate dispatch | prevents when the prompt carries `[plan-gate]`; heuristic otherwise | `test_plan_gate_guard.py` |
 | A plan over 300 lines | warns after the write | `test_plan_size_guard.py` |

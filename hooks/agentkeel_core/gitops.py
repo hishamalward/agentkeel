@@ -1,4 +1,4 @@
-"""Turn one git invocation into the operations a policy has to judge.
+"""agentkeel core: turn one git invocation into the operations a policy has to judge.
 
 An operation is one of:
 
@@ -71,6 +71,8 @@ def parse(argv, cwd):
     here = cwd
     while i < len(argv):
         a = argv[i]
+        if a in ("-C", "-c") and i + 1 >= len(argv):
+            return None
         if a == "-C" and i + 1 < len(argv):
             here = os.path.normpath(os.path.join(here, os.path.expanduser(argv[i + 1])))
             i += 2
@@ -79,11 +81,13 @@ def parse(argv, cwd):
             config[k.lower()] = v
             prefix += ["-c", argv[i + 1]]
             i += 2
+        elif a in GLOBAL_WITH_VALUE and i + 1 >= len(argv):
+            return None  # an option missing its value: git itself refuses this
         elif a in GLOBAL_WITH_VALUE and i + 1 < len(argv):
             if a in ("--git-dir", "--work-tree"):
                 prefix += [a, os.path.normpath(os.path.join(here, os.path.expanduser(argv[i + 1])))]
             i += 2
-        elif a.split("=", 1)[0] in ("--git-dir", "--work-tree"):
+        elif "=" in a and a.split("=", 1)[0] in ("--git-dir", "--work-tree"):
             k, v = a.split("=", 1)
             prefix += [k, os.path.normpath(os.path.join(here, os.path.expanduser(v)))]
             i += 1
@@ -163,6 +167,23 @@ def _flags(args):
     return shorts, longs, pos
 
 
+def _positionals(args, value_opts):
+    """Positional arguments after removing options, including those that take a separate value."""
+    pos, i = [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            pos += args[i + 1:]
+            break
+        if a in value_opts:
+            i += 2
+            continue
+        if not a.startswith("-") or a == "-":
+            pos.append(a)
+        i += 1
+    return pos
+
+
 def _strip_ref(name):
     for p in ("refs/heads/", "heads/"):
         if name.startswith(p):
@@ -227,6 +248,16 @@ def push_ops(call, branch):
         up = upstream_branch(call, branch)
         if up:
             targets.append(up)
+        name = remote or "origin"
+        configured = [call.config[k] for k in call.config if k == f"remote.{name}.push".lower()]
+        configured += (run_git(call, "config", "--get-all", f"remote.{name}.push") or "").split("\n")
+        for spec in filter(None, configured):
+            dst = spec.lstrip("+").split(":", 1)[-1]
+            if dst in ("HEAD", "@"):
+                dst = branch or "HEAD"
+            targets.append("*" if "*" in dst else _strip_ref(dst))
+            if spec.startswith("+"):
+                force = True
     ops = [Op("push", targets=targets, local=(remote == "."))]
     if force:
         ops.append(Op("destructive", name="force push"))
@@ -284,10 +315,23 @@ def _moves_by_reset(call):
     return run_git(call, "rev-parse", "--verify", "--quiet", f"{first}^{{commit}}") is not None
 
 
-def ops_for(call, protected):
-    """The operations one git call performs. `protected` is the set of protected branch names."""
+def switched_to(call):
+    """The branch a checkout/switch in this call leaves HEAD on, or None."""
+    if call.sub not in ("checkout", "switch") or "--" in call.args:
+        return None
+    pos = _positionals(call.args, {"-b", "-B", "-c", "-C", "--orphan"})
+    for flag in ("-b", "-B", "-c", "-C", "--orphan"):
+        if flag in call.args:
+            i = call.args.index(flag)
+            return call.args[i + 1] if i + 1 < len(call.args) else None
+    return _strip_ref(pos[0]) if pos else None
+
+
+def ops_for(call, protected, branch=None):
+    """The operations one git call performs. `protected` is the set of protected branch names.
+    `branch` overrides the current branch when an earlier command in the same line switched it."""
     sub, args = call.sub, call.args
-    branch = current_branch(call)
+    branch = branch if branch is not None else current_branch(call)
     on_protected = branch in protected
     shorts, longs, pos = _flags(args)
     ops = []
@@ -318,6 +362,8 @@ def ops_for(call, protected):
                 if dst in protected:
                     ops.append(Op("move", name="pull into a protected ref", targets=[dst]))
     elif sub == "rebase":
+        pos = _positionals(args, {"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec",
+                                  "-C", "--whitespace"})
         if not longs & {"--abort", "--quit", "--skip", "--continue", "--edit-todo", "--show-current-patch"}:
             if on_protected:
                 move("rebase")

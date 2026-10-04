@@ -102,6 +102,33 @@ class Install(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0)
         self.assertEqual(self.get("AGENTS.md"), "# Rules\n\nBe kind.\n")
 
+    def test_foreign_hook_with_the_same_name_is_left_alone(self):
+        os.makedirs(os.path.join(self.repo, ".claude", "hooks"))
+        self.put(".claude/hooks/secret-guard.py", "my own\n")
+        out = self.run_install("--apply")
+        self.assertIn("not agentkeel's; left alone", out.stdout)
+        self.assertEqual(self.get(".claude/hooks/secret-guard.py"), "my own\n")
+        self.run_install("--uninstall", "--apply")
+        self.assertEqual(self.get(".claude/hooks/secret-guard.py"), "my own\n")
+
+    def test_symlink_and_permissions_kept(self):
+        os.remove(os.path.join(self.repo, "AGENTS.md"))
+        self.put("RULES.md", "# Rules\n")
+        os.chmod(os.path.join(self.repo, "RULES.md"), 0o644)
+        os.symlink("RULES.md", os.path.join(self.repo, "AGENTS.md"))
+        os.chmod(os.path.join(self.repo, ".claude", "settings.json"), 0o644)
+        self.run_install("--apply")
+        self.assertTrue(os.path.islink(os.path.join(self.repo, "AGENTS.md")))
+        self.assertIn("agentkeel:start", self.get("RULES.md"))
+        for rel in ("RULES.md", ".claude/settings.json"):
+            self.assertEqual(os.stat(os.path.join(self.repo, rel)).st_mode & 0o777, 0o644, rel)
+
+    def test_markers_out_of_order_change_nothing(self):
+        self.put("AGENTS.md", "<!-- agentkeel:end -->\nx\n<!-- agentkeel:start -->\n")
+        out = self.run_install("--apply")
+        self.assertNotEqual(out.returncode, 0); self.assertIn("broken agentkeel block", out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

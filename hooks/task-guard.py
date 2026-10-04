@@ -163,7 +163,13 @@ def judge_edit(tool, tool_input, cwd, rec, environ):
     if re.match(r"^docs/specs/[^/]+\.md$", rel):
         text = new_content(tool, tool_input, target)
         before = record.read(target)
-        if text is not None and record.approval(text)[0] and not record.approval(before or "")[0]:
+        was_approved = record.approval(before or "")[0]
+        if was_approved and text is not None and (record.frontmatter(text) or {}).get("status") != "superseded":
+            raise Block(
+                f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
+                "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
+                "the human. Stop and tell them what changed.")
+        if text is not None and record.approval(text)[0] and not was_approved:
             raise Block(
                 f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
                 "Ask the human to approve it. They run, in their own terminal:\n"
@@ -202,18 +208,21 @@ def normalise(argv):
     argv = list(argv)
     if argv and os.path.basename(argv[0]) in NPX:
         argv = [a for a in argv[1:] if not a.startswith("-")] or argv
-    if argv and argv[0] in ("pnpm", "yarn") and argv[1:2] == ["dlx"]:
-        argv = argv[2:]
+    elif argv and os.path.basename(argv[0]) in ("pnpm", "yarn", "npm", "bun") and argv[1:2] in (["dlx"], ["exec"], ["x"]):
+        argv = [a for a in argv[2:] if a != "--" and not a.startswith("-")] or argv
     if argv:
-        argv[0] = TOOL_ALIASES.get(os.path.basename(argv[0]), os.path.basename(argv[0]))
+        tool = os.path.basename(argv[0])
+        if "@" in tool[1:]:
+            tool = tool[0] + tool[1:].split("@", 1)[0]  # eas-cli@latest -> eas-cli
+        argv[0] = TOOL_ALIASES.get(tool, tool)
     return argv
 
 
 def is_task_approve(argv):
-    a = list(argv)
-    if a and os.path.basename(a[0]).startswith(("python", "bash", "sh")) and len(a) > 1:
-        a = a[1:]
-    return bool(a) and os.path.basename(a[0]) == "task.py" and "approve" in a[1:2]
+    for i, tok in enumerate(argv):
+        if os.path.basename(tok) == "task.py" and "approve" in argv[i + 1:i + 4]:
+            return True
+    return False
 
 
 def need(rec, perm, what):
@@ -228,19 +237,31 @@ def need(rec, perm, what):
             "otherwise stop and report that the work is ready.")
 
 
-def judge_git(sc, rec, environ, session):
-    call = gitops.parse(sc.argv, sc.cwd)
+def judge_git(sc, rec, environ, session, line):
+    argv = list(sc.argv)
+    for var, opt in (("GIT_DIR", "--git-dir"), ("GIT_WORK_TREE", "--work-tree")):
+        if sc.env.get(var):
+            argv[1:1] = [opt, sc.env[var]]
+    call = gitops.parse(argv, sc.cwd)
     if not call:
         return
+    call.config = {**line["aliases"], **call.config}
     call, shell_text = gitops.expand_alias(call)
     if shell_text:
-        judge_command(shell_text, call.cwd, rec, environ, session)
+        judge_command(shell_text, call.cwd, rec, environ, session, line)
         return
     top = gitops.toplevel(call)
     root = os.path.realpath(top) if top else None
     pol = record.policy(root)
     protected = pol["protected"]
-    ops = gitops.ops_for(call, protected)
+    if call.sub == "config":
+        names = [a for a in call.args if not a.startswith("-")]
+        if len(names) >= 2 and names[0].lower().startswith("alias."):
+            line["aliases"][names[0].lower()] = " ".join(names[1:])
+    ops = gitops.ops_for(call, protected, branch=line["branches"].get(root))
+    switched = gitops.switched_to(call)
+    if switched:
+        line["branches"][root] = switched
     for op in ops:
         if op.kind == "destructive":
             if sc.env.get(DESTRUCTIVE_OVERRIDE) == "1":
@@ -252,7 +273,7 @@ def judge_git(sc, rec, environ, session):
                 f"If the human asked for exactly this, prefix the command with {DESTRUCTIVE_OVERRIDE}=1;\n"
                 "the override is logged and visible in the transcript.")
     for op in ops:
-        if op.kind == "worktree" and rec:
+        if op.kind == "worktree" and rec and not os.path.lexists(op.path):
             # the worktree does not exist yet (PreToolUse); resolve its parent the way git will
             path = os.path.join(os.path.realpath(nearest_dir(op.path + os.sep + "x")), "") \
                 if os.path.exists(op.path) else \
@@ -264,11 +285,12 @@ def judge_git(sc, rec, environ, session):
         elif op.kind == "commit":
             if not rec:
                 raise Block(NO_TASK)
-            if root not in (rec.get("worktrees") or []) and "merge" not in rec.get("permissions", []):
+            moves_protected = any(o.kind == "move" for o in ops)
+            if root not in (rec.get("worktrees") or []) and not (moves_protected and "merge" in rec.get("permissions", [])):
                 raise Block(
                     f"refusing a commit in {root}: it is not one of task '{rec.get('task')}'s worktrees.\n"
                     "Another agent may own it.")
-            if "implement" not in rec.get("permissions", []) and "merge" not in rec.get("permissions", []):
+            if "implement" not in rec.get("permissions", []) and not moves_protected:
                 need(rec, "implement", "a commit")
             if not op.explicit:
                 raise Block(
@@ -292,7 +314,8 @@ def judge_git(sc, rec, environ, session):
                 raise Block(NO_TASK)
 
 
-def judge_command(command, cwd, rec, environ, session):
+def judge_command(command, cwd, rec, environ, session, line=None):
+    line = line if line is not None else {"branches": {}, "aliases": {}}
     for sc in shell.commands(command, cwd):
         argv = normalise(sc.argv)
         if not argv:
@@ -302,7 +325,9 @@ def judge_command(command, cwd, rec, environ, session):
                 "`task.py approve` is the human's command (gate G1): an approval the agent can\n"
                 "produce is not the human's consent. Ask the human to run it in their own terminal.")
         if argv[0] == "git":
-            judge_git(sc, rec, environ, session)
+            judge_git(sc, rec, environ, session, line)
+            continue
+        if "--dry-run" in argv:
             continue
         texts = {" ".join(argv), " ".join([os.path.basename(sc.argv[0])] + sc.argv[1:])}
         root = gitops.toplevel(sc.cwd)
