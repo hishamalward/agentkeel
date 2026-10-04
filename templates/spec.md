@@ -1,7 +1,7 @@
 ---
 slug: <kebab-case-slug>
-tier: large
-status: draft            # draft | approved | superseded   (tier-guard reads this)
+size: large
+status: draft            # draft | approved | superseded   (task-guard reads this; the human approves)
 approved_by:
 approved_on:
 supersedes:              # a D-NNN or a spec slug, if any

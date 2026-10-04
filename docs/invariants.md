@@ -5,10 +5,11 @@ When a rule serves none, it is deleted; that is the pruning rule the practice la
 
 ## I1. Every write is bounded before it happens
 
-The spec names what may change (`Changes`) and what must not (`Must not change`). The tier
-declaration says how much process the change bought. The hooks refuse what falls outside: a write
-with no declared tier, a medium or large write on `main`, a large write before the spec is
-approved, an edit outside the worktree, a destructive git command, a push that moves `main`.
+The spec names what may change (`Changes`) and what must not (`Must not change`). The task record
+says how much process the task bought (size), which actions it may take (permissions) and where
+(resources). The hooks refuse what falls outside: a write with no task, a code edit on `main`, a
+large-task edit before the spec is approved or outside its `Changes`, an edit outside the task's
+worktrees, a destructive git command, moving or pushing `main` without the permission.
 
 Applied to intent, I1 is scope discipline: do the literal ask, then stop. "Update the status
 file" means update the status file, not also the plan, not also a tidy-up. An adjacent problem you
@@ -43,7 +44,7 @@ introduced. The cap is what keeps a control a control.
 
 ## The pricing rule
 
-Process is chosen once, by size. Declare the tier before the first write; the declaration is
-state (`hooks/tier.sh`) and the hooks read it. When in doubt pick the smaller tier: upgrading is
-cheap and the human can always ask for more. A task never grows a tier on its own; if the work
-turns out bigger than declared, stop and say so, and the human re-scopes.
+Process is chosen once, by size, and size buys no permissions. Declare the task before the first
+write; the record is state (`hooks/task.py`) and the hooks read it. When in doubt pick the smaller
+size: upgrading is cheap and the human can always ask for more. A task never grows on its own; if
+the work turns out bigger than declared, stop and say so, and the human re-scopes.

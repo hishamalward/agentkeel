@@ -8,7 +8,9 @@ had introduced, at roughly 1.2M subagent tokens before a line of code was writte
 
 Prose could not stop that, because the session that wrote the prose is the one that drifted.
 This runs in the harness before the dispatch and counts gate dispatches per plan file in
-.claude/state/plan-gates.json. The allowance is 2 per plan (one round of two agents).
+AGENTKEEL_HOME/plan-gates.json (default ~/.agentkeel), keyed by repository so every worktree of
+one repository shares the count, under a file lock so two parallel dispatches cannot both read
+the old count. The allowance is 2 per plan (one round of two agents).
 
 A dispatch counts as a plan gate when its prompt names a docs/plans/*.md file AND either carries
 the marker `[plan-gate]` (deterministic, preferred) or reads like a review of that document
@@ -25,6 +27,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agentkeel_core import gitops, record  # noqa: E402
+
 LIMIT = 2  # one round = one plan reviewer + one scope auditor
 MARKER = "[plan-gate]"
 PLAN_RE = re.compile(r"docs/plans/([A-Za-z0-9._-]+\.md)")
@@ -36,9 +41,13 @@ GATE_WORDS = re.compile(
 EXCLUDE = re.compile(r"review-package|review-[0-9a-f]{7}\.\.|\.diff\b", re.IGNORECASE)
 
 
-def state_path(payload, environ=os.environ):
-    root = environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
-    return os.path.join(root, ".claude", "state", "plan-gates.json")
+def state_path(environ=os.environ):
+    return os.path.join(record.home(environ), "plan-gates.json")
+
+
+def repo_key(payload, environ=os.environ):
+    cwd = payload.get("cwd") or environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return gitops.common_dir(cwd) or os.path.realpath(cwd)
 
 
 def decide(payload, environ=os.environ):
@@ -56,15 +65,19 @@ def decide(payload, environ=os.environ):
     if not marked and not GATE_WORDS.search(prompt):
         return 0
     plan = sorted(set(plans))[0]
+    path = state_path(environ)
+    key = f"{repo_key(payload, environ)}::{plan}"
+    with record.locked(path):
+        return count(path, key, plan)
 
-    path = state_path(payload, environ)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+def count(path, key, plan):
     try:
         with open(path) as fh:
             state = json.load(fh)
     except Exception:
         state = {}
-    used = int(state.get(plan, 0))
+    used = int(state.get(key, 0))
     if used >= LIMIT:
         sys.stderr.write(
             f"PLAN GATE GUARD: refusing a further gate dispatch for {plan}.\n\n"
@@ -73,15 +86,12 @@ def decide(payload, environ=os.environ):
             "Gate the plan ONCE, then execute. Re-gating a revised plan is what turned a control into\n"
             "a loop feeding itself. Dispatch the next task's implementer instead; the per-task review\n"
             "is the net for whatever the single gate missed.\n\n"
-            f"If this is genuinely a plan that was never gated, the counter is wrong: remove the\n"
-            f"\"{plan}\" key from {path} deliberately, then retry.\n"
+            "If this is genuinely a plan that was never gated, the counter is wrong: tell the human,\n"
+            f"who can remove the \"{key}\" key from {path}.\n"
         )
         return 2
-    state[plan] = used + 1
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(state, fh, indent=2, sort_keys=True)
-    os.replace(tmp, path)
+    state[key] = used + 1
+    record.atomic_write_json(path, state)
     return 0
 
 
@@ -107,7 +117,7 @@ def selftest():
         def run(prompt, expect):
             payload = {"tool_name": "Agent", "cwd": tmp, "tool_input": {"prompt": prompt}}
             out = subprocess.run([sys.executable, here], input=json.dumps(payload), text=True,
-                                 capture_output=True, env={**os.environ, "CLAUDE_PROJECT_DIR": tmp})
+                                 capture_output=True, env={**os.environ, "AGENTKEEL_HOME": tmp})
             ok = out.returncode == expect
             print(("PASS" if ok else "FAIL"), repr(prompt[:50]), "->", out.returncode)
             return ok

@@ -7,8 +7,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class RepoContract(unittest.TestCase):
-    def test_claude_fragment_is_at_most_60_lines(self):
-        path = os.path.join(ROOT, "templates", "CLAUDE.agentkeel.md")
+    def test_no_claude_md_anywhere(self):
+        # Claude Code loads CLAUDE.md instead of AGENTS.md when one exists; agentkeel never ships one
+        found = [os.path.join(d, f) for d, _, fs in os.walk(ROOT) if ".git" not in d
+                 for f in fs if f in ("CLAUDE.md", "CLAUDE.local.md")]
+        self.assertEqual(found, [])
+
+    def test_agents_fragment_is_at_most_60_lines(self):
+        path = os.path.join(ROOT, "templates", "AGENTS.agentkeel.md")
         with open(path, encoding="utf-8") as fh:
             n = len(fh.read().rstrip("\n").split("\n"))
         self.assertLessEqual(n, 60, f"{path} is {n} lines")
@@ -29,12 +35,14 @@ class RepoContract(unittest.TestCase):
         hooks = os.path.join(ROOT, "hooks")
         for name in sorted(os.listdir(hooks)):
             path = os.path.join(hooks, name)
+            if not name.endswith((".py", ".sh")):
+                continue
             cmd = ["bash", path, "--selftest"] if name.endswith(".sh") else ["python3", path, "--selftest"]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             self.assertEqual(out.returncode, 0, f"{name}: {out.stdout}\n{out.stderr}")
 
     def test_shell_hooks_parse(self):
-        for name in ("tier.sh", "plan-size-guard.sh"):
+        for name in ("plan-size-guard.sh",):
             out = subprocess.run(["bash", "-n", os.path.join(ROOT, "hooks", name)], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, out.stderr)
 

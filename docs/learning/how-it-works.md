@@ -1,5 +1,12 @@
 # How agentkeel works
 
+> **v0.2 note (2026-10-04).** This document describes v0.1, where a "tier" was one declaration that
+> also granted actions (`tier.sh`, `tier-guard.py`, `write-path-guard.py`). v0.2 replaced it with
+> the task record: size, permissions and resources answered separately (`task.py`,
+> `task-guard.py`; `DECISIONS.md` D-004 to D-007). The reasoning below stands; the hook names,
+> state paths and override names do not. The present behaviour is in the README and
+> `docs/task-record.md`.
+
 For whoever owns this next, including me in six months. It assumes the README and aims to let
 you defend every number without opening the code. `docs/spec.md` is the contract; this is the
 tour.

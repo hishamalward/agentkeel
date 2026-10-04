@@ -15,7 +15,9 @@ commands whose only effect is to show one:
 Reading a secret into the environment is not showing it, so `source .env`, `. .env` and
 `export $(cat .env | xargs)` are allowed.
 
-Override: AGENTKEEL_SHOW_SECRETS=1, echoed to stderr when used.
+Override: prefix the command itself with AGENTKEEL_SHOW_SECRETS=1. It applies to that one command,
+is visible in the transcript, and is logged to AGENTKEEL_HOME/overrides.jsonl. (A variable set in
+the harness's own environment is not an override: it would apply to every command, silently.)
 
 What this cannot see: a program that reads the secret and prints it (python -c ...), or a value
 already in a file that gets printed under a name this list does not know. It is a courtesy guard
@@ -26,6 +28,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agentkeel_core import record, shell  # noqa: E402
 
 ENV_FILE_RE = re.compile(r"(?:^|[\s/'\"=:])(\.env(?:\.[A-Za-z0-9_.-]+)?)(?=$|[\s'\";|&)])")
 ENV_FILE_OK = re.compile(r"^\.env\.(?:example|sample|template|dist)$")
@@ -95,15 +100,16 @@ def decide(payload, environ=os.environ):
     reason = offending(command)
     if not reason:
         return 0
-    if environ.get("AGENTKEEL_SHOW_SECRETS") == "1":
-        sys.stderr.write(f"SECRET GUARD: override AGENTKEEL_SHOW_SECRETS=1 used: {reason}\n")
+    cwd = payload.get("cwd") or os.getcwd()
+    if any(sc.env.get("AGENTKEEL_SHOW_SECRETS") == "1" for sc in shell.commands(command, cwd)):
+        record.log_override("AGENTKEEL_SHOW_SECRETS", command, payload.get("session_id"), environ)
         return 0
     return block(
         f"refusing: {reason}.\n"
         "A secret may be used, not shown; once printed it lives in the transcript.\n"
         "Use it without printing (source .env, read it in the program), or check that it is set\n"
-        "with `test -n \"$VAR\" && echo set`. If the human asked to see it, run with\n"
-        "AGENTKEEL_SHOW_SECRETS=1 so the override is on record."
+        "with `test -n \"$VAR\" && echo set`. If the human asked to see it, prefix the command\n"
+        "with AGENTKEEL_SHOW_SECRETS=1; the override is logged and visible in the transcript."
     )
 
 
@@ -124,12 +130,14 @@ def main():
 
 
 def selftest():
+    import tempfile
     here = os.path.abspath(__file__)
+    home = tempfile.mkdtemp()
 
     def run(command, expect, env=None):
         payload = {"tool_name": "Bash", "tool_input": {"command": command}}
         out = subprocess.run([sys.executable, here], input=json.dumps(payload), text=True,
-                             capture_output=True, env={**os.environ, **(env or {})})
+                             capture_output=True, env={**os.environ, "AGENTKEEL_HOME": home, **(env or {})})
         ok = out.returncode == expect
         print(("PASS" if ok else "FAIL"), repr(command), "->", out.returncode)
         return ok
@@ -139,7 +147,8 @@ def selftest():
         run("printenv", 2), run("printenv PATH", 0), run("echo $API_KEY", 2), run("echo $HOME", 0),
         run("git show HEAD:.env", 2), run("source .env && npm test", 0),
         run("export $(cat .env | xargs) && npm test", 0), run("cat ~/.aws/credentials", 2),
-        run("cat .env", 0, {"AGENTKEEL_SHOW_SECRETS": "1"}),
+        run("cat .env", 2, {"AGENTKEEL_SHOW_SECRETS": "1"}),
+        run("AGENTKEEL_SHOW_SECRETS=1 cat .env", 0),
     ]
     print("secret-guard selftest:", "PASS" if all(results) else "FAIL")
     return 0 if all(results) else 1

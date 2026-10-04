@@ -51,9 +51,15 @@ class SecretGuard(unittest.TestCase):
         for c in ("cat ~/.ssh/id_rsa", "cat server.pem", "cat ~/.aws/credentials", "cat ~/.netrc"):
             self.assert_block(c)
 
-    def test_override_echoed(self):
-        code, err = run_hook(H, bash("cat .env"), env={"AGENTKEEL_SHOW_SECRETS": "1"})
-        self.assertEqual(code, 0); self.assertIn("override AGENTKEEL_SHOW_SECRETS", err)
+    def test_inline_override_works_and_is_logged(self):
+        import json, os, tempfile
+        with tempfile.TemporaryDirectory() as home:
+            env = {"AGENTKEEL_HOME": home}
+            self.assertEqual(run_hook(H, bash("AGENTKEEL_SHOW_SECRETS=1 cat .env"), env=env)[0], 0)
+            with open(os.path.join(home, "overrides.jsonl")) as fh:
+                self.assertEqual(json.loads(fh.readline())["override"], "AGENTKEEL_SHOW_SECRETS")
+            # the harness's own environment is not an override: it would apply silently to everything
+            self.assertEqual(run_hook(H, bash("cat .env"), env={**env, "AGENTKEEL_SHOW_SECRETS": "1"})[0], 2)
 
     def test_other_tools_and_malformed_allowed(self):
         self.assertEqual(run_hook(H, {"tool_name": "Write", "tool_input": {"file_path": ".env"}})[0], 0)

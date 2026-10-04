@@ -1,5 +1,12 @@
 # Defending the framework
 
+> **v0.2 note (2026-10-04).** This document describes v0.1, where a "tier" was one declaration that
+> also granted actions (`tier.sh`, `tier-guard.py`, `write-path-guard.py`). v0.2 replaced it with
+> the task record: size, permissions and resources answered separately (`task.py`,
+> `task-guard.py`; `DECISIONS.md` D-004 to D-007). The reasoning below stands; the hook names,
+> state paths and override names do not. The present behaviour is in the README and
+> `docs/task-record.md`.
+
 For the owner, in interviews and reviews. Two or three sentences each, evidence not assertion.
 The evidence lines cite `docs/spec.md` §2.1, which cites the source lines in the practice repo.
 

@@ -6,16 +6,17 @@ that every gate consumes.
 
 | # | Gate | Owner | Entry | Exit evidence | Enforced by |
 |---|---|---|---|---|---|
-| G1 | Spec approval | Human | tier `large`; spec `status: draft` | `status: approved`, `approved_by`, `approved_on`; the `D-NNN` entry appended | `tier-guard.py` refuses edits outside `docs/` until then |
-| G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists | the plan table with every "check scope inside may-touch" cell `yes`; findings applied | `plan-gate-guard.py` refuses a second round; `plan-size-guard.sh` refuses a plan carrying code |
-| G3 | Review | AI reviewer, one round per scope | per task: that task's diff; whole branch: all tasks done | findings applied; no second round without the human | none in v0.1 |
-| G4 | Ship | Human decides; AI supplies the evidence | rebased on `main`; tests green on the branch | fast-forward merge; `main` always green; merge and push only when asked | `write-path-guard.py` refuses a commit on `main` outside tier `small`, and a push to `main` without `AGENTKEEL_ALLOW_PUSH_MAIN=1` |
+| G1 | Spec approval | Human | size `large`; spec `status: draft` | `status: approved`, `approved_by`, `approved_on` in frontmatter; the `D-NNN` entry appended | `task-guard.py` refuses edits outside `docs/` until then, and refuses the agent writing the approval |
+| G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists | the plan table with every "check scope inside may-touch" cell `yes`; findings applied | `plan-gate-guard.py` refuses a third dispatch; `plan-size-guard.sh` reports a plan over 300 lines after the write |
+| G3 | Review | AI reviewer, one round per scope | per task: that task's diff; whole branch: all tasks done | findings applied; no second round without the human | guidance only |
+| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moved and pushed only within the task's permissions | `task-guard.py` refuses moving `main` without `merge` and pushing it without `push`; tests before `main` moves need a required CI check |
 
 ## G1, spec approval
 
 The human reads the spec and rules. The ruling is recorded twice, on purpose: in the spec's
 frontmatter (which the hook reads) and as a `D-NNN` entry (which people read later, when they
-want to know why). A spec is never edited after approval except to mark it `superseded`; a change
+want to know why). The human records it with `task.py approve <task-id>` in their own terminal;
+the guard refuses that command, and any edit that marks a spec approved, from the agent. A spec is never edited after approval except to mark it `superseded`; a change
 of mind is a new spec or a new decision entry.
 
 ## G2, plan gate
@@ -31,14 +32,16 @@ single gate missed. Dispatch prompts carry `[plan-gate]` so the guard counts det
 One round per scope. After each task, a review of that task's diff; after the last task, one
 review of the whole branch. Reviewing a revision does not open a new round. In practice this is
 where the implementation defects were found (all in failure paths, none visible in the plan), so
-it is the gate that earns its cost. There is no hook on it in v0.1; a dispatch-count cap is the
-obvious next one.
+it is the gate that earns its cost. No hook enforces it yet; a dispatch-count cap is the obvious
+next one.
 
 ## G4, ship
 
-The agent rebases onto `main`, runs the tests on the branch, and reports. The human decides.
-`main` must always be green because in the practice this came from, every push to `main`
-deployed. Conflicts are resolved on the branch; there is no integration branch; the merge is a
-fast-forward. The hooks refuse the two ways this gets skipped: a commit straight onto `main` when
-the work was not declared small, and a push that moves `main` without the override that shows the
-human asked for it.
+The agent runs the tests on the branch and reports. The human decides, and the request sets the
+scope: "merge and push" is the `merge` and `push` permissions for that task, and the agent does
+both without asking again. `main` must always be green because in the practice this came from,
+every push to `main` deployed. Conflicts are resolved on the branch; there is no integration
+branch. The hooks refuse moving `main` without `merge` (a commit on it, a merge, a
+fast-forward, a reset, an update-ref) and pushing it without `push`. They cannot prove the tests
+passed: that needs a required check on the candidate commit before `main` moves, with deployment
+waiting for it, which is CI's job and the next stage.

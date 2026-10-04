@@ -12,6 +12,5 @@ build/
 .DS_Store
 
 # Editor / harness state
-.claude/state/
 .claude/settings.local.json
 .env
