@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="t">
+  <title id="t">AgentKeel mark, one color</title>
+  <style>
+    .hull{fill:#000}.keel{fill:#000}.work{fill:#000}.water{stroke:#000}
+    
+  </style>
+  <path class="water" d="M0.5 35.5h63" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <rect class="work" x="14" y="21.5" width="10.5" height="7.5" rx="1.6"/>
+  <rect class="work" x="26" y="21.5" width="10.5" height="7.5" rx="1.6"/>
+  <rect class="work" x="20" y="12.5" width="10.5" height="7.5" rx="1.6"/>
+  <path class="hull" d="M4 30h59c-3.6 6.6-10 10.3-19 10.5H12.5C8 40.4 5 37 4 30z"/>
+  <path class="keel" d="M31 40h9.5l-5.5 11.5h-5.6z"/>
+  <path class="keel" d="M21.5 53.3c0-1.7 5.2-2.8 11.4-2.8 5.9 0 11.1 1.2 11.1 2.7 0 1.5-5.1 2.6-11.1 2.6-6.2 0-11.4-.9-11.4-2.5z"/>
+  <path class="keel" d="M10 40.2h4.6l-1.2 7.6h-3.2z"/>
+</svg>

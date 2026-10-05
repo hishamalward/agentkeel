@@ -5,14 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The task record</title>
 <link rel="stylesheet" href="keel.css">
+<link rel="icon" href="261005-brand-icon-asset.svg">
 </head>
 <body>
 <main>
 <header class="page">
+  <a class="brand" href="260823-project-reference.html"><img src="261005-brand-mark-asset.svg" alt="">AgentKeel</a>
   <div class="kicker">Feature state &middot; created 261004</div>
   <h1>The task record</h1>
+  <p class="lede">Before its first write, the agent declares its task in one command. The record
+  answers three separate questions: how much process (size), which actions (permissions) and
+  where (worktrees). The hooks read it on every tool call.</p>
+  <nav class="toc" aria-label="On this page"><a href="#three-questions-answered-separately">Size, permissions, worktrees</a><a href="#rules">Rules</a><a href="#the-repository-policy-file">agentkeel.json</a></nav>
 </header>
-<p>Declare before the first write, in one command, from your reading of the human's request:</p>
+<p>Declare it from your reading of the human's request:</p>
 <pre><code>.claude/hooks/task.py start &lt;task-id&gt; --size small|medium|large --allow &lt;permissions&gt; \
     [--write-root DIR]... [--worktree DIR]... [--resource NAME]...</code></pre>
 <p>It writes <code>~/.agentkeel/tasks/&lt;session-id&gt;.json</code> (<code>AGENTKEEL_HOME</code> moves it). The guards read it on every tool call. Fields: <code>task</code>, <code>session_id</code>, <code>size</code>, <code>permissions</code>, <code>worktrees</code>, <code>write_roots</code>, <code>resources</code>, <code>evidence</code>, <code>history</code>.</p>

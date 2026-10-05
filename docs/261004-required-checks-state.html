@@ -5,32 +5,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Required checks before main moves</title>
 <link rel="stylesheet" href="keel.css">
+<link rel="icon" href="261005-brand-icon-asset.svg">
 </head>
 <body>
 <main>
 <header class="page">
+  <a class="brand" href="260823-project-reference.html"><img src="261005-brand-mark-asset.svg" alt="">AgentKeel</a>
   <div class="kicker">Feature state &middot; created 261004</div>
   <h1>Required checks before main moves</h1>
+  <p class="lede">Hooks guard the agent, not the branch. To keep <code>main</code> green, test the
+  candidate commit <strong>before</strong> <code>main</code> moves, refuse a commit whose check has not
+  passed, and make the deploy wait for it. A passing check proves the tests ran green on that
+  commit; it proves nothing the tests do not cover.</p>
+  <nav class="toc" aria-label="On this page"><a href="#two-ways-to-hold-main">Two setups</a><a href="#the-shipping-path">Shipping</a><a href="#install">Install</a><a href="#protect-the-branch">Protect</a><a href="#make-the-deploy-wait">Deploy</a><a href="#what-can-still-bypass-it">Bypasses</a><a href="#verification">Verification</a></nav>
 </header>
-<p>The hooks guard the agent, not the branch. A local pre-push hook can be skipped, and CI that runs only after a push to <code>main</code> reports after the deploy has started. So the check that keeps <code>main</code> green lives on the hosting side: the candidate commit is tested <strong>before</strong> <code>main</code> moves, the protected branch refuses a commit whose check has not passed, and the deploy waits for it.</p>
-<p>Passing checks are evidence, not a promise: they prove the tests the workflow runs passed on that commit. A repository admin can still bypass the rule if the settings allow it (see the last section).</p>
 <section id="two-ways-to-hold-main">
 <h2>Two ways to hold main</h2>
 <table><thead><tr><th>Setup</th><th>Who it stops</th><th>Needs</th></tr></thead><tbody>
 <tr><td><strong>Branch protection</strong> requires <code>agentkeel-required</code> (below)</td><td>everyone, at GitHub</td><td>a public repository, or GitHub Pro/Team for a private one</td></tr>
-<tr><td><strong>The agentkeel push gate</strong> plus the deploy waiting for CI</td><td>every agent, before its push runs; the deploy for anyone</td><td>nothing paid</td></tr>
+<tr><td><strong>The AgentKeel push gate</strong> plus the deploy waiting for CI</td><td>every agent, before its push runs; the deploy for anyone</td><td>nothing paid</td></tr>
 </tbody></table>
-<p>GitHub Free has no branch protection or rulesets on private repositories (the API answers "Upgrade to GitHub Pro or make this repository public to enable this feature"). There, use the push gate: put <code>&quot;require_check_before_push&quot;: &quot;agentkeel-required&quot;</code> in <code>agentkeel.json</code>, and an agent's push into a protected branch is refused unless that check passed on the exact commit being shipped. The gate accepts only a push it can prove: one that names the tested commit by its full SHA (<code>git push origin &lt;full-tested-sha&gt;:main</code>) and runs alone in its call. A branch name or <code>HEAD</code> is refused, because another agent can move it while the gate reads the check, and an earlier command in the same call could move it too. A bare push, <code>--all</code>, a configured or wildcard refspec, and <code>gh pr merge</code> are refused: GitHub writes a new commit for every PR merge mode, and no check has run on it. A human can still push to <code>main</code> by hand, but with the deploy waiting for CI an untested commit is not deployed. The gate asks GitHub through <code>gh</code>, using the check-runs API or, for a token that cannot read checks, the Actions jobs of that commit; if it cannot get an answer, it refuses.</p>
-<p>Checked on 2026-10-04 in a private throwaway repository with the push gate and real Actions runs: a candidate whose tests failed was refused (<code>&#x27;agentkeel-required&#x27; ended failure</code>), as was one whose check had not run yet; a docs-only candidate skipped the app tests, passed the required check, was allowed, and <code>main</code> moved to it; a green candidate built on an older <code>main</code> was rejected by git as non-fast-forward, and after a rebase its new commit was refused until its own check ran. The same repository was connected to a Railway test service with wait for CI on (<code>checkSuites: true</code> on the service's GitHub deploy trigger; the API name of the dashboard setting): a failing commit pushed straight to <code>main</code> by hand was never deployed, and a passing commit was held <code>WAITING</code> while its run was in progress and deployed once it passed. Both test resources were deleted afterwards.</p>
+<p>GitHub Free has no branch protection on private repositories. There, use the push gate:
+add <code>&quot;require_check_before_push&quot;: &quot;agentkeel-required&quot;</code> to
+<code>agentkeel.json</code>. An agent's push into a protected branch is then refused unless the check
+passed on the exact commit it ships.</p>
+<ul>
+<li><strong>Allowed:</strong> <code>git push origin &lt;full-tested-sha&gt;:main</code>, alone in its call.</li>
+<li><strong>Refused:</strong> a branch name or <code>HEAD</code> as the source (it can move while the gate reads the check), an earlier command in the same call, a bare push, <code>--all</code>, a configured or wildcard refspec, and <code>gh pr merge</code> (GitHub writes a new, unchecked commit for every merge mode).</li>
+<li><strong>No answer, no push:</strong> the gate asks GitHub through <code>gh</code> (check runs, or the commit's Actions jobs), and refuses when it gets no answer.</li>
+<li><strong>Humans:</strong> a human can still push to <code>main</code> by hand. With the deploy waiting for CI, an untested commit is not deployed.</li>
+</ul>
 </section>
 <section id="the-shipping-path">
 <h2>The shipping path</h2>
-<ol>
-<li>Push the task branch: <code>git push origin feat/&lt;task&gt;</code> (needs the <code>push</code> permission).</li>
-<li>Wait for <code>agentkeel-required</code> to pass on that commit (<code>gh pr checks</code>, or <code>gh run watch</code> on the branch's run).</li>
-<li>Move <code>main</code> to the same commit, in its own call: <code>git push origin &lt;full-tested-sha&gt;:main</code> (needs <code>push</code>). The commit must already contain <code>main</code> (rebase and test again if <code>main</code> moved), so the push is a fast-forward and <code>main</code> receives exactly the tested commit. GitHub then marks an open pull request for that branch as merged. With branch protection, <code>gh pr merge</code> (needs <code>merge</code> and <code>push</code>) also works, because GitHub requires the check on the result; under the push gate it is refused.</li>
-<li>The deploy starts only once the check on that commit is green.</li>
+<ol class="flow" aria-label="Shipping a task">
+<li class="ai"><b>Push the branch</b><code>git push origin feat/&lt;task&gt;</code> (needs <code>push</code>).</li>
+<li><b>Wait for the check</b><code>agentkeel-required</code> passes on that commit (<code>gh pr checks</code>).</li>
+<li class="human"><b>Move main</b><code>git push origin &lt;full-tested-sha&gt;:main</code>, in its own call.</li>
+<li><b>Deploy</b>It starts only when the check on that commit is green.</li>
 </ol>
+<p>The commit must already contain <code>main</code>, so the push is a fast-forward and <code>main</code>
+gets exactly the tested commit. If <code>main</code> moved, rebase and test again. GitHub then marks the
+branch's pull request as merged. With branch protection, <code>gh pr merge</code> (needs <code>merge</code>
+and <code>push</code>) also works, because GitHub requires the check on the result; under the push gate
+it is refused.</p>
 <p>A commit that never passed the check cannot reach <code>main</code> this way: GitHub refuses the push to a protected branch whose required status checks have not passed on the pushed commit.</p>
 </section>
 <section id="install">
@@ -62,7 +80,7 @@ EOF</code></pre>
 <li><strong>Railway</strong>: in the service's settings, enable waiting for GitHub check suites ("Wait for CI") for the GitHub-connected deploy (in the API: <code>deploymentTriggerUpdate</code> with <code>checkSuites: true</code>). Railway then holds the deploy of a pushed commit as <code>WAITING</code> until its checks finish, and does not deploy it if they fail (verified 2026-10-04).</li>
 <li><strong>Vercel, Netlify and others</strong>: use their equivalent "wait for checks" or "ignored build step" setting, or deploy from CI after <code>agentkeel-required</code> passes instead of on push.</li>
 </ul>
-<p>Check the setting in your provider's current documentation when you enable it; agentkeel does not configure the host for you.</p>
+<p>Check the setting in your provider's current documentation when you enable it; AgentKeel does not configure the host for you.</p>
 </section>
 <section id="what-can-still-bypass-it">
 <h2>What can still bypass it</h2>
@@ -73,6 +91,10 @@ EOF</code></pre>
 <tr><td>Tests that do not cover the change</td><td>not a setting: write the test</td></tr>
 <tr><td>A local pre-push hook</td><td>early feedback only; it can be skipped with <code>--no-verify</code> and is not part of this guarantee</td></tr>
 </tbody></table>
+</section>
+<section id="verification">
+<h2>Verification</h2>
+<p>Checked live on 2026-10-04 in a private throwaway repository with the push gate and real Actions runs: a candidate whose tests failed was refused (<code>&#x27;agentkeel-required&#x27; ended failure</code>), as was one whose check had not run yet; a docs-only candidate skipped the app tests, passed the required check, was allowed, and <code>main</code> moved to it; a green candidate built on an older <code>main</code> was rejected by git as non-fast-forward, and after a rebase its new commit was refused until its own check ran. The same repository was connected to a Railway test service with wait for CI on (<code>checkSuites: true</code> on the service's GitHub deploy trigger; the API name of the dashboard setting): a failing commit pushed straight to <code>main</code> by hand was never deployed, and a passing commit was held <code>WAITING</code> while its run was in progress and deployed once it passed. Both test resources were deleted afterwards.</p>
 </section>
 </main>
 </body>

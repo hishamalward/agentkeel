@@ -1,288 +1,144 @@
-# agentkeel
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/261005-brand-banner-dark-asset.svg">
+  <img src="docs/261005-brand-banner-light-asset.svg" width="100%" alt="AgentKeel: guardrails beneath your AI coding agents. The mark is a boat carrying blocks of work, with a keel below the waterline.">
+</picture>
 
 [![validate](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml/badge.svg)](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml)
 
-A framework for shipping production code with AI coding agents: work priced by size, actions
-granted by permission, an approved boundary before large work, four gates with named owners,
-blast radius bounded by hooks, and documentation with one current owner per fact.
+AgentKeel keeps AI coding agents inside the task you gave them. Each agent declares its task
+before its first write. Hooks then check every tool call against that declaration and refuse what
+falls outside it, with a reason the agent reads. It runs in **Claude Code** and **Codex**, from one
+core, with no dependencies.
 
-AI coding agents write code faster than anyone reviews it. The failures that follow are rarely
-in the code. They are the missing gates: a one-file fix that quietly became a refactor, a plan
-reviewed three times before a line was written, a check that could not fail, a commit that landed
-on `main` because nothing stood in the way, a build nobody asked for. Rules in an instruction
-file do not hold, because the session that drifts is the session that read them.
+## The problem
 
-agentkeel is the practice from shipping a real product solo with agents writing the code,
-extracted and made enforceable. Three invariants sit above every rule: every write is bounded
-before it happens, every claim carries its evidence, every loop has a cap and only a human
-re-opens it. Each task is declared once, as a record the hooks read: its size (how much process),
-its permissions (which actions), and its resources (which worktrees and folders). A feature's
-state page says what is true now and, for large work, holds the boundary the human approved. Four gates each name an owner. Four hooks and one command guard
-the write path from inside the harness, outside the model's memory.
+Agents write code faster than anyone can review it. The failures are rarely in the code. They
+are missing gates: a one-file fix that became a refactor, a commit on `main` that nothing
+stopped, a check that could not fail, a build nobody asked for. Rules in an instruction file do
+not hold, because the session that drifts is the session that read them. AgentKeel moves the
+rules that matter into hooks, outside the model's memory.
 
-What it does today, stated by kind of protection, is in the [capability table](#what-it-protects-and-what-it-does-not).
-Version 0.3 supports Claude Code and Codex, from one core: both hosts give the same decision and
-the same refusal text for the same task and the same act ([verified live](#verified-live)).
+## What it does
 
-## The invariants
+- **One task record per session.** The agent states the task's size (how much process),
+  permissions (which actions) and worktrees (where). Size never grants a permission.
+- **Bounded writes.** A write with no task, outside the task's worktree, or on `main` is
+  refused. Every code task works in its own git worktree, so agents never share a checkout.
+- **Shipping is a permission.** Moving `main` needs `merge`. Any push needs `push`. Builds,
+  store submissions and paid jobs each need their own permission.
+- **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
+  boundary, and then only the paths that the boundary lists.
+- **One current owner per fact.** Documentation is authored HTML pages in one `docs/` folder,
+  in the present tense. `main` moves only when the docs check passes.
+- **Loops have caps.** One plan gate per plan, one review round per scope.
 
-Every rule in this repo serves one of these, and a rule that serves none is deleted. The full
-statement is in the [project canon](docs/260823-project-reference.html#invariants).
+## Quickstart
 
-1. **Every write is bounded before it happens.** A large task's approved boundary names what may
-   change and what must not; the task record says what the task may do and where; the hooks refuse what falls outside.
-   Scope discipline is this invariant applied to intent: do the literal ask, mention the adjacent
-   problem in one line, do not fix it.
-2. **Every claim carries its evidence.** No completion claim without fresh output pasted. Verify
-   at the cheapest layer that can prove the change. A failed check stops the work and is reported;
-   it is never worked around, and the check is never narrowed to pass.
-3. **Every loop has a cap, and only the human re-opens it.** One plan gate per plan, one review
-   round per scope, one verification pass per claim. A control that re-runs on its own output
-   turns into a loop feeding itself.
-
-And one pricing rule: **process is chosen once, by size, and size buys no permissions.** If the
-work turns out bigger than declared, stop and say so.
-
-## The task record: size, permissions, resources
-
-One command, run by the agent before its first write, from its reading of the human's request:
-
-```bash
-.claude/hooks/task.py start json-flag --size medium --allow implement,merge,push
-```
-
-| Question | Answers | What the hooks do with it |
-|---|---|---|
-| **Size**: how much process? | `small`: own branch and worktree, no plan or subagents, one check. `medium`: tests, one review round. `large`: approved boundary, plan table gated once, per-task and branch review | `large`: no edit outside `docs/` until the boundary is approved, then only its `Changes` paths |
-| **Permissions**: which actions? | `review` (write only the `--write-root` report folders, which lie outside any repository), `implement` (edit, commit, local checks and builds), `merge` (move a protected branch locally), `push` (any push to a remote, and deploy commands); a PR merge needs both `merge` and `push`, `distribution-build`, `store-submission`, `paid-job` | each action is refused without its permission; "merge and push" grants both and never a distribution build |
-| **Resources**: where? | the worktree it was declared in, any worktree it creates with `git worktree add`, and `--write-root` folders | writes outside them are refused; another agent's worktree is never writable |
-
-The record is bound to the agent session (the host's session id; a subagent's tool calls carry
-its parent's on both hosts), stored
-in `~/.agentkeel/tasks/` (`AGENTKEEL_HOME`), and never editable by the agent's file tools. A
-second session cannot reuse it. Changing the size never changes the permissions; widening the
-permissions is said out loud on stderr and kept in the record's history. The agent states its
-reading of the request in its first update and proceeds; it asks only when something is missing,
-unclear, or past the request. Details: [the task record](docs/261004-task-record-state.html).
-
-The record is the agent's declaration, not the human's consent: the agent writes it. What it buys
-is that every action is checked against one stated scope, and a mismatch is refused before it
-happens. Where consent itself must be enforced, use the host's own permission prompts.
-
-## An approved boundary, and plans that never carry code
-
-A `large` task starts its feature's state page with `task.py new state <feature>`. The page
-describes the feature in the present tense and carries a boundary section, the part the human
-approves:
-
-- **Outcome, constraints and acceptance checks**, the last split by owner: *AI-verifiable* checks
-  are a command and its expected output; *human-verifiable* checks are a fact a person can check in
-  under a minute.
-- **Files**: a `Changes` list and a `Must not change` list of paths.
-- **Approval**: the human runs `task.py approve <feature>` in a terminal of their own. It writes a
-  digest of the boundary into the page. Until then the task guard refuses edits outside `docs/`;
-  after it, edits outside the approved `Changes` list. The agent cannot write or remove the
-  approval. It can keep editing the page, the boundary included: the write limits stay those of
-  the approved version, and `main` does not move until the new boundary is approved.
-
-A plan, when a different session will execute the work, is a table in the page's Working
-section: task, files it may touch, blocked by, the check that proves it, and whether the check's
-scope fits inside the files the task touches. That last column exists because it was the dominant
-plan defect in practice: a verification scoped wider than the work it checks (a whole-file count
-behind a two-region edit; `npm run dev | head` as proof a server started). Plans carry no code.
-If the deliverable is small enough that the plan would carry the code, there is no plan. The
-Working section is removed before `main` moves; what is still unfinished lives in the page's
-Remaining scope.
-
-## The four gates
-
-A gate is a point where work cannot proceed until a named owner produces named evidence.
-Verification is not a gate; it is the evidence rule every gate consumes.
-
-| # | Gate | Owner | Entry | Exit evidence | Enforced by |
-|---|---|---|---|---|---|
-| G1 | Boundary approval | Human | size `large`; a state page with an unapproved boundary | the page's `keel-approval` digest matches its boundary | `task-guard.py` refuses non-doc edits before it, and refuses the agent writing the approval; the docs check keeps `main` still while a boundary is unapproved |
-| G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists (the Working section) | the plan table with every scope column `yes`; findings applied | `plan-gate-guard.py` refuses a third dispatch (heuristic; see the table below); `plan-size-guard.sh` reports a Working section over 300 lines after the write |
-| G3 | Review | AI reviewer, one round per scope | per task: the task's diff; whole branch: all tasks done | findings applied; no second round without the human | guidance only |
-| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moves only with the merge permission, is pushed only with the push permission | `task-guard.py`; tests before `main` moves: the required-checks template ([required checks](docs/261004-required-checks-state.html)), which is CI's job, not a hook's |
-
-Two gates are human-owned (G1, G4), two are AI-owned (G2, G3). The [project canon](docs/260823-project-reference.html#gates)
-has a paragraph per gate.
-
-## Guardrails and hooks
-
-Four hooks and one command, no dependencies, Python 3.10+ and bash 3.2. Each hook runs in the
-harness before or after a tool call, reads the call as JSON on stdin (shapes captured in
-[the captured hook payloads](docs/260823-hook-payloads-reference.html)), and allows (exit 0) or blocks with a reason the
-model sees (exit 2). A hook that cannot parse its input allows: a broken guard must never stop
-work on its own. The shared reader in `hooks/agentkeel_core/` splits a command line into every
-simple command (after `&&`, `;`, `|`, newlines, line continuations, `$(...)`, `bash -c` and
-`bash -lc`, `bash <<EOF`, `env -S`, `eval`, `cd`), follows a `git checkout` earlier in the line,
-and reads every git global option (`-C`, `-c`, `--git-dir`, `GIT_DIR`) and alias, including one
-defined earlier in the same line, so the second push in a line is judged like the first.
-
-Guards never read a host's tool names. `agentkeel_core/host.py` turns each host's call into the
-same events first: a file edit (Claude Code's `Write`/`Edit`/`NotebookEdit`, every path in a
-Codex `apply_patch`, both ends of a move), a shell command (`Bash` on both), or a subagent
-dispatch (`Agent`; Codex's `spawn_agent`). A tool that may write but has no adapter is refused
-with a reason, never silently allowed. The shapes are pinned by real captured payloads in
-`tests/fixtures/`; facts per host are on the [hosts page](docs/261004-hosts-state.html).
-
-| Hook | Event | Refuses |
-|---|---|---|
-| `task.py` | (the command) | declares, shows, records a check (`verify -- <cmd>`), ends a task; starts, reads, finishes and checks docs pages (`new`, `context`, `finish`, `check`, `index`); `approve` is the human's |
-| `task-guard.py` | PreToolUse, every tool (`*`) on both hosts | everything in the first block of the table below; reads, planning and messaging tools pass |
-| `secret-guard.py` | PreToolUse `Bash` | printing `.env*` (not `.env.example`), key files, credentials; bare `env`/`printenv`; `echo $ANY_KEY_OR_TOKEN`; `git show`/`diff` of `.env` |
-| `plan-gate-guard.py` | PreToolUse `Agent` (Codex: `spawn_agent`) | a third gate dispatch for the same plan, counted per repository under a file lock; on Codex, whose dispatch message is encrypted, a `task_name` starting `plan_gate` counted per task |
-| `plan-size-guard.sh` | PostToolUse `Write\|Edit` (Codex: `apply_patch`) | reports a state page's Working section over 300 lines (the write has happened) |
-| `session-start.py` | SessionStart, plugin only | prints the task command with this install's real path |
-
-Two overrides exist, both written on the command itself so they apply once and show in the
-transcript, and both logged to `~/.agentkeel/overrides.jsonl`: `AGENTKEEL_ALLOW_DESTRUCTIVE=1 git
-reset --hard` and `AGENTKEEL_SHOW_SECRETS=1 cat .env`. A variable set in the harness's own
-environment is not an override. There is no override for shipping: that is a permission.
-
-## What it protects, and what it does not
-
-The guards see the agent's tool calls, not the filesystem, so the guarantee is "this agent's tool
-calls were checked", never "nothing else touched the tree". Each row is labelled by what it is.
-
-| Protection | Kind | Tested in |
-|---|---|---|
-| No write without a task declared by this session; a second session cannot reuse it | prevents | `test_task_guard.py` (NoTask, SessionBinding) |
-| Writes only inside the task's worktrees, write roots and its own scratch (its scratch folder, or a temp path naming its session); another task's temp files are not writable; a review writes only its report folder, and a write root never reaches into a repository; `git worktree add` claims only a path that does not exist yet | prevents | WriteRoots, ReviewFindings |
-| Code edits only in the task's own linked worktree, never the shared checkout (whatever branch it is on), and never on a protected branch (`main`, `master`, or `agentkeel.json`), at every size | prevents | Branches, StageReviewFindings |
-| Commits name their paths (`-- <paths>`), so another agent's staged files never ride along | prevents | Commits |
-| `main` moves locally (commit, merge, ff, reset, rebase, update-ref, `fetch .:main`) only with `merge` | prevents | Shipping |
-| Every push to a remote only with `push`, including `+main`, compound lines, `-C`, `-c`, aliases and `remote.*.push` config; `gh pr merge` only with `merge` and `push` | prevents | Shipping, ReviewFindings, StageReviewFindings |
-| Force push, remote branch delete, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` (the stash is shared by every worktree) | prevents, with a logged one-command override | Destructive |
-| `eas build`, `eas submit`, `eas update`, `npm publish`, deploy commands, repo-defined paid jobs only with their permission (also through `npx`, `pnpm exec`, `npm exec`; a `--dry-run` is not the action) | prevents, for the listed command shapes | CommandClasses |
-| Hook config, `agentkeel.json` and agentkeel state not editable by the agent's file tools | prevents | ProtectedConfig |
-| A large task edits nothing outside `docs/` before its boundary is approved, then only the approved `Changes` list (a widened draft grants nothing); the agent cannot add, change or remove an approval, or rename or delete an approved page | prevents, for the agent's file tools and `task.py` | LargeAndBoundaryApproval, StageReviewFindings |
-| `main` moves only to a commit whose docs check passes (no Working section, every boundary approved, names, links and anchors valid, no decision log) | prevents, for agent pushes and local moves that name their commit by full SHA, alone in their call; CI's `agentkeel-required` runs the same check for everyone | `test_pages.py`, `test_task_guard.py` (DocsGate) |
-| A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
-| A third plan-gate dispatch | prevents when the prompt carries `[plan-gate]`; heuristic otherwise | `test_plan_gate_guard.py` |
-| A Working section over 300 lines | warns after the write | `test_plan_size_guard.py` |
-| An agent ships to `main` only a commit whose required check passed (`require_check_before_push` in `agentkeel.json`) | prevents, for agent pushes that name the tested commit's full SHA and run alone in their call; refuses other push forms, `gh pr merge`, and when GitHub cannot be asked | `test_task_guard.py` (PushGate); live on a throwaway GitHub repository |
-| One review round per scope (G3) | guidance only | |
-| Shell writes that are not git (`sed -i`, `>`, `rm`), commands inside scripts or npm scripts, other tools and hosts | unsupported | |
-| The same protections on Codex (file edits through `apply_patch`, shell, subagents) | prevents, as above | `test_hosts.py` (SameDecision, CapturedShapes) |
-| A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: every tool reaches the guard, and an unreadable writer is refused with a reason | `test_hosts.py` (ConfiguredRoute) |
-| MCP tools | unsupported: they pass; an MCP server that writes files is outside agentkeel | |
-| Cursor and other hosts | guidance only: they read `AGENTS.md`, no adapter | |
-
-## Documentation: one current owner per fact
-
-A repository opts in with `"docs": "html"` in `agentkeel.json`. Every document is then one
-authored HTML page in a flat `docs/` folder, opened directly from disk, and describes what is true
-now. Git keeps the history, so there is no decision log and nothing to keep in sync with a twin.
-
-| Page | Owns |
-|---|---|
-| `YYMMDD-project-reference.html` | the project canon: repo-wide rules that apply now, each with its reason |
-| `YYMMDD-<feature>-state.html` | one feature: behavior, constraints, remaining scope, limitations, verification, and for large work its approved boundary |
-| `...-reference.html`, `...-audit.html`, `...-mockup.html` | a shared rule or runbook; findings at a stated revision; a design exploration |
-
-Pages link one shared `keel.css` and may add their own styles. `task.py context <page>` prints a
-page as plain structured text for an agent to read; the agent edits the HTML itself.
-`task.py check` is the docs check `main` moves on, run by the guard before an agent ships and by
-CI for everyone. The model, its contract and its limits are on
-[the documentation page](docs/261005-html-docs-state.html); this repository's own docs use it, with
-its [project canon](docs/260823-project-reference.html).
-
-## Quickstart (5 minutes)
-
-Two ways in. A **project install** puts the hooks in the repository, for everyone who opens it:
+Python 3.10 or newer. Preview first; the installer changes nothing without `--apply`.
 
 ```bash
 git clone https://github.com/hishamalward/agentkeel
-python3 agentkeel/install.py path/to/your-repo            # preview: lists every change, makes none
+python3 agentkeel/install.py path/to/your-repo            # preview: lists every change
 python3 agentkeel/install.py path/to/your-repo --apply    # hooks, settings for both hosts, AGENTS.md
-python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted (--live proves it)
+python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted
 ```
 
-The installer copies the hooks into `.claude/hooks/`, merges its entries into
-`.claude/settings.json` (Claude Code) and `.codex/hooks.json` (Codex) without touching your other
-hooks or settings, and writes the instruction fragment into `AGENTS.md` between markers.
-`--host claude` or `--host codex` limits it to one. It never creates a `CLAUDE.md`: Claude Code
-reads `AGENTS.md` only when no `CLAUDE.md` exists, so creating one would hide the instructions. If
-your repo has one, or a `.codex/config.toml` that already defines hooks of the same name, the
-installer says so and leaves it alone. `--uninstall` reverses all of it: a file you have not
-edited since goes back to its original bytes, and edits you made after install are kept.
+Then prove it works. Open the repository in your agent and ask for a one-line edit before
+anything else. The agent must get this refusal:
 
-A **plugin** carries the same hooks in your agent instead: `.claude-plugin/` and `.codex-plugin/`
-share one `hooks/hooks.json`. Plugin hooks run in every repository, so they act only where an act
-lands in a repository that opted in with an `agentkeel.json` at its root (the target decides, not
-the folder the session started in), and a session-start hook tells the agent the task command's
-real path. An opt-in is remembered in `~/.agentkeel/opted-in.json`, so deleting the file from a
-shell does not switch the guards off; to opt out, delete the file and remove its entry there. Use
-one way per repository, not both.
+```text
+AGENTKEEL: no task is declared for this session.
+```
 
-Installed is not active. Codex runs a new project hook only after you trust it (`/hooks` in
-Codex); `--doctor` shows what is missing. Then ask for a one-line edit before declaring anything;
-it must be refused with `no task is declared for this session` (`--doctor --live` does this for
-you, one short session per host).
+On Codex, trust the new hooks first (`/hooks` in Codex): Codex skips a project hook until you
+trust it. `--doctor --live` runs this proof for you, one short session per host.
 
-## Verified live
+The installer writes `.claude/hooks/`, merges its entries into `.claude/settings.json` and
+`.codex/hooks.json`, and adds its instructions to `AGENTS.md` between markers. It keeps your
+other hooks and settings, and it never creates a `CLAUDE.md` (Claude Code reads `AGENTS.md` only
+when no `CLAUDE.md` exists). `--host claude` or `--host codex` installs one host. `--uninstall`
+puts back each file you have not edited since, and keeps your later edits.
 
-Run 2026-10-04 with Claude Code 2.1.289 (`claude -p`, Sonnet) and Codex CLI 0.160.0 (`codex exec`,
-low reasoning) in two throwaway repositories with local bare remotes, each installed with
-`install.py --apply`. Both models got the same eight steps, were told to attempt each once and to
-quote the hook, and gave the same result at every step. The Codex run used
-`--dangerously-bypass-hook-trust` instead of trusting the hooks by hand, and ran inside a Claude
-Code shell, so both hosts' session variables were set; `task.py` picked Codex's.
+To use AgentKeel in every repository, install it as a plugin instead: `.claude-plugin/` and
+`.codex-plugin/` share one `hooks/hooks.json`. A plugin acts only in a repository with an
+`agentkeel.json` at its root. Use one way per repository, not both.
 
-| Step | Claude Code | Codex |
-|---|---|---|
-| create `notes.txt` before declaring a task (file tool) | refused: `no task is declared for this session` | refused, same text (through `apply_patch`) |
-| `task.py start parity --size small --allow implement` in the shared checkout | allowed; no worktree recorded, the note names the command | same |
-| `git worktree add ../wt -b feat/parity`, then create `../wt/notes.txt` | allowed | allowed |
-| `git add notes.txt && git commit -m notes -- notes.txt` in the worktree | allowed | allowed |
-| `git push origin feat/parity && git push origin main` | refused at the first push: `a push to 'feat/parity' needs the 'push' permission` | same |
-| `cat .env` | refused by the secret guard | same |
-| a subagent creates a file in the task's worktree | allowed | allowed |
-| a subagent writes in the shared checkout (separate Codex run) | (Stage 1 run: refused) | refused: `... is the repository's shared checkout` |
-| a third `plan_gate*` subagent dispatch (separate Codex run) | (Stage 1 run: refused by marker) | refused before launch: `PLAN GATE GUARD: refusing a further gate dispatch for task:gates` |
+## A small task, start to finish
 
-Also live: the Claude plugin (`claude --plugin-dir`) refused an undeclared write in a repository
-with `agentkeel.json` and named its real `task.py` path at session start, and did nothing in a
-repository without one. The Codex plugin, installed from a local marketplace with `codex plugin
-add` and its five hooks trusted by hand in `/hooks` (no bypass flag), refused an undeclared write
-in the shared checkout and a `cat .env`, both shown to the agent as `Command blocked by
-PreToolUse hook: ...`, and created no file. Codex ranked the session-start instruction above the
-user's prompt and declared a task first, which is the instruction layer working.
-
-One difference found: inside a Codex subagent, `CODEX_THREAD_ID` is the subagent's own id, so
-`task.py show` and `task.py verify` run by a Codex subagent find no task, while its tool calls are
-still judged against the parent's record. Declare the task and record evidence from the main
-agent.
-
-## Relationship to other work
-
-- [agent-slots](https://github.com/hishamalward/agent-slots): runtime isolation for several agents
-  on one machine. agentkeel is the process side; agent-slots is the resource side.
-- [toilscan](https://github.com/hishamalward/toilscan): the write-safety pattern in
-  the [guardrails reference](docs/260823-guardrails-reference.html) is its `apply` path, generalized.
-- mcpclerk (in progress): the same instinct at the MCP tool layer, where the write path is a tool
-  call rather than a file: allowlist, approval, quotas, an audit log that verifies.
-## Not yet
-
-- A cap on the review gate (G3).
-- Ownership-aware cleanup of a finished task's worktrees and slots; a session-start banner.
-
-## Install and test
-
-Python 3.10 or newer for the Python hooks (macOS's `/usr/bin/python3` may be older; point the hook
-lines at a 3.10+ interpreter if so), bash 3.2 or newer for the shell hook.
+You ask: "Add a `--json` flag to the CLI, then merge it." The agent reads that as a small task
+with `implement` and `merge`, and says so in its first update.
 
 ```bash
-python3 -m unittest discover -s tests -v
+# 1. In the shared checkout: declare the task. The hooks read this record on every tool call.
+python3 .claude/hooks/task.py start json-flag --size small --allow implement,merge
+
+# 2. Make the task's own worktree. It is recorded as the task's automatically.
+git worktree add ../myrepo-json-flag -b feat/json-flag
+cd ../myrepo-json-flag
+
+# 3. Edit there, then commit, naming the paths.
+git add cli.py tests/test_cli.py
+git commit -m "cli: add --json" -- cli.py tests/test_cli.py
+
+# 4. Run the check and record its result against this HEAD.
+python3 ../myrepo/.claude/hooks/task.py verify -- python3 -m pytest
+
+# 5. Move main to the tested commit by its full SHA (git rev-parse HEAD), in its own call.
+cd ../myrepo && git merge --ff-only <full-sha>
+
+# 6. End the task. The output lists what the task owned.
+python3 .claude/hooks/task.py end
 ```
 
-CI runs the same suite on macOS and Linux, on Python 3.10 and 3.13, plus every hook's `--selftest`.
+What the hooks refuse on the way, and why:
 
-For whoever owns this next: start at the [project canon](docs/260823-project-reference.html); the
-v0.1 tour, the v0.1 contract and the old decision log are in Git history.
+| The agent tries | The hook answers |
+|---|---|
+| an edit in the shared checkout | `... is the repository's shared checkout. Every code task, small ones included, works in its own worktree` |
+| an edit on `main` | `this worktree is on the protected branch 'main'` |
+| `git commit -m x` with no paths | `refusing a commit that does not name its paths` |
+| `git push origin feat/json-flag` | `a push to 'feat/json-flag' needs the 'push' permission; task 'json-flag' has implement, merge` |
+
+"Merge" did not include "push", so the agent stops at step 5 and reports that the work is
+ready to push.
+
+## Limits
+
+- The hooks see the agent's tool calls, not the filesystem. A shell write that is not git
+  (`sed -i`, `>`), a command inside a script, and MCP tools are not checked.
+- The task record is the agent's declaration, not your consent. It makes every action match
+  one stated scope. For consent itself, use your host's permission prompts.
+- An approval digest detects a change to an approved boundary. It does not prove who approved.
+- Hooks guard the agent, not the branch. Tests before `main` moves need a required CI check:
+  see [required checks](docs/261004-required-checks-state.html).
+- Other hosts (Cursor, Copilot) read `AGENTS.md` only. For them, AgentKeel is guidance.
+
+## Read next
+
+The documentation is HTML. Open the `docs/` pages from a clone, in a browser. On github.com, a
+link to a page shows its source.
+
+| Page | Read it to |
+|---|---|
+| [Project canon](docs/260823-project-reference.html) | learn the rules that apply now: the invariants, the four gates, and why each rule exists |
+| [Guardrails](docs/260823-guardrails-reference.html) | see each hook, what it refuses, what it cannot see, the overrides, and the test for each protection |
+| [The task record](docs/261004-task-record-state.html) | declare a task: sizes, permissions, worktrees, scratch, `agentkeel.json` |
+| [HTML documentation](docs/261005-html-docs-state.html) | write docs pages, get a boundary approved, and pass the docs check |
+| [Required checks](docs/261004-required-checks-state.html) | keep `main` green with a CI check and a deploy that waits for it |
+| [Hosts](docs/261004-hosts-state.html) | see the Claude Code and Codex facts and the live results |
+| [Hook payloads](docs/260823-hook-payloads-reference.html) | read the captured JSON that the hooks parse |
+
+Related work: [agent-slots](https://github.com/hishamalward/agent-slots) isolates the database,
+ports and queues of several agents on one machine. AgentKeel is the process side; agent-slots is
+the resource side.
+
+## Test
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+CI runs the suite on macOS and Linux, on Python 3.10 and 3.13, plus each hook's `--selftest`.
 
 ## License
 

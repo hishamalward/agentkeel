@@ -57,6 +57,17 @@ section[data-keel-transient] { border-left: 4px solid var(--warn); }
 .muted, small { color: var(--muted); }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 img, svg, video { max-width: 100%; height: auto; }
+header.page .brand { display: inline-flex; align-items: center; gap: .55rem; margin-bottom: .9rem; color: var(--ink); font-weight: 650; text-decoration: none; }
+header.page .brand img { width: 2.2rem; height: 2.2rem; }
+.lede { font-size: 1.1rem; }
+nav.toc { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin-top: .9rem; font-size: .92rem; }
+.callout { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: .8rem 1rem; }
+.flow { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); margin: 1rem 0; padding: 0; list-style: none; counter-reset: step; }
+.flow > li { max-width: none; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem; font-size: .92rem; counter-increment: step; }
+.flow > li::before { content: counter(step); display: block; color: var(--muted); font: 600 .75rem ui-monospace, Menlo, monospace; }
+.flow > li b { display: block; }
+.flow > li.human { border-top-color: var(--accent); }
+.flow > li.ai { border-top-color: var(--ok); }
 """
 
 _HEAD = """<!doctype html>

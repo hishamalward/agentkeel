@@ -5,41 +5,126 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardrails</title>
 <link rel="stylesheet" href="keel.css">
+<link rel="icon" href="261005-brand-icon-asset.svg">
 </head>
 <body>
 <main>
 <header class="page">
+  <a class="brand" href="260823-project-reference.html"><img src="261005-brand-mark-asset.svg" alt="">AgentKeel</a>
   <div class="kicker">Reference &middot; created 260823</div>
   <h1>Guardrails</h1>
+  <p class="lede">What each hook refuses, what it cannot see, and the test that proves each
+  protection. The guarantee is "this agent's tool calls were checked", never "nothing else touched
+  the tree".</p>
+  <nav class="toc" aria-label="On this page">
+    <a href="#hooks">Hooks</a><a href="#protections">Protections</a><a href="#blind-spots">Blind spots</a>
+    <a href="#overrides">Overrides</a><a href="#the-pattern-on-every-write-path">Write pattern</a>
+    <a href="#isolation-is-a-different-problem">Isolation</a>
+  </nav>
 </header>
+
+<section id="hooks">
+  <h2>Hooks</h2>
+  <p>Four hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A hook reads the tool
+  call as JSON on stdin (<a href="260823-hook-payloads-reference.html">captured payloads</a>), then
+  allows it (exit 0) or blocks it with a reason the model reads (exit 2).</p>
+  <ol class="flow" aria-label="How a tool call is judged">
+    <li class="ai"><b>Tool call</b>The host sends the call to the hook as JSON.</li>
+    <li><b>Events</b><code>host.py</code> turns it into file edits, shell commands or dispatches.</li>
+    <li><b>Judge</b>Each guard checks the events against the task record and <code>agentkeel.json</code>.</li>
+    <li class="human"><b>Allow or refuse</b>Exit 0, or exit 2 with the reason.</li>
+  </ol>
+  <table>
+    <thead><tr><th>Hook</th><th>Runs on</th><th>Refuses</th></tr></thead>
+    <tbody>
+      <tr><td><code>task-guard.py</code></td><td>before every tool call, both hosts</td><td>writes, commits, moves and pushes outside the task record (the table below)</td></tr>
+      <tr><td><code>secret-guard.py</code></td><td>before a shell command</td><td>printing <code>.env*</code> (not <code>.env.example</code>), key files and credentials; bare <code>env</code> or <code>printenv</code>; <code>echo $SECRET_NAME</code>; <code>git show</code> or <code>diff</code> of <code>.env</code></td></tr>
+      <tr><td><code>plan-gate-guard.py</code></td><td>before a subagent dispatch</td><td>a third gate dispatch for the same plan; on Codex, a third <code>plan_gate*</code> task name per task</td></tr>
+      <tr><td><code>plan-size-guard.sh</code></td><td>after a file edit</td><td>nothing; it reports a Working section over 300 lines</td></tr>
+      <tr><td><code>session-start.py</code></td><td>session start, plugin only</td><td>nothing; it prints the task command's real path and the session id</td></tr>
+      <tr><td><code>task.py</code></td><td>the agent runs it</td><td>nothing; it declares, shows, verifies and ends a task, and starts, reads, finishes and checks docs pages. <code>approve</code> is the human's.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="protections">
+  <h2>Protections</h2>
+  <p>Each row says what kind of protection it is: <strong>prevents</strong> (refused before it
+  happens), <strong>warns after</strong>, <strong>guidance only</strong>, or
+  <strong>unsupported</strong>. Test names are classes in <code>tests/</code>.</p>
+  <table>
+    <thead><tr><th>Protection</th><th>Kind</th><th>Tested in</th></tr></thead>
+    <tbody>
+      <tr><td>No write without a task declared by this session; another session cannot reuse it</td><td>prevents</td><td>NoTask, SessionBinding</td></tr>
+      <tr><td>Writes only in the task's worktrees, its write roots and its own scratch; a review writes only its report folder, outside any repository</td><td>prevents</td><td>WriteRoots, ReviewFindings</td></tr>
+      <tr><td>Code edits only in the task's own linked worktree, never the shared checkout, never on a protected branch</td><td>prevents</td><td>Branches, StageReviewFindings</td></tr>
+      <tr><td>Commits name their paths, so another agent's staged files never ride along</td><td>prevents</td><td>Commits</td></tr>
+      <tr><td>A protected branch moves locally (commit, merge, reset, rebase, <code>update-ref</code>, <code>fetch .</code>) only with <code>merge</code></td><td>prevents</td><td>Shipping</td></tr>
+      <tr><td>Every push only with <code>push</code>, including <code>+main</code>, compound lines, <code>-C</code>, <code>-c</code>, aliases and <code>remote.*.push</code>; <code>gh pr merge</code> only with <code>merge</code> and <code>push</code></td><td>prevents</td><td>Shipping, StageReviewFindings</td></tr>
+      <tr><td>Force push, remote branch delete, <code>reset --hard</code>, whole-tree checkout or restore, <code>clean -f</code>, <code>branch -D</code>, <code>stash drop/clear/pop</code></td><td>prevents, with a logged override</td><td>Destructive</td></tr>
+      <tr><td><code>eas build/submit/update</code>, <code>npm publish</code>, deploy commands and repository-listed paid jobs only with their permission (also through <code>npx</code>, <code>pnpm exec</code>; a <code>--dry-run</code> is not the action)</td><td>prevents, for the listed shapes</td><td>CommandClasses</td></tr>
+      <tr><td>Hook config, <code>agentkeel.json</code> and AgentKeel state are not editable by the agent's file tools</td><td>prevents</td><td>ProtectedConfig</td></tr>
+      <tr><td>A large task edits nothing outside <code>docs/</code> before its boundary is approved, then only the approved Changes paths; an empty Changes list grants nothing; the agent cannot add, change or remove an approval</td><td>prevents</td><td>LargeAndBoundaryApproval, EmptyChangesList</td></tr>
+      <tr><td><code>main</code> moves only to a commit whose docs check passes, named by full SHA, alone in its call; an error while judging the move refuses it</td><td>prevents, for agents; CI's <code>agentkeel-required</code> checks everyone</td><td>DocsGate, StageTwoBReviewFindings</td></tr>
+      <tr><td>An agent ships to <code>main</code> only a commit whose required check passed (<code>require_check_before_push</code>)</td><td>prevents, for a full-SHA push alone in its call; other forms and <code>gh pr merge</code> are refused</td><td>PushGate</td></tr>
+      <tr><td>A printed secret</td><td>prevents, for the listed shapes</td><td><code>test_secret_guard.py</code></td></tr>
+      <tr><td>A third plan-gate dispatch</td><td>prevents with the <code>[plan-gate]</code> marker; heuristic without it</td><td><code>test_plan_gate_guard.py</code></td></tr>
+      <tr><td>A Working section over 300 lines</td><td>warns after</td><td><code>test_plan_size_guard.py</code></td></tr>
+      <tr><td>The same protections on Codex (<code>apply_patch</code>, shell, subagents)</td><td>prevents</td><td>SameDecision, CapturedShapes</td></tr>
+      <tr><td>A tool that may write but has no adapter (Codex <code>write_stdin</code> included)</td><td>prevents: it is refused with a reason</td><td>ConfiguredRoute</td></tr>
+      <tr><td>One review round per scope (G3)</td><td>guidance only</td><td></td></tr>
+      <tr><td>Cursor, Copilot and other hosts</td><td>guidance only: they read <code>AGENTS.md</code></td><td></td></tr>
+      <tr><td>Shell writes that are not git, commands inside scripts, MCP tools</td><td>unsupported</td><td></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blind-spots">
+  <h2>Blind spots</h2>
+  <p>Hooks see a tool call, not the filesystem and not the process it starts.</p>
+  <table>
+    <thead><tr><th>Guard</th><th>Sees</th><th>Does not see</th></tr></thead>
+    <tbody>
+      <tr><td><code>task-guard.py</code></td><td>file-tool paths; every simple command in a shell line; every git call with its options and aliases</td><td><code>sed -i</code>, redirects, <code>mv</code>; a script or npm script that writes or runs git</td></tr>
+      <tr><td><code>secret-guard.py</code></td><td>commands that print env files, key files, the environment or secret-named variables</td><td>a program that reads and prints a value; a secret in a file with a name it does not know</td></tr>
+      <tr><td><code>plan-gate-guard.py</code></td><td>dispatches that name a plan, with the marker or the gate words</td><td>a dispatch worded to avoid the heuristic</td></tr>
+      <tr><td><code>plan-size-guard.sh</code></td><td>the Working section's length after a write</td><td>a plan split across pages</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="overrides">
+  <h2>Overrides</h2>
+  <p>Two overrides exist, each written as a prefix on the one command it applies to, so it applies
+  once and the transcript shows it. Each use goes to <code>~/.agentkeel/overrides.jsonl</code>. A
+  variable set in the host's own environment is not an override. Shipping has no override: it is
+  a permission.</p>
+  <pre><code>AGENTKEEL_ALLOW_DESTRUCTIVE=1 git reset --hard
+AGENTKEEL_SHOW_SECRETS=1 cat .env</code></pre>
+</section>
+
 <section id="the-pattern-on-every-write-path">
-<h2>The pattern on every write path</h2>
-<p>Reused from <a href="https://github.com/hishamalward/toilscan">toilscan</a>'s <code>apply</code> path, where it is enforced in code:</p>
-<ol>
-<li><strong>Read-only by default.</strong> The default invocation previews; nothing is written until the caller authorizes it explicitly (a flag, an approval, a declared permission).</li>
-<li><strong>Explicit authorization to apply</strong>, per operation, never "apply all" by default.</li>
-<li><strong>Stable IDs</strong> for the things being written, so a re-run recognizes what it already did.</li>
-<li><strong>Atomic writes</strong>: write to a temp file beside the target, then rename. A crash leaves the old file or the new file, never half of one.</li>
-<li><strong>A recoverable journal</strong> of what was written, so the last apply can be undone.</li>
-<li>**Never move or push <code>main</code><strong> without the merge or push permission; </strong>never edit outside your task's worktrees<strong>; </strong>never print a secret**.</li>
-</ol>
-<p>The hooks in this repo enforce item 6 and the permission half of item 2. Items 1, 3, 4 and 5 are how to build a tool that writes; the hooks cannot enforce them from outside and the README does not claim they do.</p>
+  <h2>The pattern on every write path</h2>
+  <p>A tool that writes follows this pattern, taken from
+  <a href="https://github.com/hishamalward/toilscan">toilscan</a>'s <code>apply</code> path:</p>
+  <ol>
+    <li>Preview by default. Nothing is written until the caller authorizes it.</li>
+    <li>Authorize each operation, never "apply all" by default.</li>
+    <li>Give stable IDs to what is written, so a re-run knows what it already did.</li>
+    <li>Write atomically: a temp file beside the target, then a rename.</li>
+    <li>Keep a journal of what was written, so the last apply can be undone.</li>
+    <li>Never move or push <code>main</code> without permission, never edit outside the task's worktrees, never print a secret.</li>
+  </ol>
+  <p>The hooks enforce item 6 and the permission half of item 2. Items 1, 3, 4 and 5 are how to
+  build a tool that writes; a hook cannot enforce them from outside.</p>
 </section>
-<section id="what-the-hooks-see-and-what-they-cannot">
-<h2>What the hooks see, and what they cannot</h2>
-<p>Hooks run on tool calls. They see the call as JSON (<a href="260823-hook-payloads-reference.html">the captured hook payloads</a>), not the filesystem and not the process that results. So the guarantee is "the agent's tool calls were bounded", not "nothing else touched the tree". Concretely:</p>
-<table><thead><tr><th>Guard</th><th>Sees</th><th>Does not see</th></tr></thead><tbody>
-<tr><td><code>task-guard.py</code></td><td><code>Write</code>, <code>Edit</code>, <code>NotebookEdit</code> paths; every simple command in a <code>Bash</code> line (after <code>&amp;&amp;</code>, <code>;</code>, pipes, newlines, <code>$(...)</code>, <code>bash -c</code>, <code>eval</code>, <code>cd</code>), every git operation in it with its global options and aliases</td><td><code>sed -i</code>, redirects, <code>mv</code>, a script or npm script that writes or runs git; variables and globs (not expanded)</td></tr>
-<tr><td><code>secret-guard.py</code></td><td>shell commands that print env files, key files, the environment, secret-named variables</td><td>a program that reads and prints the value; a secret in a file under a name the list does not know</td></tr>
-<tr><td><code>plan-gate-guard.py</code></td><td><code>Agent</code> dispatches naming a plan file, with the <code>[plan-gate]</code> marker or the gate words</td><td>a dispatch worded to avoid the heuristic</td></tr>
-<tr><td><code>plan-size-guard.sh</code></td><td>the line count of a plan file after a write</td><td>a plan split across files</td></tr>
-</tbody></table>
-<p>The README's capability table labels each protection as prevents, warns after, guidance only or unsupported.</p>
-<p>Two overrides exist (<code>AGENTKEEL_ALLOW_DESTRUCTIVE=1</code>, <code>AGENTKEEL_SHOW_SECRETS=1</code>). Each is written on the command it applies to, so it applies once and the transcript shows it, and each use is appended to <code>~/.agentkeel/overrides.jsonl</code>. Shipping has no override: it is a permission.</p>
-</section>
+
 <section id="isolation-is-a-different-problem">
-<h2>Isolation is a different problem</h2>
-<p>A git worktree isolates the filesystem and nothing else. The database, the ports, the job queue and the simulator stay shared, and two agents on one machine will collide there first. That is runtime isolation and it lives in <a href="https://github.com/hishamalward/agent-slots">agent-slots</a>, where one integer derives a worktree, a database, two ports and a queue schema. agentkeel does not duplicate it.</p>
+  <h2>Isolation is a different problem</h2>
+  <p>A git worktree isolates files and nothing else. The database, the ports, the job queue and
+  the simulator stay shared, and two agents on one machine collide there first.
+  <a href="https://github.com/hishamalward/agent-slots">agent-slots</a> handles that: one number
+  gives each agent a worktree, a database, two ports and a queue schema.</p>
 </section>
 </main>
 </body>
