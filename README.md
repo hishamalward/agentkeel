@@ -128,7 +128,7 @@ with a reason, never silently allowed. The shapes are pinned by real captured pa
 | Hook | Event | Refuses |
 |---|---|---|
 | `task.py` | (the command) | declares, shows, records a check (`verify -- <cmd>`), ends a task; `approve` is the human's |
-| `task-guard.py` | PreToolUse: Claude `Write\|Edit\|NotebookEdit\|Bash`; Codex `Bash\|apply_patch` | everything in the first block of the table below |
+| `task-guard.py` | PreToolUse, every tool (`*`) on both hosts | everything in the first block of the table below; reads, planning and messaging tools pass |
 | `secret-guard.py` | PreToolUse `Bash` | printing `.env*` (not `.env.example`), key files, credentials; bare `env`/`printenv`; `echo $ANY_KEY_OR_TOKEN`; `git show`/`diff` of `.env` |
 | `plan-gate-guard.py` | PreToolUse `Agent` (Codex: `spawn_agent`) | a third gate dispatch for the same plan, counted per repository under a file lock; on Codex, whose dispatch message is encrypted, a `task_name` starting `plan_gate` counted per task |
 | `plan-size-guard.sh` | PostToolUse `Write\|Edit` (Codex: `apply_patch`) | reports a `docs/plans/*plan*.md` over 300 lines (the write has happened) |
@@ -162,7 +162,8 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | One review round per scope (G3); tests green before shipping (G4) | guidance only | |
 | Shell writes that are not git (`sed -i`, `>`, `rm`), commands inside scripts or npm scripts, other tools and hosts | unsupported | |
 | The same protections on Codex (file edits through `apply_patch`, shell, subagents) | prevents, as above | `test_hosts.py` (SameDecision, CapturedShapes) |
-| A tool that may write but has no adapter | prevents (refused as a visible gap) | `test_hosts.py` |
+| A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: every tool reaches the guard, and an unreadable writer is refused with a reason | `test_hosts.py` (ConfiguredRoute) |
+| MCP tools | unsupported: they pass; an MCP server that writes files is outside agentkeel | |
 | Cursor and other hosts | guidance only: they read `AGENTS.md`, no adapter | |
 
 ## The three registers
@@ -197,8 +198,8 @@ hooks or settings, and writes the instruction fragment into `AGENTS.md` between 
 `--host claude` or `--host codex` limits it to one. It never creates a `CLAUDE.md`: Claude Code
 reads `AGENTS.md` only when no `CLAUDE.md` exists, so creating one would hide the instructions. If
 your repo has one, or a `.codex/config.toml` that already defines hooks of the same name, the
-installer says so and leaves it alone. `--uninstall` reverses all of it, back to the original
-bytes of every file it changed.
+installer says so and leaves it alone. `--uninstall` reverses all of it: a file you have not
+edited since goes back to its original bytes, and edits you made after install are kept.
 
 A **plugin** carries the same hooks in your agent instead: `.claude-plugin/` and `.codex-plugin/`
 share one `hooks/hooks.json`. Plugin hooks run in every repository, so they act only where an act

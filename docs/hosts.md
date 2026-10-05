@@ -20,6 +20,14 @@ per-host fact sheet those events are built on. Every row was checked against a c
 | Trust | project settings load when the folder is trusted | a new or changed non-managed hook is skipped until trusted (`/hooks`); `codex exec --dangerously-bypass-hook-trust` skips the check for one run |
 | SessionStart context | stdout is added to the session | not verified |
 
+## Which tools reach the guard
+
+The task guard is configured for every tool (`*`) on both hosts, and decides in `host.py`: file
+edits, shell and dispatches are judged; reads, planning, messaging and scheduling tools pass (a
+scheduled prompt runs later as ordinary, judged tool calls); MCP tools pass and are outside
+agentkeel; any other tool whose name suggests a write (`write_stdin` among them) is refused as a
+visible gap.
+
 ## Consequences
 
 - **One process, two ids.** When one agent runs inside the other (Codex started from a Claude Code

@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "matcher": "*",
         "hooks": [
           { "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/task-guard.py\"", "timeout": 30, "statusMessage": "agentkeel: checking the task record" }
         ]

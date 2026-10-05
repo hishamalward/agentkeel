@@ -192,14 +192,31 @@ def plan(repo, remove, hosts=("claude", "codex")):
         raise SystemExit("install: AGENTS.md has a broken agentkeel block (one marker missing or out of\n"
                          "order); fix the markers by hand. Nothing changed.")
     text = agents_text(current, fragment, remove)
+    if remove and os.path.exists(backup_path(agents_path)):
+        text = restore_text(agents_path, text)
     if text != current:
         verb = "remove the agentkeel block from" if remove else ("update the agentkeel block in" if START in current
                                                                   else "add the agentkeel block to")
-        if remove and not text.strip():
-            actions.append(("remove AGENTS.md (it held only the agentkeel block)", lambda: os.remove(agents_path)))
+        if remove and not text.strip() and not (os.path.exists(backup_path(agents_path)) and
+                                                 not os.path.exists(backup_path(agents_path) + ".absent")):
+            def drop_agents():
+                os.remove(agents_path)
+                for leftover in (backup_path(agents_path), backup_path(agents_path) + ".absent"):
+                    if os.path.exists(leftover):
+                        os.remove(leftover)
+                prune(os.path.dirname(backup_path(agents_path)))
+            actions.append(("remove AGENTS.md (it held only the agentkeel block)", drop_agents))
         else:
-            actions.append((f"{verb} AGENTS.md{'' if current or remove else ' (new file)'}",
-                            lambda: atomic_write(agents_path, text)))
+            def write_agents():
+                if not remove:
+                    save_original(agents_path)
+                atomic_write(agents_path, text)
+                if remove:
+                    for leftover in (backup_path(agents_path), backup_path(agents_path) + ".absent"):
+                        if os.path.exists(leftover):
+                            os.remove(leftover)
+                    prune(os.path.dirname(backup_path(agents_path)))
+            actions.append((f"{verb} AGENTS.md{'' if current or remove else ' (new file)'}", write_agents))
     return actions, skipped
 
 
@@ -218,7 +235,7 @@ def prune(d):
 
 def save_original(path):
     b = backup_path(path)
-    if os.path.exists(b):
+    if os.path.exists(b) or os.path.exists(b + ".absent"):
         return  # keep the first original across repeated installs
     os.makedirs(os.path.dirname(b), exist_ok=True)
     if os.path.exists(path):
@@ -245,6 +262,19 @@ def restore_or_write(path, new, remove):
             prune(os.path.dirname(b))
             return
     atomic_write(path, json.dumps(new, indent=2) + "\n")
+
+
+def restore_text(path, without_block):
+    """The original bytes when the file, without the agentkeel block, still says what it said before
+    install (whitespace aside); otherwise the text without the block, keeping the user's edits."""
+    b = backup_path(path)
+    try:
+        with open(b, "rb") as fh:
+            original = fh.read().decode("utf-8")
+    except OSError:
+        return without_block
+    norm = lambda t: "\n".join(l.rstrip() for l in t.replace("\r\n", "\n").strip().split("\n"))
+    return original if norm(original) == norm(without_block) else without_block
 
 
 def config_actions(repo, rel, template_name, remove, drop_when_empty, left_alone=()):
@@ -282,11 +312,11 @@ def config_actions(repo, rel, template_name, remove, drop_when_empty, left_alone
     return [(f"{verb} {rel} (other hooks and settings kept)", write)]
 
 
-PROBE = "agentkeel-doctor-probe.txt"
-PROBE_PROMPT = (f"This is an automated check of this repository's guard hooks. Without declaring any task, "
-                f"use your file editing tool once to create the file {PROBE} containing the word probe. "
-                "Do not retry, do not use the shell, and do not work around a refusal. Reply with the exact "
-                "error text you received, or 'created' if it worked.")
+def probe_prompt(name):
+    return (f"This is an automated check of this repository's guard hooks. Without declaring any task, "
+            f"use your file editing tool once to create the file {name} containing the word probe. "
+            "Do not retry, do not use the shell, and do not work around a refusal. Reply with the exact "
+            "error text you received, or 'created' if it worked.")
 
 
 def doctor(repo, hosts, live):
@@ -334,20 +364,26 @@ def doctor(repo, hosts, live):
         except OSError:
             row("codex", "trust", False, "~/.codex/config.toml not readable")
     if live:
+        import uuid
         for h in hosts:
-            probe = os.path.join(repo, PROBE)
+            # a name no file can already have, checked anyway: the doctor never touches a user file
+            name = f"agentkeel-doctor-probe-{uuid.uuid4().hex[:12]}.txt"
+            probe = os.path.join(repo, name)
+            if os.path.lexists(probe):
+                row(h, "live refusal reaches the agent", False, f"{name} already exists; not run")
+                continue
             if h == "claude":
-                cmd = ["claude", "-p", "--model", "sonnet", "--permission-mode", "bypassPermissions", PROBE_PROMPT]
+                cmd = ["claude", "-p", "--model", "sonnet", "--permission-mode", "bypassPermissions", probe_prompt(name)]
             else:
                 cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral",
-                       "-c", 'model_reasoning_effort="low"', "-C", repo, PROBE_PROMPT]
+                       "-c", 'model_reasoning_effort="low"', "-C", repo, probe_prompt(name)]
             env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")}
             try:
                 out = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=600, env=env)
                 text = out.stdout + out.stderr
             except (OSError, subprocess.TimeoutExpired) as exc:
                 text = str(exc)
-            created = os.path.exists(probe)
+            created = os.path.lexists(probe)  # it did not exist before this run, so it is ours
             refused = "no task is declared" in text
             row(h, "live refusal reaches the agent", refused and not created,
                 "refused before the write" if refused and not created else

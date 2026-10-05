@@ -10,7 +10,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(Bash|apply_patch|Edit|Write|NotebookEdit)$",
+        "matcher": "*",
         "hooks": [
           { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/task-guard.py\" --plugin", "timeout": 30 }
         ]

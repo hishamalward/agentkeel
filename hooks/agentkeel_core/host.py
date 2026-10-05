@@ -18,8 +18,19 @@ from dataclasses import dataclass, field
 
 from . import patch as patchmod
 
-READ_ONLY = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite", "TaskList",
-             "TaskGet", "ToolSearch", "view_image", "update_plan", "read_file", "list_dir"}
+# Tools that write no repository file: reads, planning, messaging, scheduling (a scheduled prompt
+# runs later as ordinary tool calls, which are judged then). Everything else whose name suggests a
+# write is a gap and refused; MCP tools are outside agentkeel's scope and pass (README says so).
+NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite", "TaskList",
+                 "TaskGet", "TaskCreate", "TaskUpdate", "TaskStop", "TaskOutput", "ToolSearch",
+                 "Skill", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "SendMessage",
+                 "ListAgents", "TeamCreate", "TeamDelete", "CronCreate", "CronDelete", "CronList",
+                 "ScheduleWakeup", "Monitor", "PushNotification", "EnterWorktree", "ExitWorktree",
+                 "Artifact", "ArtifactComments", "ArtifactData", "SendFeedback", "ReportFindings",
+                 "ListMcpResourcesTool", "ReadMcpResourceTool", "BashOutput", "KillShell",
+                 "view_image", "update_plan", "read_file", "list_dir", "web_search", "wait_agent",
+                 "list_agents", "close_agent", "send_input"}
+READ_ONLY = NO_FILE_WRITE
 MAY_WRITE_RE = re.compile(r"write|edit|patch|exec|shell|bash|command|run|spawn|agent|delete|move|create",
                           re.IGNORECASE)
 

@@ -197,3 +197,71 @@ class UserHookWithAgentkeelName(unittest.TestCase):
             run("--uninstall", "--apply")
             with open(os.path.join(repo, ".claude", "settings.json")) as fh:
                 self.assertEqual(fh.read(), original)
+
+
+class StageTwoReviewInstall(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.realpath(os.path.join(self._tmp.name, "repo"))
+        subprocess.run(["git", "init", "-q", self.repo], check=True)
+        self.env = {**os.environ, "AGENTKEEL_HOME": os.path.join(self._tmp.name, "home")}
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_install(self, *args):
+        return subprocess.run([sys.executable, INSTALL, self.repo, *args], capture_output=True, text=True, env=self.env)
+
+    def agents(self):
+        with open(os.path.join(self.repo, "AGENTS.md"), "rb") as fh:
+            return fh.read()
+
+    def test_agents_md_round_trips_byte_for_byte(self):
+        for original in (b"\n# Existing local rules\n\n\n", b"# A\r\n\r\nB\r\n", b"no newline at end", b"# R\n"):
+            with open(os.path.join(self.repo, "AGENTS.md"), "wb") as fh:
+                fh.write(original)
+            self.run_install("--apply"); self.run_install("--apply")
+            self.run_install("--uninstall", "--apply")
+            self.assertEqual(self.agents(), original)
+
+    def test_user_edits_after_install_survive_uninstall(self):
+        with open(os.path.join(self.repo, "AGENTS.md"), "w") as fh:
+            fh.write("# Rules\n")
+        self.run_install("--apply")
+        with open(os.path.join(self.repo, "AGENTS.md"), "a") as fh:
+            fh.write("\n## Added later by the user\n")
+        self.run_install("--uninstall", "--apply")
+        text = self.agents().decode()
+        self.assertIn("## Added later by the user", text); self.assertIn("# Rules", text)
+        self.assertNotIn("agentkeel:start", text)
+
+    def test_doctor_never_touches_an_existing_file(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("ak_install", INSTALL)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        old_probe = os.path.join(self.repo, "agentkeel-doctor-probe.txt")
+        with open(old_probe, "w") as fh:
+            fh.write("user data\n")
+        os.symlink("agentkeel-doctor-probe.txt", os.path.join(self.repo, "probe-link"))
+        real_run = subprocess.run
+
+        def refusal(cmd, *a, **k):
+            if cmd and cmd[0] in ("claude", "codex"):
+                return subprocess.CompletedProcess(cmd, 0, "AGENTKEEL: no task is declared for this session.", "")
+            return real_run(cmd, *a, **k)
+
+        def timeout(cmd, *a, **k):
+            if cmd and cmd[0] in ("claude", "codex"):
+                raise subprocess.TimeoutExpired(cmd, 1)
+            return real_run(cmd, *a, **k)
+
+        for fake in (refusal, timeout):
+            with mock.patch("subprocess.run", fake), \
+                    mock.patch.dict(os.environ, {"AGENTKEEL_HOME": self.env["AGENTKEEL_HOME"]}):
+                mod.doctor(self.repo, ("claude",), live=True)
+            with open(old_probe) as fh:
+                self.assertEqual(fh.read(), "user data\n")
+            self.assertTrue(os.path.islink(os.path.join(self.repo, "probe-link")))
+        self.assertEqual(sorted(f for f in os.listdir(self.repo) if f.startswith("agentkeel-doctor-probe")),
+                         ["agentkeel-doctor-probe.txt"])

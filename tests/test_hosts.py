@@ -297,3 +297,32 @@ class PluginScope(RepoCase):
         self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)
         os.remove(os.path.join(self.repo, "agentkeel.json"))
         self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)
+
+
+class ConfiguredRoute(unittest.TestCase):
+    """The shipped hook configurations and the adapter together: what reaches the task guard."""
+
+    CONFIGS = [os.path.join(ROOT, "templates", "claude-hooks.json"), os.path.join(ROOT, "templates", "codex-hooks.json"),
+               os.path.join(ROOT, "hooks", "hooks.json")]
+
+    @staticmethod
+    def matches(matcher, tool):
+        import re
+        return matcher in ("*", "") or re.fullmatch(matcher, tool) is not None or re.search(matcher, tool) is not None
+
+    def task_guard_matchers(self, path):
+        with open(path) as fh:
+            groups = json.load(fh)["hooks"]["PreToolUse"]
+        return [g["matcher"] for g in groups if any("task-guard.py" in h["command"] for h in g["hooks"])]
+
+    def test_unknown_writer_reaches_the_guard_and_is_refused(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            for cfg in self.CONFIGS:
+                for tool, want in (("write_file_v2", 2), ("write_stdin", 2), ("Read", 0), ("CronCreate", 0),
+                                   ("TaskCreate", 0), ("mcp__fs__write_file", 0)):
+                    routed = any(self.matches(m, tool) for m in self.task_guard_matchers(cfg))
+                    self.assertTrue(routed, (cfg, tool))
+                    code, err = run_hook("task-guard.py", {"tool_name": tool, "cwd": home, "session_id": "s",
+                                                           "tool_input": {}}, env={"AGENTKEEL_HOME": home})
+                    self.assertEqual(code, want, (cfg, tool, err))
