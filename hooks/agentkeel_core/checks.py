@@ -2,7 +2,8 @@
 
 Used by the push gate: when a repository's agentkeel.json names a required check
 (`"require_check_before_push": "agentkeel-required"`), an agent's push or PR merge into a
-protected branch needs that check to have passed on the exact commit being shipped. Git refuses a
+protected branch needs that check to have passed on the exact commit being shipped (a PR merge is
+refused: GitHub writes a new, unchecked commit for it). Git refuses a
 non-fast-forward push and the guard refuses a force push, so a pushed commit already contains the
 branch it lands on: a green check on that commit is a check on what main becomes.
 
@@ -88,8 +89,3 @@ def conclusion(root, remote, sha, name, environ=os.environ):
         return "success", f"'{name}' passed on {sha[:12]}"
     return "failure", f"'{name}' ended {latest.get('conclusion')} on {sha[:12]}"
 
-
-def pr_head(root, pr, environ=os.environ):
-    gh = environ.get("AGENTKEEL_GH") or "gh"
-    out, _ = _run([gh, "pr", "view", *([pr] if pr else []), "--json", "headRefOid", "-q", ".headRefOid"], root)
-    return out or None

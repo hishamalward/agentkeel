@@ -172,7 +172,9 @@ runs after a push to `main` reports after the deploy started. A required check t
 docs-only changes would block them forever, so the one required job always reports.
 Where branch protection is not available (GitHub Free, private repository), the
 same rule is held for agents by the push gate: with `require_check_before_push` in
-`agentkeel.json`, an agent's push or `gh pr merge` into a protected branch needs the check to have
-passed on the exact commit, and the deploy waits for CI for everyone else.
+`agentkeel.json`, an agent's push into a protected branch needs the check to have passed on the
+exact commit, and the deploy waits for CI for everyone else. The gate accepts only a push it can
+prove (an explicit source, alone in its call) and refuses `gh pr merge`, whose result is a new,
+unchecked commit.
 **Replaces**: "G4: tests green on the branch" as guidance only.
 

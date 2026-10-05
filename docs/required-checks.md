@@ -19,8 +19,12 @@ section).
 GitHub Free has no branch protection or rulesets on private repositories (the API answers "Upgrade
 to GitHub Pro or make this repository public to enable this feature"). There, use the push gate:
 put `"require_check_before_push": "agentkeel-required"` in `agentkeel.json`, and an agent's push
-or `gh pr merge` into a protected branch is refused unless that check passed on the exact commit
-being shipped. A human can still push to `main` by hand, but with the deploy waiting for CI an
+into a protected branch is refused unless that check passed on the exact commit being shipped.
+The gate accepts only a push it can prove: one that names its source
+(`git push origin <tested-branch-or-sha>:main`) and runs alone in its call, because an earlier
+command in the same call could move the branch after the gate reads it. A bare push, `--all`, a
+configured or wildcard refspec, and `gh pr merge` are refused: GitHub writes a new commit for
+every PR merge mode, and no check has run on it. A human can still push to `main` by hand, but with the deploy waiting for CI an
 untested commit is not deployed. The gate asks GitHub through `gh`, using the check-runs API or,
 for a token that cannot read checks, the Actions jobs of that commit; if it cannot get an answer,
 it refuses.
@@ -41,9 +45,12 @@ resources were deleted afterwards.
 1. Push the task branch: `git push origin feat/<task>` (needs the `push` permission).
 2. Wait for `agentkeel-required` to pass on that commit (`gh pr checks`, or
    `gh run watch` on the branch's run).
-3. Move `main` to the same commit: fast-forward locally (needs `merge`) and push it (needs
-   `push`), or merge the pull request (`gh pr merge`, needs both). Because the commit is the
-   same, its passing check is already there and the protected branch accepts it.
+3. Move `main` to the same commit, in its own call: `git push origin <tested-sha>:main` (needs
+   `push`). The commit must already contain `main` (rebase and test again if `main` moved), so the
+   push is a fast-forward and `main` receives exactly the tested commit. GitHub then marks an open
+   pull request for that branch as merged. With branch protection, `gh pr merge` (needs `merge` and
+   `push`) also works, because GitHub requires the check on the result; under the push gate it is
+   refused.
 4. The deploy starts only once the check on that commit is green.
 
 A commit that never passed the check cannot reach `main` this way: GitHub refuses the push to a

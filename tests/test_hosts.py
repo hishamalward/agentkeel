@@ -165,30 +165,47 @@ class SessionFromEnv(unittest.TestCase):
         self.assertEqual(self.record.session_from_env({**both, "AGENTKEEL_SESSION_ID": "x"}), "x")
 
 
-class SessionHint(RepoCase):
-    """The guard sees the true session id; task.py uses it when its environment cannot tell."""
+class SessionOwnership(RepoCase):
+    """A task record belongs to one session: no shared hint, and only the caller's own id inline."""
 
-    def task(self, env):
+    def task(self, env, *args):
         import subprocess, sys
         from helpers import HOOKS
         clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "AGENTKEEL_SESSION_ID")}
-        return subprocess.run([sys.executable, os.path.join(HOOKS, "task.py"), "start", "h", "--size", "small",
-                               "--allow", "implement"], cwd=self.repo, capture_output=True, text=True,
-                              env={**clean, **self.env, **env})
+        return subprocess.run([sys.executable, os.path.join(HOOKS, "task.py"), *args], cwd=self.repo,
+                              capture_output=True, text=True, env={**clean, **self.env, **env})
 
-    def test_ambiguous_environment_uses_the_guards_hint(self):
-        cmd = "python3 .claude/hooks/task.py start h --size small --allow implement"
-        self.assertEqual(self.hook(codex_bash(self.repo, cmd, session="codex-thread"))[0], 0)
-        both = {"CODEX_THREAD_ID": "codex-thread", "CLAUDE_CODE_SESSION_ID": "outer-claude"}
-        out = self.task(both)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(self.record("codex-thread")["task"], "h")
+    def test_parent_guard_call_cannot_hand_its_session_to_a_child(self):
+        from agentkeel_core import record
+        self.declare(task="parent-review", allow=("review",), session="codex-thread")
+        # the parent's guard sees a task.py command in this folder, then a nested child runs task.py
+        self.assertEqual(self.hook(codex_bash(self.repo, "python3 task.py show", session="codex-thread"))[0], 0)
+        both = {"CODEX_THREAD_ID": "codex-thread", "CLAUDE_CODE_SESSION_ID": "child-claude"}
+        self.task(both, "start", "child", "--size", "small", "--allow", "implement")
+        if record.nearest_host() != "codex":  # the child is not itself under a Codex process here
+            self.assertEqual(self.record("codex-thread")["task"], "parent-review")
 
-    def test_hint_must_name_a_candidate_and_be_fresh(self):
-        self.assertEqual(self.hook(codex_bash(self.repo, "python3 task.py show", session="someone-else"))[0], 0)
-        out = self.task({"CODEX_THREAD_ID": "a", "CLAUDE_CODE_SESSION_ID": "b"})
-        # nearest_host may still resolve this from the test runner's own ancestry; never "someone-else"
-        self.assertFalse(os.path.exists(os.path.join(self.home, "tasks", "someone-else.json")))
+    def test_inline_id_must_be_the_callers_own(self):
+        cmd = lambda v: f"AGENTKEEL_SESSION_ID={v} python3 task.py start y --size small --allow implement"
+        code, err = self.hook(codex_bash(self.repo, cmd("someone-else"), session="me"))
+        self.assertEqual(code, 2); self.assertIn("not this session's id", err)
+        self.assertEqual(self.hook(codex_bash(self.repo, cmd("me"), session="me"))[0], 0)
+        self.assertEqual(self.hook(codex_bash(self.repo, "env AGENTKEEL_SESSION_ID=x python3 task.py show", session="me"))[0], 2)
+        code, err = self.hook(codex_bash(self.repo, "export AGENTKEEL_SESSION_ID=me", session="me"))
+        self.assertEqual(code, 2); self.assertIn("refusing to export", err)
+
+    def test_ambiguous_environment_fails_closed_and_says_how(self):
+        out = self.task({"AGENTKEEL_SESSION_ID": "", "CODEX_THREAD_ID": "a", "CLAUDE_CODE_SESSION_ID": "b"}, "start", "z", "--size", "small", "--allow", "review")
+        from agentkeel_core import record
+        if record.nearest_host() is None:
+            self.assertEqual(out.returncode, 2); self.assertIn("AGENTKEEL_SESSION_ID=<id>", out.stderr)
+
+    def test_session_start_prints_the_id(self):
+        import subprocess, sys
+        from helpers import HOOKS
+        out = subprocess.run([sys.executable, os.path.join(HOOKS, "session-start.py")], text=True, capture_output=True,
+                             input=json.dumps(fixture("codex", "session-start") | {"cwd": self.repo}), env={**os.environ, **self.env})
+        self.assertIn("AGENTKEEL_SESSION_ID=" + fixture("codex", "session-start")["session_id"], out.stdout)
 
 
 class PlanSizeOnCodex(unittest.TestCase):

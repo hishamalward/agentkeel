@@ -354,6 +354,16 @@ def judge_git(sc, rec, environ, session, line):
                 where = (hits[0] if hits[0] != "*" else "every branch") if hits else ", ".join(op.targets)
                 need(rec, "push", f"a push to '{where}'")
                 if hits and pol["require_check"]:
+                    if line.get("earlier"):
+                        raise Block(
+                            f"refusing a push to '{where}' that shares its call with other commands: an earlier\n"
+                            "command can move the branch after this check reads it, so the commit checked would\n"
+                            "not be the commit sent. Run the push alone, in its own call.")
+                    if not op.explicit or "*" in hits:
+                        raise Block(
+                            f"refusing a push that reaches '{where}' without naming what it sends (a bare push,\n"
+                            "--all, a configured or wildcard refspec): the commit that lands cannot be proven.\n"
+                            "Name the tested commit: git push origin <tested-branch-or-sha>:main")
                     for dst in hits:
                         src = op.sources.get(dst) or "HEAD"
                         sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
@@ -373,22 +383,36 @@ def require_green(root, remote, sha, name, dst, environ):
             "Push the branch, wait for the check to pass on it, then move main to that same commit.")
 
 
+def judge_session_claim(sc, session):
+    """`AGENTKEEL_SESSION_ID` names the session task.py acts for. Only the caller's own id may be
+    given, and only inline (VAR=id command), so it cannot reach another agent's process."""
+    if record.SESSION_VAR in sc.env and sc.env[record.SESSION_VAR] != session:
+        raise Block(
+            f"refusing {record.SESSION_VAR}={sc.env[record.SESSION_VAR]}: it is not this session's id, and a task\n"
+            "record belongs to the session that declared it. Use the id printed at session start.")
+    if sc.name in ("export", "declare", "typeset", "set", "setenv") and any(
+            a.split("=", 1)[0] == record.SESSION_VAR for a in sc.argv[1:]):
+        raise Block(
+            f"refusing to export {record.SESSION_VAR}: an exported id reaches every process this shell\n"
+            "starts, other agents included. Give it inline, to the one command: "
+            f"{record.SESSION_VAR}=<id> python3 task.py ...")
+
+
 def judge_command(command, cwd, rec, environ, session, line=None):
     line = line if line is not None else {"branches": {}, "aliases": {}}
     for sc in shell.commands(command, cwd):
         argv = normalise(sc.argv)
         if not argv:
             continue
-        if session and any(os.path.basename(a) == "task.py" for a in sc.argv[:3]):
-            record.write_session_hint(sc.cwd, session, environ)
+        judge_session_claim(sc, session)
         if is_task_approve(sc.argv):
             raise Block(
                 "`task.py approve` is the human's command (gate G1): an approval the agent can\n"
                 "produce is not the human's consent. Ask the human to run it in their own terminal.")
-        if argv[0] == "git":
-            judge_git(sc, rec, environ, session, line)
-            continue
-        if "--dry-run" in argv:
+        if argv[0] == "git" or "--dry-run" in argv:
+            if argv[0] == "git":
+                judge_git(sc, rec, environ, session, line)
+            line["earlier"] = line.get("earlier", 0) + 1
             continue
         texts = {" ".join(argv), " ".join([os.path.basename(sc.argv[0])] + sc.argv[1:])}
         root = gitops.toplevel(sc.cwd)
@@ -397,10 +421,12 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             if any(re.search(p, t) for p in patterns for t in texts):
                 need(rec, perm, f"`{' '.join(sc.argv)[:60]}`")
         if pol["require_check"] and argv[:3] == ["gh", "pr", "merge"]:
-            pr = next((a for a in argv[3:] if not a.startswith("-")), "")
-            sha = checks.pr_head(sc.cwd, pr, environ)
-            require_green(os.path.realpath(root) if root else sc.cwd, "origin", sha or "",
-                          pol["require_check"], "the pull request's base", environ)
+            raise Block(
+                "refusing `gh pr merge`: GitHub writes a new commit for --merge, --squash and --rebase,\n"
+                "and no check has run on it, so the tested commit is not the one main receives.\n"
+                "Ship the tested commit itself, in its own call: git push origin <tested-sha>:main\n"
+                "(it must already contain main; GitHub then marks the pull request merged).")
+        line["earlier"] = line.get("earlier", 0) + (sc.name not in ("cd", "pushd", "popd"))
 
 
 def decide(payload, environ=os.environ):

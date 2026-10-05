@@ -14,7 +14,9 @@ separate answers to separate questions. "merge and push" in the human's request 
 --allow implement,merge,push; a distribution build is never implied by shipping.
 
 The record is bound to this session (CLAUDE_CODE_SESSION_ID in Claude Code, CODEX_THREAD_ID in
-Codex, AGENTKEEL_SESSION_ID for other hosts) and stored in AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it.
+Codex, AGENTKEEL_SESSION_ID given inline for other hosts or when both are set) and stored in
+AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it: the guard refuses an
+AGENTKEEL_SESSION_ID that is not the caller's own id.
 `approve` is refused when an agent runs it through its shell tool; the human runs it in a
 terminal of their own, outside the agent session.
 """
@@ -44,10 +46,10 @@ def realpath(p, cwd):
 def start(args, environ):
     session = record.session_from_env(environ)
     if not session:
-        return fail("no session id. Run this from the agent session (Claude Code sets\n"
-                    "CLAUDE_CODE_SESSION_ID, Codex sets CODEX_THREAD_ID), or set AGENTKEEL_SESSION_ID\n"
-                    "for another host. If both are set and the running agent cannot be found, set\n"
-                    "AGENTKEEL_SESSION_ID to the right one.")
+        return fail("no session id: cannot tell which session runs this. Run it from the agent\n"
+                    "session (Claude Code sets CLAUDE_CODE_SESSION_ID, Codex sets CODEX_THREAD_ID). If both are set and the\n"
+                    "running agent cannot be found, give your own id inline, as printed at session start:\n"
+                    "  AGENTKEEL_SESSION_ID=<id> python3 task.py ...")
     if not args.task or set(args.task) - TASK_ID_CHARS:
         return fail("task id must be kebab-case (a-z, 0-9, -), e.g. json-flag")
     perms = [p.strip() for p in (args.allow or "").split(",") if p.strip()]

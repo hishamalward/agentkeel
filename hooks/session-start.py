@@ -31,7 +31,10 @@ def main():
           "your reading of the request, state that reading in your first update, and proceed:\n"
           f'  python3 "{task}" start <task-id> --size small|medium|large --allow <permissions>\n'
           "Permissions: review, implement, merge, push, distribution-build, store-submission, paid-job.\n"
-          "Code changes happen in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>).")
+          "Code changes happen in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>)."
+          + (f"\nYour session id is {payload['session_id']}. If task.py says it cannot tell which session\n"
+             f"runs it, prefix the command with AGENTKEEL_SESSION_ID={payload['session_id']}"
+             if payload.get("session_id") else ""))
     return 0
 
 

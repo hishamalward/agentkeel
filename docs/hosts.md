@@ -45,10 +45,12 @@ visible gap.
   and runs the same approval check a Claude `Edit` gets; a patch whose hunks do not fit a spec is
   refused rather than guessed at.
 - **Choosing the session inside a shell.** When the agent's shell cannot tell which session runs
-  it (both hosts' variables set, a sandbox that hides the process tree), `task.py` uses the
-  guard's hint: the guard writes the payload's true session id for that folder just before it
-  lets a `task.py` command run, valid for 60 seconds, and it is used only when it names one of the
-  candidates. Keep `AGENTKEEL_HOME` writable from the agent's sandbox (Codex `workspace-write`
+  it (both hosts' variables set, a sandbox that hides the process tree), `task.py` refuses rather
+  than guess, because a guess can act on another session's task record. The session-start
+  message prints the session's id; the agent then gives it inline,
+  `AGENTKEEL_SESSION_ID=<id> python3 task.py ...`, and the guard, which sees the true id in the
+  payload, refuses any other value and any `export` of it (an exported id would reach every
+  process the shell starts, other agents included). Keep `AGENTKEEL_HOME` writable from the agent's sandbox (Codex `workspace-write`
   blocks writes outside the workspace; add the folder or use a profile that allows it).
 - **Removing the Codex plugin fully.** After `codex plugin remove <plugin>@<marketplace>` and
   `codex plugin marketplace remove <marketplace>`, delete the `hooks.state."<plugin>@<marketplace>:..."`

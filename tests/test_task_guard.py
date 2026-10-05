@@ -534,8 +534,6 @@ FAKE_GH = """#!/usr/bin/env python3
 import json, os, sys
 state = json.load(open(os.environ["FAKE_GH_STATE"]))
 a = sys.argv[1:]
-if a[:2] == ["pr", "view"]:
-    print(state.get("pr_head", "")); sys.exit(0)
 if a[:1] == ["api"]:
     sha = a[1].split("/commits/")[1].split("/")[0]
     runs = state.get("runs", {}).get(sha, [])
@@ -561,11 +559,11 @@ class PushGate(RepoCase):
         self.sha = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
         self.declare(allow=("implement", "merge", "push"))
 
-    def runs(self, *conclusions, status="completed"):
+    def runs(self, *conclusions, status="completed", sha=None):
         runs = [{"name": "agentkeel-required", "status": status, "conclusion": c,
                  "started_at": f"2026-10-04T00:00:0{i}Z"} for i, c in enumerate(conclusions)]
         with open(self.state, "w") as fh:
-            json.dump({"runs": {self.sha: runs}, "pr_head": self.sha}, fh)
+            json.dump({"runs": {sha or self.sha: runs}}, fh)
 
     def push(self, command="git push origin feat/x:main"):
         return self.hook(self.bash(command), env={"AGENTKEEL_GH": self.gh, "FAKE_GH_STATE": self.state})
@@ -573,7 +571,37 @@ class PushGate(RepoCase):
     def test_green_check_on_the_exact_commit_ships(self):
         self.runs("success")
         self.assertEqual(self.push()[0], 0)
-        self.assertEqual(self.push("gh pr merge 3 --merge")[0], 0)
+        self.assertEqual(self.push(f"git push origin {self.sha}:main")[0], 0)
+        self.assertEqual(self.push(f"cd {self.repo} && git push origin feat/x:main")[0], 0)
+
+    def ahead(self):
+        """feat/x one commit ahead of main: HEAD and main are different commits."""
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "feature")
+        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+    def test_a_push_that_does_not_name_its_source_is_refused(self):
+        self.runs("success", sha=self.ahead())  # HEAD green, main never checked
+        code, err = self.push("git push origin --all")
+        self.assertEqual(code, 2); self.assertIn("without naming what it sends", err)
+        git(self.repo, "config", "remote.origin.push", "main")
+        code, err = self.push("git push origin")
+        self.assertEqual(code, 2); self.assertIn("without naming what it sends", err)
+
+    def test_a_ref_moved_earlier_in_the_same_call_is_refused(self):
+        self.ahead()
+        self.runs("success")  # main green, feat/x never checked
+        for cmd in (f"git -C {self.repo} checkout -q main && git merge --ff-only feat/x && git push origin main",
+                    "git fetch . feat/x:main && git push origin main",
+                    "./ship.sh; git push origin main"):
+            code, err = self.push(cmd)
+            self.assertEqual(code, 2, cmd); self.assertIn("Run the push alone", err)
+        self.assertEqual(self.push("git push origin main")[0], 0)  # main itself, alone: its own check
+
+    def test_pr_merge_is_refused_even_with_a_green_head(self):
+        self.runs("success")
+        code, err = self.push("gh pr merge 3 --merge")
+        self.assertEqual(code, 2); self.assertIn("new commit", err)
+        self.assertEqual(self.push("gh pr merge 3 --squash")[0], 2)
 
     def test_failed_missing_or_pending_check_refused(self):
         for setup, word in ((lambda: self.runs("failure"), "ended failure"), (lambda: self.runs(), "no 'agentkeel-required'"),

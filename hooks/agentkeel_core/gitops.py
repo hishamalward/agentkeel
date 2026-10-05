@@ -272,7 +272,10 @@ def push_ops(call, branch):
             sources[_strip_ref(dst)] = src_part or "HEAD"
             if spec.startswith("+"):
                 force = True
-    ops = [Op("push", targets=targets, local=(remote == "."), remote=remote, sources=sources)]
+    # explicit: every destination came from a refspec on this command line, so its source is known.
+    # A bare push (current branch, upstream, remote.*.push) or --all depends on state outside it.
+    ops = [Op("push", targets=targets, local=(remote == "."), remote=remote, sources=sources,
+              explicit=bool(refspecs) and not everything)]
     if force:
         ops.append(Op("destructive", name="force push"))
     for d in deleted:

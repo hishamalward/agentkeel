@@ -73,49 +73,19 @@ def nearest_host(pid=None):
     return None
 
 
-HINT_SECONDS = 60
+SESSION_VAR = "AGENTKEEL_SESSION_ID"
 
 
-def _hint_path(cwd, environ=os.environ):
-    import hashlib
-    key = hashlib.sha256(os.path.realpath(cwd).encode()).hexdigest()[:20]
-    return os.path.join(home(environ), "session-hints", key + ".json")
-
-
-def write_session_hint(cwd, session_id, environ=os.environ):
-    """Left by the guard just before a command that runs task.py: the hook payload always carries
-    the true session id, and the command's own environment may not (nested agents, sandboxes)."""
-    try:
-        atomic_write_json(_hint_path(cwd, environ), {"session_id": session_id, "at": time.time()})
-    except OSError:
-        pass
-
-
-def _read_hint(cwd, environ=os.environ):
-    try:
-        with open(_hint_path(cwd, environ)) as fh:
-            h = json.load(fh)
-        if time.time() - float(h.get("at", 0)) <= HINT_SECONDS:
-            return h.get("session_id")
-    except Exception:
-        pass
-    return None
-
-
-def session_from_env(environ=os.environ, cwd=None):
-    """This command's agent session id: AGENTKEEL_SESSION_ID; else the one host variable that is
-    set; else (both set, or none) the guard's fresh hint for this folder; else the variable of the
-    nearest agent process."""
-    if environ.get("AGENTKEEL_SESSION_ID"):
-        return environ["AGENTKEEL_SESSION_ID"]
+def session_from_env(environ=os.environ):
+    """This command's agent session id: AGENTKEEL_SESSION_ID (the guard lets an agent give only its
+    own, inline); else the one host variable that is set; else, with both set, the variable of the
+    nearest agent process. When that cannot be told (a sandbox that hides the process tree), None:
+    task.py refuses rather than guess, because a guess can act on another session's record."""
+    if environ.get(SESSION_VAR):
+        return environ[SESSION_VAR]
     present = {h: environ[v] for h, v in HOST_SESSION_ENV.items() if environ.get(v)}
     if len(present) == 1:
         return next(iter(present.values()))
-    # Ambiguous or absent. First the guard's hint for this folder (it saw the true session id of
-    # the call about to run this command) when it names a candidate; then the nearest agent process.
-    hint = _read_hint(cwd or os.getcwd(), environ)
-    if hint and (not present or hint in present.values()):
-        return hint
     if present:
         h = nearest_host()
         if h and present.get(h):
