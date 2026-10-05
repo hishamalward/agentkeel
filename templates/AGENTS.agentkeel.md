@@ -16,9 +16,10 @@ past it. Size and permissions are separate: changing one never changes the other
 - Size (how much process): small = own branch and worktree, no plan or subagents, one check;
   medium = tests and one review round; large = an approved boundary, a plan gated once, reviews.
 - Permissions (which actions): review (writes only --write-root report folders, outside the
-  repo), implement (edit, commit with explicit paths, local checks and builds), merge (move a
-  protected branch), push (any push), distribution-build, store-submission, paid-job. "Merge and
-  push" grants both and never a distribution build. Finishing work and shipping it are separate.
+  repo), implement (edit, commit with explicit paths, local checks and builds, local pushes
+  between feature branches), merge (move a protected branch), push (any remote push),
+  distribution-build, store-submission, paid-job. "Merge and push" grants both and never a
+  distribution build. Finishing work and shipping it are separate.
 - Worktrees: every code task works in its own worktree, never the shared checkout.
   `git worktree add ../<repo>-<task> -b feat/<task>` records it. Temp files go in the scratch
   folder that `task.py start` prints.

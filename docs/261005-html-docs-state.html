@@ -14,8 +14,9 @@
   <div class="kicker">Feature state &middot; created 261005</div>
   <h1>HTML documentation</h1>
   <p class="lede">Every document is one authored HTML page in a flat <code>docs/</code> folder, in the
-  present tense. A large task's boundary on its state page is what the human approves, and
-  <code>main</code> moves only when the docs check passes.</p>
+  present tense. A large task's boundary on its state page is what the human approves. The docs
+  check runs before an agent's push to <code>main</code> and before a local move to a known commit,
+  and CI runs it for everyone.</p>
   <nav class="toc" aria-label="On this page"><a href="#state-now">State now</a><a href="#behavior">Behavior</a><a href="#approval">Approval</a><a href="#check">Docs check</a><a href="#remaining">Remaining</a><a href="#limitations">Limitations</a><a href="#verification">Verification</a></nav>
 </header>
 

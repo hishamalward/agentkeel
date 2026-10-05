@@ -129,15 +129,22 @@
   git call with its options and aliases. <em>Why:</em> a guard that read only the first command let
   <code>git push origin feat &amp;&amp; git push origin main</code> through.</p>
 
-  <h3 id="moves">A protected branch moves only to the commit that was checked</h3>
-  <p>A push gated on CI, and a local move in a repository with HTML docs, name the commit by its
-  full SHA and run alone in their call. <em>Why:</em> a branch name can move between the check and
-  the move, by another agent or by an earlier command in the same call.</p>
+  <h3 id="moves">A checked move lands the commit that was checked</h3>
+  <p>The guard checks a move of a protected branch whose new commit is known before it runs: an
+  agent's push, and a local <code>merge --ff-only</code>, <code>reset</code>, <code>update-ref</code>,
+  <code>fetch .</code> or <code>push .</code>. Where that move is gated (a push gated on CI, or a local
+  move in a repository with HTML docs), it names the commit by its full SHA and runs alone in its
+  call. <em>Why:</em> a branch name can move between the check and the move, by another agent or by
+  an earlier command in the same call.</p>
+  <p>A move whose new commit is not known in advance (a commit made on <code>main</code>, a rebase, a
+  non-fast-forward merge) needs the <code>merge</code> permission, and its docs check runs later: at
+  the push and in CI (<a href="261005-html-docs-state.html#limitations">limits</a>).</p>
 
-  <h3 id="fail-closed">A move the guard cannot judge is refused</h3>
-  <p>An error while the guard judges a move or push of a protected branch refuses it. Elsewhere, a
-  hook that cannot read its input allows, so a broken guard never stops ordinary work.
-  <em>Why:</em> an HTML asset once crashed the docs check, and the old rule then allowed the move.</p>
+  <h3 id="fail-closed">A check that fails to run refuses the move</h3>
+  <p>When the guard checks a move or push of a protected branch and the check itself raises an
+  error, the move is refused. Elsewhere, a hook that cannot read its input allows, so a broken
+  guard never stops ordinary work. <em>Why:</em> an HTML asset once crashed the docs check, and the
+  old rule then allowed the move.</p>
 
   <h3 id="overrides">Overrides are written on the command, apply once, and are logged</h3>
   <p><code>AGENTKEEL_ALLOW_DESTRUCTIVE=1</code> and <code>AGENTKEEL_SHOW_SECRETS=1</code> count only as

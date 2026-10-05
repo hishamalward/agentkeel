@@ -2,7 +2,7 @@
   <title id="t">AgentKeel mark, one color</title>
   <style>
     .hull{fill:#000}.keel{fill:#000}.work{fill:#000}.water{stroke:#000}
-    
+
   </style>
   <path class="water" d="M0.5 35.5h63" stroke-width="2.2" stroke-linecap="round" fill="none"/>
   <rect class="work" x="14" y="21.5" width="10.5" height="7.5" rx="1.6"/>

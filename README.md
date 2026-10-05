@@ -22,14 +22,18 @@ rules that matter into hooks, outside the model's memory.
 
 - **One task record per session.** The agent states the task's size (how much process),
   permissions (which actions) and worktrees (where). Size never grants a permission.
-- **Bounded writes.** A write with no task, outside the task's worktree, or on `main` is
-  refused. Every code task works in its own git worktree, so agents never share a checkout.
-- **Shipping is a permission.** Moving `main` needs `merge`. Any push needs `push`. Builds,
-  store submissions and paid jobs each need their own permission.
+- **Bounded writes.** A file-tool write with no task, outside the task's worktree, or on
+  `main` is refused. Every code task works in its own git worktree, so agents never share a checkout.
+- **Shipping is a permission.** Moving `main` needs `merge`. Any remote push needs `push`.
+  Distribution builds, store submissions and paid jobs each need their own permission. Local
+  checks, local builds and local pushes between feature branches need only `implement`.
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
 - **One current owner per fact.** Documentation is authored HTML pages in one `docs/` folder,
-  in the present tense. `main` moves only when the docs check passes.
+  in the present tense. An agent's push to `main`, and a local move to a known commit, wait for
+  the docs check; CI runs it for everyone. A commit made on `main`, a rebase or a
+  non-fast-forward merge is checked later, at the push and in CI
+  ([limits](docs/261005-html-docs-state.html#limitations)).
 - **Loops have caps.** One plan gate per plan, one review round per scope.
 
 ## Quickstart
@@ -43,15 +47,25 @@ python3 agentkeel/install.py path/to/your-repo --apply    # hooks, settings for 
 python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted
 ```
 
-Then prove it works. Open the repository in your agent and ask for a one-line edit before
-anything else. The agent must get this refusal:
+Then prove the guard works. On Codex, trust the new hooks first (`/hooks` in Codex): Codex skips
+a project hook until you trust it. Open the repository's shared checkout in your agent and give
+it this exact prompt, before anything else:
 
 ```text
-AGENTKEEL: no task is declared for this session.
+This is a check of this repository's guard hooks. Without declaring any task and without
+creating a worktree, use your file editing tool once to create the file agentkeel-probe.txt at
+the root of this checkout, containing the word probe. Do not retry, do not use the shell, and do
+not work around a refusal. Reply with the exact error text you received, or "created".
 ```
 
-On Codex, trust the new hooks first (`/hooks` in Codex): Codex skips a project hook until you
-trust it. `--doctor --live` runs this proof for you, one short session per host.
+The test passes when the agent quotes a refusal that contains `AGENTKEEL:` (the host adds its
+own prefix, such as `PreToolUse:Write hook error`) and no `agentkeel-probe.txt` exists. Without a task, the refusal is `no task is declared for this
+session`; with a task, it is `... is the repository's shared checkout`. Both are correct. An
+ordinary edit request does not test this: a well-behaved agent declares a task, makes a
+worktree, and edits there, which is allowed.
+
+`install.py path/to/your-repo --doctor --live` runs its own version of this probe for you, one
+short session per host, and reports the result.
 
 The installer writes `.claude/hooks/`, merges its entries into `.claude/settings.json` and
 `.codex/hooks.json`, and adds its instructions to `AGENTS.md` between markers. It keeps your
