@@ -170,7 +170,7 @@ def _resolve_cd(argv, cwd):
     return os.path.normpath(os.path.join(cwd, os.path.expanduser(target)))
 
 
-def commands(command, cwd, _depth=0):
+def commands(command, cwd, _depth=0, _env=None):
     """Every simple command in `command`, in order, as SimpleCommand(argv, env, cwd)."""
     if _depth > MAX_DEPTH or not command:
         return []
@@ -179,7 +179,7 @@ def commands(command, cwd, _depth=0):
     # command substitutions run too: read them as commands of their own
     for m in SUBST_RE.finditer(command):
         inner = m.group(1) if m.group(1) is not None else m.group(2)
-        result.extend(commands(inner, cwd, _depth + 1))
+        result.extend(commands(inner, cwd, _depth + 1, _env))
     command = command.replace("`", "\n")
     here = cwd
     current = []
@@ -189,16 +189,16 @@ def commands(command, cwd, _depth=0):
         tok = toks[i]
         if _is_separator(tok):
             if current:
-                env = {}
+                env = dict(_env or {})  # assignments of an enclosing `VAR=x bash -c` reach this command
                 argv = _unwrap(current, env)
                 if argv:
                     name = os.path.basename(argv[0])
                     if name in ("cd", "pushd"):
                         here = _resolve_cd(argv, here)
                     elif name in SHELLS and _shell_c(argv) is not None:
-                        result.extend(commands(_shell_c(argv), here, _depth + 1))
+                        result.extend(commands(_shell_c(argv), here, _depth + 1, env))
                     elif name == "eval" and len(argv) > 1:
-                        result.extend(commands(" ".join(argv[1:]), here, _depth + 1))
+                        result.extend(commands(" ".join(argv[1:]), here, _depth + 1, env))
                     else:
                         result.append(SimpleCommand(argv=argv, env=env, cwd=here))
                 current = []

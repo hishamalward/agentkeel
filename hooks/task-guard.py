@@ -363,11 +363,19 @@ def judge_git(sc, rec, environ, session, line):
                         raise Block(
                             f"refusing a push that reaches '{where}' without naming what it sends (a bare push,\n"
                             "--all, a configured or wildcard refspec): the commit that lands cannot be proven.\n"
-                            "Name the tested commit: git push origin <tested-branch-or-sha>:main")
+                            "Name the tested commit: git push origin <full-tested-sha>:main")
                     for dst in hits:
                         src = op.sources.get(dst) or "HEAD"
+                        if not FULL_SHA_RE.match(src):
+                            raise Block(
+                                f"refusing to push '{src}' to '{dst}': a branch name or HEAD can move while the check\n"
+                                "is read (another agent shares the branches), so the commit checked may not be the\n"
+                                "commit sent. Push the tested commit by its full SHA: git push origin <full-sha>:main")
                         sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
                         require_green(root, op.remote, sha, pol["require_check"], dst, environ)
+
+
+FULL_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def require_green(root, remote, sha, name, dst, environ):
@@ -381,6 +389,20 @@ def require_green(root, remote, sha, name, dst, environ):
             f"refusing to ship {sha[:12]} to '{dst}': {detail}.\n"
             "This repository requires the check to pass on the exact commit before main moves.\n"
             "Push the branch, wait for the check to pass on it, then move main to that same commit.")
+
+
+SESSION_CLAIM_RE = re.compile(r"\b" + record.SESSION_VAR + r"""=((?:\\.|"[^"]*"|'[^']*'|[^\s;&|()`])*)""")
+
+
+def judge_session_text(command, session):
+    """Every literal `AGENTKEEL_SESSION_ID=value` in the line, wrappers and quoting included: one
+    that is not the caller's own id is refused, whatever the parser makes of the line around it."""
+    for m in SESSION_CLAIM_RE.finditer(command or ""):
+        value = re.sub(r"""[\\"']""", "", m.group(1))
+        if value != session:
+            raise Block(
+                f"refusing {record.SESSION_VAR}={value or '(empty)'}: it is not this session's id, and a task\n"
+                "record belongs to the session that declared it. Use the id printed at session start.")
 
 
 def judge_session_claim(sc, session):
@@ -400,6 +422,7 @@ def judge_session_claim(sc, session):
 
 def judge_command(command, cwd, rec, environ, session, line=None):
     line = line if line is not None else {"branches": {}, "aliases": {}}
+    judge_session_text(command, session)
     for sc in shell.commands(command, cwd):
         argv = normalise(sc.argv)
         if not argv:

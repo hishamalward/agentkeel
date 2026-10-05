@@ -20,9 +20,10 @@ GitHub Free has no branch protection or rulesets on private repositories (the AP
 to GitHub Pro or make this repository public to enable this feature"). There, use the push gate:
 put `"require_check_before_push": "agentkeel-required"` in `agentkeel.json`, and an agent's push
 into a protected branch is refused unless that check passed on the exact commit being shipped.
-The gate accepts only a push it can prove: one that names its source
-(`git push origin <tested-branch-or-sha>:main`) and runs alone in its call, because an earlier
-command in the same call could move the branch after the gate reads it. A bare push, `--all`, a
+The gate accepts only a push it can prove: one that names the tested commit by its full SHA
+(`git push origin <full-tested-sha>:main`) and runs alone in its call. A branch name or `HEAD` is
+refused, because another agent can move it while the gate reads the check, and an earlier
+command in the same call could move it too. A bare push, `--all`, a
 configured or wildcard refspec, and `gh pr merge` are refused: GitHub writes a new commit for
 every PR merge mode, and no check has run on it. A human can still push to `main` by hand, but with the deploy waiting for CI an
 untested commit is not deployed. The gate asks GitHub through `gh`, using the check-runs API or,
@@ -45,7 +46,7 @@ resources were deleted afterwards.
 1. Push the task branch: `git push origin feat/<task>` (needs the `push` permission).
 2. Wait for `agentkeel-required` to pass on that commit (`gh pr checks`, or
    `gh run watch` on the branch's run).
-3. Move `main` to the same commit, in its own call: `git push origin <tested-sha>:main` (needs
+3. Move `main` to the same commit, in its own call: `git push origin <full-tested-sha>:main` (needs
    `push`). The commit must already contain `main` (rebase and test again if `main` moved), so the
    push is a fast-forward and `main` receives exactly the tested commit. GitHub then marks an open
    pull request for that branch as merged. With branch protection, `gh pr merge` (needs `merge` and

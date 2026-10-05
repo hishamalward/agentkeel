@@ -565,14 +565,21 @@ class PushGate(RepoCase):
         with open(self.state, "w") as fh:
             json.dump({"runs": {sha or self.sha: runs}}, fh)
 
-    def push(self, command="git push origin feat/x:main"):
+    def push(self, command=None):
+        command = command or f"git push origin {self.sha}:main"
         return self.hook(self.bash(command), env={"AGENTKEEL_GH": self.gh, "FAKE_GH_STATE": self.state})
 
     def test_green_check_on_the_exact_commit_ships(self):
         self.runs("success")
         self.assertEqual(self.push()[0], 0)
-        self.assertEqual(self.push(f"git push origin {self.sha}:main")[0], 0)
-        self.assertEqual(self.push(f"cd {self.repo} && git push origin feat/x:main")[0], 0)
+        self.assertEqual(self.push(f"cd {self.repo} && git push origin {self.sha}:main")[0], 0)
+
+    def test_a_branch_name_or_head_as_the_source_is_refused(self):
+        self.runs("success")  # green, but a name can move between the check and the push
+        for cmd in ("git push origin main", "git push origin feat/x:main", "git push origin HEAD:main",
+                    f"git push origin {self.sha[:12]}:main"):
+            code, err = self.push(cmd)
+            self.assertEqual(code, 2, cmd); self.assertIn("full SHA", err)
 
     def ahead(self):
         """feat/x one commit ahead of main: HEAD and main are different commits."""
@@ -595,7 +602,6 @@ class PushGate(RepoCase):
                     "./ship.sh; git push origin main"):
             code, err = self.push(cmd)
             self.assertEqual(code, 2, cmd); self.assertIn("Run the push alone", err)
-        self.assertEqual(self.push("git push origin main")[0], 0)  # main itself, alone: its own check
 
     def test_pr_merge_is_refused_even_with_a_green_head(self):
         self.runs("success")
@@ -623,5 +629,5 @@ class PushGate(RepoCase):
 
     def test_unverifiable_is_refused(self):
         self.runs("success")
-        code, err = self.hook(self.bash("git push origin feat/x:main"), env={"AGENTKEEL_GH": "/nonexistent/gh"})
+        code, err = self.hook(self.bash(f"git push origin {self.sha}:main"), env={"AGENTKEEL_GH": "/nonexistent/gh"})
         self.assertEqual(code, 2); self.assertIn("could not ask GitHub", err)

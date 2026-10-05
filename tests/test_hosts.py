@@ -191,8 +191,29 @@ class SessionOwnership(RepoCase):
         self.assertEqual(code, 2); self.assertIn("not this session's id", err)
         self.assertEqual(self.hook(codex_bash(self.repo, cmd("me"), session="me"))[0], 0)
         self.assertEqual(self.hook(codex_bash(self.repo, "env AGENTKEEL_SESSION_ID=x python3 task.py show", session="me"))[0], 2)
+        for wrapped in ("bash -c '{c}'", "bash -lc '{c}'", "sh -c '{c}'", "env {a} bash -c 'python3 task.py show'",
+                        "{a} bash -c 'sh -c \"python3 task.py show\"'", "{a} eval 'python3 task.py show'",
+                        "bash -c \"{a} python3 task.py show\"", "{a}; export AGENTKEEL_SESSION_ID; python3 task.py show"):
+            text = wrapped.format(c=cmd("someone-else"), a="AGENTKEEL_SESSION_ID=someone-else")
+            code, err = self.hook(codex_bash(self.repo, text, session="me"))
+            self.assertEqual(code, 2, text); self.assertIn("not this session's id", err)
+        self.assertEqual(self.hook(codex_bash(self.repo, "AGENTKEEL_SESSION_ID=me bash -c 'python3 task.py show'", session="me"))[0], 0)
         code, err = self.hook(codex_bash(self.repo, "export AGENTKEEL_SESSION_ID=me", session="me"))
         self.assertEqual(code, 2); self.assertIn("refusing to export", err)
+
+    def test_a_wrapped_foreign_id_leaves_the_other_record_unchanged(self):
+        import subprocess
+        self.declare(task="other-review", allow=("review",), session="other-session")
+        path = os.path.join(self.home, "tasks", "other-session.json")
+        with open(path, "rb") as fh:
+            before = fh.read()
+        from helpers import HOOKS
+        cmd = (f"AGENTKEEL_SESSION_ID=other-session bash -c 'python3 {os.path.join(HOOKS, 'task.py')} "
+               "start overwritten --size small --allow implement'")
+        code, _ = self.hook(codex_bash(self.repo, cmd, session="caller"))
+        self.assertEqual(code, 2)
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(), before)
 
     def test_ambiguous_environment_fails_closed_and_says_how(self):
         out = self.task({"AGENTKEEL_SESSION_ID": "", "CODEX_THREAD_ID": "a", "CLAUDE_CODE_SESSION_ID": "b"}, "start", "z", "--size", "small", "--allow", "review")

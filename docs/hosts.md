@@ -49,7 +49,8 @@ visible gap.
   than guess, because a guess can act on another session's task record. The session-start
   message prints the session's id; the agent then gives it inline,
   `AGENTKEEL_SESSION_ID=<id> python3 task.py ...`, and the guard, which sees the true id in the
-  payload, refuses any other value and any `export` of it (an exported id would reach every
+  payload, refuses any other value (also inside `bash -c`, `sh -c`, `env` and `eval`) and any
+  `export` of it (an exported id would reach every
   process the shell starts, other agents included). Keep `AGENTKEEL_HOME` writable from the agent's sandbox (Codex `workspace-write`
   blocks writes outside the workspace; add the folder or use a profile that allows it).
 - **Removing the Codex plugin fully.** After `codex plugin remove <plugin>@<marketplace>` and
