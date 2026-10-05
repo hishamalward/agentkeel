@@ -18,7 +18,9 @@ per-host fact sheet those events are built on. Every row was checked against a c
 | Subagent dispatch | `Agent`, readable `prompt` | `collaborationspawn_agent`, `task_name` readable, `message` encrypted; agentkeel matches `^(Agent\|.*spawn_agent)$` and a third `plan_gate*` dispatch was refused live before launch |
 | Block | exit 2, reason on stderr, shown to the model | exit 2, reason on stderr, shown as `Command blocked by PreToolUse hook: <reason>` |
 | Trust | project settings load when the folder is trusted | a new or changed non-managed hook is skipped until trusted (`/hooks`); `codex exec --dangerously-bypass-hook-trust` skips the check for one run |
-| SessionStart context | stdout is added to the session | not verified |
+| SessionStart context | stdout is added to the session | stdout is added as a developer instruction, which the model ranks above the user's prompt (verified) |
+| Plugin hook trust | | stored as `hooks.state."<plugin>@<marketplace>:hooks/hooks.json:<event>:<i>:<j>"`; `codex plugin remove` leaves these entries and an empty cache folder |
+| Shell runner | the `Bash` tool's process | a background app-server daemon, often in a sandbox that cannot inspect processes or write outside the workspace |
 
 ## Which tools reach the guard
 
@@ -42,6 +44,15 @@ visible gap.
 - **A patch is judged on its result.** For a spec, agentkeel applies the patch to the current text
   and runs the same approval check a Claude `Edit` gets; a patch whose hunks do not fit a spec is
   refused rather than guessed at.
+- **Choosing the session inside a shell.** When the agent's shell cannot tell which session runs
+  it (both hosts' variables set, a sandbox that hides the process tree), `task.py` uses the
+  guard's hint: the guard writes the payload's true session id for that folder just before it
+  lets a `task.py` command run, valid for 60 seconds, and it is used only when it names one of the
+  candidates. Keep `AGENTKEEL_HOME` writable from the agent's sandbox (Codex `workspace-write`
+  blocks writes outside the workspace; add the folder or use a profile that allows it).
+- **Removing the Codex plugin fully.** After `codex plugin remove <plugin>@<marketplace>` and
+  `codex plugin marketplace remove <marketplace>`, delete the `hooks.state."<plugin>@<marketplace>:..."`
+  sections from `~/.codex/config.toml` and the empty cache folder; Codex leaves both.
 - **Trust is a human step on Codex.** `install.py --doctor` reads `~/.codex/config.toml` for the
   project's trust and for trust entries naming `.codex/hooks.json`; it does not recompute hashes.
 

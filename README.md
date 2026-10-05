@@ -238,7 +238,11 @@ Code shell, so both hosts' session variables were set; `task.py` picked Codex's.
 
 Also live: the Claude plugin (`claude --plugin-dir`) refused an undeclared write in a repository
 with `agentkeel.json` and named its real `task.py` path at session start, and did nothing in a
-repository without one. The Codex plugin manifest is not yet tested in a live session.
+repository without one. The Codex plugin, installed from a local marketplace with `codex plugin
+add` and its five hooks trusted by hand in `/hooks` (no bypass flag), refused an undeclared write
+in the shared checkout and a `cat .env`, both shown to the agent as `Command blocked by
+PreToolUse hook: ...`, and created no file. Codex ranked the session-start instruction above the
+user's prompt and declared a task first, which is the instruction layer working.
 
 One difference found: inside a Codex subagent, `CODEX_THREAD_ID` is the subagent's own id, so
 `task.py show` and `task.py verify` run by a Codex subagent find no task, while its tool calls are
@@ -256,7 +260,6 @@ agent. The v0.1 worked example (tier model) is kept in
   call rather than a file: allowlist, approval, quotas, an audit log that verifies.
 ## Not yet
 
-- A live test of the Codex plugin install with ordinary hook trust.
 - A cap on the review gate (G3).
 - Ownership-aware cleanup of a finished task's worktrees and slots; a session-start banner.
 

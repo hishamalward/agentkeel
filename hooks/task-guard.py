@@ -379,6 +379,8 @@ def judge_command(command, cwd, rec, environ, session, line=None):
         argv = normalise(sc.argv)
         if not argv:
             continue
+        if session and any(os.path.basename(a) == "task.py" for a in sc.argv[:3]):
+            record.write_session_hint(sc.cwd, session, environ)
         if is_task_approve(sc.argv):
             raise Block(
                 "`task.py approve` is the human's command (gate G1): an approval the agent can\n"

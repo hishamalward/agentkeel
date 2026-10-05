@@ -165,6 +165,32 @@ class SessionFromEnv(unittest.TestCase):
         self.assertEqual(self.record.session_from_env({**both, "AGENTKEEL_SESSION_ID": "x"}), "x")
 
 
+class SessionHint(RepoCase):
+    """The guard sees the true session id; task.py uses it when its environment cannot tell."""
+
+    def task(self, env):
+        import subprocess, sys
+        from helpers import HOOKS
+        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "AGENTKEEL_SESSION_ID")}
+        return subprocess.run([sys.executable, os.path.join(HOOKS, "task.py"), "start", "h", "--size", "small",
+                               "--allow", "implement"], cwd=self.repo, capture_output=True, text=True,
+                              env={**clean, **self.env, **env})
+
+    def test_ambiguous_environment_uses_the_guards_hint(self):
+        cmd = "python3 .claude/hooks/task.py start h --size small --allow implement"
+        self.assertEqual(self.hook(codex_bash(self.repo, cmd, session="codex-thread"))[0], 0)
+        both = {"CODEX_THREAD_ID": "codex-thread", "CLAUDE_CODE_SESSION_ID": "outer-claude"}
+        out = self.task(both)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(self.record("codex-thread")["task"], "h")
+
+    def test_hint_must_name_a_candidate_and_be_fresh(self):
+        self.assertEqual(self.hook(codex_bash(self.repo, "python3 task.py show", session="someone-else"))[0], 0)
+        out = self.task({"CODEX_THREAD_ID": "a", "CLAUDE_CODE_SESSION_ID": "b"})
+        # nearest_host may still resolve this from the test runner's own ancestry; never "someone-else"
+        self.assertFalse(os.path.exists(os.path.join(self.home, "tasks", "someone-else.json")))
+
+
 class PlanSizeOnCodex(unittest.TestCase):
     def test_patch_to_a_long_plan_reported(self):
         import tempfile
