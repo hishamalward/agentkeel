@@ -37,6 +37,7 @@ docs/, in the present tense: the project canon (repo-wide rules), one state page
 references, audits, mockups. `task.py new` starts one, `task.py context <page>` reads one. Plan and
 progress go in the page's Working section, removed (`task.py finish`) before main moves; what is
 unfinished goes in Remaining scope. No decision log, no Markdown twin, no copied facts: link.
+Move main by the checked commit's full SHA, alone in its call: `git merge --ff-only <full-sha>`.
 
 **What the guards refuse** (exit 2 with the reason): a write with no task for this session; a
 write outside the task's worktrees and write roots; code edits on a protected branch; a commit

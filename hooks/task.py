@@ -240,7 +240,8 @@ def new(args, environ):
         if existing:
             return fail(f"{os.path.relpath(existing[0], top)} already exists: a feature has one state page "
                         "and a repository one canon. Edit it.")
-    date = datetime.date.today().strftime("%y%m%d")
+    today = datetime.date.today()
+    date = family_date(docs, family) or today.strftime("%y%m%d")
     name = f"{date}-{family}{'-' + args.qualifier if args.qualifier else ''}-{kind}.html"
     path = os.path.join(docs, name)
     if os.path.exists(path):
@@ -249,7 +250,7 @@ def new(args, environ):
     boundary = args.boundary or (args.kind == "state" and rec.get("size") == "large")
     os.makedirs(docs, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(starters.page(args.kind, title, date, boundary=boundary))
+        fh.write(starters.page(args.kind, title, today.isoformat(), boundary=boundary))
     css = os.path.join(docs, "keel.css")
     if not os.path.exists(css):
         with open(css, "w", encoding="utf-8") as fh:
@@ -258,6 +259,34 @@ def new(args, environ):
     print(f"agentkeel: wrote {os.path.relpath(path, top)}"
           + (" (with a boundary for the human to approve)" if boundary else ""))
     return 0
+
+
+def family_date(docs, family):
+    """The date prefix a family already uses: every page of one feature shares its first date, so
+    the files sort together. The family's state page sets it, else a page named for the family alone."""
+    names = sorted(os.listdir(docs)) if os.path.isdir(docs) else []
+    for kinds in (("state",), pages.KINDS):
+        for name in names:
+            m = pages.NAME_RE.match(name)
+            if m and m.group(2) == family and m.group(3) in kinds:
+                return m.group(1)
+    return None
+
+
+def families(names):
+    """{page name: family}. A name's slug is family[-qualifier]; the family is the longest state
+    page slug with the same date that the slug starts with, else the shortest such page slug."""
+    found = {n: pages.NAME_RE.match(n) for n in names}
+    found = {n: m for n, m in found.items() if m}
+    states = {(m.group(1), m.group(2)) for m in found.values() if m.group(3) == "state"}
+    slugs = {(m.group(1), m.group(2)) for m in found.values()}
+    out = {}
+    for n, m in found.items():
+        date, slug = m.group(1), m.group(2)
+        heads = lambda pool: [s for d, s in pool if d == date and (slug == s or slug.startswith(s + "-"))]
+        st = heads(states)
+        out[n] = max(st, key=len) if st else min(heads(slugs), key=len)
+    return out
 
 
 def context(args, environ):
@@ -305,21 +334,19 @@ def index(args, environ):
     docs = os.path.join(top, "docs")
     if not os.path.isdir(docs):
         return fail("no docs/ folder here")
-    families = {}
-    for name in sorted(os.listdir(docs)):
+    groups = {}
+    for name, fam in sorted(families(os.listdir(docs)).items()):
         m = pages.NAME_RE.match(name)
-        if not m:
-            continue
         text = record.read(os.path.join(docs, name)) or ""
         title = pages.scan(text).title.strip() or name
         state = pages.boundary_state(name, text)[0]
         working = bool(pages.sections(text, "working"))
-        families.setdefault(m.group(2), []).append((m.group(3), name, title, state, working))
+        groups.setdefault(fam, []).append((m.group(3), name, title, state, working))
     rows = []
     order = {"state": 0, "reference": 1, "audit": 2, "mockup": 3}
-    for fam in sorted(families, key=lambda f: (f != "project", f)):
+    for fam in sorted(groups, key=lambda f: (f != "project", f)):
         rows.append(f"<h2>{h.escape(fam)}</h2><ul>")
-        for kind, name, title, state, working in sorted(families[fam], key=lambda r: (order[r[0]], r[1])):
+        for kind, name, title, state, working in sorted(groups[fam], key=lambda r: (order[r[0]], r[1])):
             tags = f'<span class="tag">{kind}</span>'
             if state != "none":
                 tags += f' <span class="tag {"ok" if state == "approved" else "warn"}">boundary {state}</span>'

@@ -474,16 +474,17 @@ def check(tree, base=None):
             if name == "index.html" and isinstance(tree, GitTree):
                 problems.append(f"{p}: the index is derived (task.py index); do not commit it")
             continue
-        m = NAME_RE.match(name) or ASSET_RE.match(name)
-        if not m or not _valid_date(m.group(1)):
+        m = NAME_RE.match(name)
+        asset = None if m else ASSET_RE.match(name)
+        if not (m or asset) or not _valid_date((m or asset).group(1)):
             problems.append(f"{p}: name must be YYMMDD-<family>[-<qualifier>]-<kind>.html "
                             f"(kind: {', '.join(KINDS)}) or ...-asset.<ext>, with a real date")
             continue
         if name.endswith(".html"):
-            pages[p] = m
-            if m.group(3) == "state":
+            pages[p] = asset or m  # an HTML asset is checked like a page: links, Working section
+            if m and m.group(3) == "state":
                 states.setdefault(m.group(2), []).append(p)
-            if m.group(3) == "reference" and m.group(2) == "project":
+            if m and m.group(3) == "reference" and m.group(2) == "project":
                 projects.append(p)
     for family, ps in states.items():
         if len(ps) > 1:

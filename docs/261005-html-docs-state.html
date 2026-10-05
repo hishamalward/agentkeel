@@ -38,7 +38,7 @@
       <tr><td><code>YYMMDD-&lt;family&gt;[-&lt;qualifier&gt;]-reference.html</code></td><td>a shared rule or runbook with its own subject</td></tr>
       <tr><td><code>...-audit.html</code></td><td>findings and evidence at a stated revision; it never outranks the state page</td></tr>
       <tr><td><code>...-mockup.html</code></td><td>a design exploration; bespoke layout welcome</td></tr>
-      <tr><td><code>...-asset.&lt;ext&gt;</code></td><td>a supporting file</td></tr>
+      <tr><td><code>...-asset.&lt;ext&gt;</code></td><td>a supporting file; an HTML asset is checked like a page (links, Working section)</td></tr>
       <tr><td><code>keel.css</code></td><td>the shared look; pages link <code>./keel.css</code> and may add their own styles</td></tr>
       <tr><td><code>index.html</code></td><td>derived by <code>task.py index</code>; never committed</td></tr>
     </tbody>
@@ -66,6 +66,7 @@
   <ul>
     <li>The agent may edit anything on the page, the boundary included, as a draft. It cannot add, change or remove the approval, or rename or delete an approved page.</li>
     <li>A large task's write limits come from the approved boundary. When the draft differs, the kept copy still rules; a widened draft grants nothing.</li>
+    <li>An empty or missing Changes list grants no path outside <code>docs/</code>. Wide access is explicit: <code>*</code> grants every path.</li>
     <li><code>main</code> does not move while any boundary is unapproved, changed since approval, missing its approval, duplicated, malformed, or dropped by renaming or deleting an approved page.</li>
   </ul>
 
@@ -79,7 +80,7 @@
   commit, compared with what <code>main</code> holds now:</p>
   <ul>
     <li><code>task.py check [--rev R] [--base B]</code>, by hand.</li>
-    <li>The task guard, before an agent's push to a protected branch and before a local move whose new commit is known (<code>merge --ff-only &lt;rev&gt;</code>, <code>reset &lt;rev&gt;</code>, <code>update-ref</code>, <code>fetch . x:main</code>, <code>push . x:main</code>).</li>
+    <li>The task guard, before an agent's push to a protected branch and before a local move whose new commit is known (<code>merge --ff-only</code>, <code>reset</code>, <code>update-ref</code>, <code>fetch .</code>, <code>push .</code>). The move names its commit by full SHA and runs alone in its call, so the commit checked is the commit that lands: <code>git merge --ff-only &lt;full-sha&gt;</code>. A branch name, <code>HEAD</code> or an earlier command in the same call is refused. When the check cannot run, the move is refused.</li>
     <li>CI: the <code>docs</code> job of <code>templates/ci/required-checks.yml</code> runs on every push and pull request, docs-only changes included, and <code>agentkeel-required</code> is red unless it succeeds.</li>
   </ul>
   <p>It fails on: a misnamed file or a subfolder in <code>docs/</code>; a committed index; two state
@@ -92,7 +93,9 @@
   <p><code>task.py new state|reference|audit|mockup|project &lt;family&gt;</code> writes a starter
   page in the task's own worktree (it needs <code>implement</code>), and <code>keel.css</code> when
   missing. A large task's state page starts with a boundary. A feature that already has a state page
-  is refused: edit it.</p>
+  is refused: edit it. A later page of a family reuses the family's first date, so its files sort
+  together; the page itself shows the day it was created. <code>task.py index</code> groups each
+  family's pages, qualifiers included, under one heading.</p>
 </section>
 
 <section id="remaining">
@@ -118,11 +121,12 @@
 <section id="verification">
   <h2>Verification</h2>
   <ul>
-    <li><strong>Unit suite</strong>: 207 tests pass, hook self-tests included (<code>python3 -m unittest discover -s tests</code>), on the Stage 2b branch. <code>test_pages.py</code> covers names, links, anchors, Working sections, boundary states and digests, base comparison, retired logs and context; <code>DocsGate</code>, <code>LargeAndBoundaryApproval</code> and the host parity tests cover the guard.</li>
+    <li><strong>Unit suite</strong>: 214 tests pass, hook self-tests included (<code>python3 -m unittest discover -s tests</code>), on the Stage 2b branch. <code>test_pages.py</code> covers names, links, anchors, Working sections, boundary states and digests, base comparison, retired logs and context; <code>DocsGate</code>, <code>LargeAndBoundaryApproval</code> and the host parity tests cover the guard.</li>
     <li><strong>Claude Code, live</strong> (<code>claude -p</code>, throwaway repo, project install, 2026-10-05): an Edit adding a <code>keel-approval</code> meta was refused with the G1 reason; a push to <code>main</code> of a commit with a Working section was refused; <code>task.py finish</code> removed the section; a push of the literal SHA of the finished commit moved <code>main</code>; <code>task.py context</code> read the page.</li>
     <li><strong>Found live and fixed</strong>: <code>git push origin $(git rev-parse HEAD):main</code> was read as a push to a branch named <code>$</code>, so neither the docs check nor the push gate ran. A command substitution now stays one opaque word, an unknown destination counts as any branch, and the live rerun refused all three forms. The regression test fails against the Stage 2 code.</li>
     <li><strong>Codex, live</strong> (<code>codex exec</code> 0.160.0, same page, <code>--dangerously-bypass-hook-trust</code> for this run only; the normal-trust path was proven in Stage 2): an <code>apply_patch</code> adding an approval was refused; a push of a commit with a Working section was refused with the docs-check reason; <code>context</code> read the Working section another session wrote. Codex's workspace sandbox refuses writes inside <code>.git</code>, so that commit was made outside Codex.</li>
     <li><strong>Pages</strong>: this page and the project canon checked at 1280 px and 390 px wide with no horizontal overflow.</li>
+    <li><strong>Independent review at 5d17846, four findings, fixed</strong>: an HTML asset crashed the check and the guard allowed the move; a call could move a branch after the guard read it; an empty Changes list granted every path; a family's later pages took a new date and index group. Each has a regression test that fails on 5d17846 (<code>StageTwoBReviewFindings</code>, <code>EmptyChangesList</code>, <code>test_a_family_keeps_its_first_date_and_one_index_group</code>), and the reviewer's probe script gives the expected result on all four.</li>
     <li>Not run: the CI <code>docs</code> job on GitHub.</li>
   </ul>
 </section>
@@ -135,10 +139,11 @@
       <tr><td>Page model, commands, guard, plan hooks, CI job</td><td><code>hooks/</code>, <code>templates/ci/</code></td><td>unit suite</td><td>done</td></tr>
       <tr><td>agentkeel's own docs on the model</td><td><code>docs/</code>, README, AGENTS fragment</td><td>docs check passes except this section</td><td>done</td></tr>
       <tr><td>Hosts in throwaway repos</td><td>none</td><td>live refusals on both hosts</td><td>done</td></tr>
+      <tr><td>Fix the four findings of the review at 5d17846</td><td><code>hooks/</code>, <code>tests/</code>, this page</td><td>regressions fail before, pass after; reviewer probes</td><td>done</td></tr>
       <tr><td>Founder review, then merge</td><td>none</td><td><code>task.py finish</code> on this page, docs check passes</td><td>waiting</td></tr>
     </tbody>
   </table>
-  <p>Next action: wait for review. Before the merge, remove this section.</p>
+  <p>Next action: wait for the re-review. Before the merge, remove this section.</p>
 </section>
 
 </main>

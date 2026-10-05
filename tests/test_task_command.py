@@ -146,6 +146,31 @@ class TaskCommand(RepoCase):
             self.assertIn(os.path.basename(page), fh.read())
         self.assertEqual(self.task("check").returncode, 0)  # an untracked index is not a problem locally
 
+    def test_a_family_keeps_its_first_date_and_one_index_group(self):
+        # finding 4 of the Stage 2b review: a later audit took today's date and its own index group
+        self.task("start", "history-import", "--size", "medium", "--allow", "implement")
+        docs = os.path.join(self.repo, "docs")
+        os.makedirs(docs)
+        with open(os.path.join(docs, "260901-history-import-state.html"), "w") as fh:
+            fh.write("<!doctype html><html><head><title>History import</title></head><body></body></html>")
+        for args in (("audit", "history-import", "--qualifier", "memory"),
+                     ("mockup", "history-import", "--qualifier", "empty-state"), ("new-family",)):
+            out = self.task("new", *args) if args[0] != "new-family" else self.task("new", "reference", "deploy")
+            self.assertEqual(out.returncode, 0, out.stderr)
+        names = sorted(n for n in os.listdir(docs) if n.endswith(".html"))
+        self.assertIn("260901-history-import-memory-audit.html", names)
+        self.assertIn("260901-history-import-empty-state-mockup.html", names)
+        import datetime
+        today = datetime.date.today()
+        self.assertIn(today.strftime("%y%m%d") + "-deploy-reference.html", names)  # a new family: today
+        with open(os.path.join(docs, "260901-history-import-memory-audit.html")) as fh:
+            self.assertIn(today.isoformat(), fh.read())                               # the real date, inside
+        self.assertEqual(self.task("index").returncode, 0)
+        with open(os.path.join(docs, "index.html")) as fh:
+            index = fh.read()
+        self.assertEqual(index.count("<h2>"), 2, index)                               # history-import, deploy
+        self.assertNotIn("<h2>history-import-memory</h2>", index)
+
     def test_record_drives_the_guard(self):
         self.branch("feat/x")
         payload = {"tool_name": "Write", "cwd": self.repo, "session_id": SESSION,

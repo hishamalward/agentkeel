@@ -253,12 +253,24 @@ def approved_boundary(root, rec):
                 f"docs/{name}: {why or 'it has no boundary section'}.\n" + ask)
 
 
-def judge_large_path(rel, root, rec):
+def large_limits(root, rec):
+    """(page name, changes, must_not) from the approved boundary. An empty or missing Changes list
+    grants nothing: wide access is a pattern the human approved (`*`), never an omission."""
     name, boundary = approved_boundary(root, rec)
     changes, must_not = pages.blast_radius(boundary)
+    if not changes:
+        raise Block(
+            f"the approved boundary of {name} lists no paths under Changes, so this large task may change\n"
+            "nothing outside docs/. List the paths (<ul data-keel-changes><li><code>src/x/</code></li></ul>;\n"
+            "`*` means every path) and ask the human to approve the boundary again.")
+    return name, changes, must_not
+
+
+def judge_large_path(rel, root, rec):
+    name, changes, must_not = large_limits(root, rec)
     if record.matches(rel, must_not):
         raise Block(f"{rel} is listed under 'Must not change' in the approved boundary of {name}.")
-    if changes and not record.matches(rel, changes):
+    if not record.matches(rel, changes):
         raise Block(
             f"{rel} is outside the Changes list of the approved boundary of {name} ({', '.join(changes)}).\n"
             "Stop and tell the human: the blast radius grew, and re-scoping is theirs.")
@@ -334,6 +346,19 @@ def judge_git(sc, rec, environ, session, line):
                 "This discards work that may not be yours, in a tree other agents may share.\n"
                 f"If the human asked for exactly this, prefix the command with {DESTRUCTIVE_OVERRIDE}=1;\n"
                 "the override is logged and visible in the transcript.")
+    try:
+        judge_git_ops(call, ops, root, pol, rec, environ, line)
+    except Block:
+        raise
+    except Exception as exc:
+        if any(o.kind in ("move", "push") for o in ops):
+            raise Block(f"cannot check this {call.sub} ({type(exc).__name__}: {exc}); a branch move that\n"
+                        "agentkeel cannot judge is refused, not allowed. Report this to the agentkeel maintainers.")
+        raise
+
+
+def judge_git_ops(call, ops, root, pol, rec, environ, line):
+    protected = pol["protected"]
     for op in ops:
         if op.kind == "worktree" and rec and not os.path.lexists(op.path):
             # the worktree does not exist yet (PreToolUse); resolve its parent the way git will
@@ -360,20 +385,21 @@ def judge_git(sc, rec, environ, session, line):
                     "A bare `git commit` (or -a) commits whatever is staged, including another agent's\n"
                     "work. Name the paths: git commit -m '...' -- <path> [<path>...]")
             if rec.get("size") == "large" and root and not all(p.startswith("docs/") for p in op.paths):
-                approved_boundary(root, rec)
+                large_limits(root, rec)
         elif op.kind == "move":
             need(rec, "merge", f"moving the protected branch '{op.targets[0] if op.targets else '?'}' ({op.name})")
-            if op.source and root:
-                sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{op.source}^{{commit}}")
-                docs_gate(root, sha, op.targets[0] if op.targets else "main", None, environ)
+            dst = op.targets[0] if op.targets else "main"
+            if op.source and root and docs_on(root, dst):
+                sha = bound_source(call, op.source, dst, line)
+                docs_gate(root, sha, dst, None, environ)
         elif op.kind == "push":
             hits = [t for t in op.targets if t in protected or t == "*"]
             if op.local:
                 if hits:
                     need(rec, "merge", f"moving '{hits[0]}' with a local push")
                     for dst in hits:
-                        if dst != "*" and op.sources.get(dst) and root:
-                            sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{op.sources[dst]}^{{commit}}")
+                        if dst != "*" and root and docs_on(root, dst):
+                            sha = bound_source(call, op.sources.get(dst) or "HEAD", dst, line)
                             docs_gate(root, sha, dst, None, environ)
                 else:
                     need(rec, "implement", "a local push between branches")
@@ -401,17 +427,40 @@ def judge_git(sc, rec, environ, session, line):
                         sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
                         require_green(root, op.remote, sha, pol["require_check"], dst, environ)
                         docs_gate(root, sha, dst, op.remote, environ)
-                elif hits and root:
-                    if "*" in hits and pages.enabled(pages.FsTree(root)):
+                elif hits and root and any(docs_on(root, d) for d in hits):
+                    if "*" in hits:
                         raise Block("refusing a push whose destination is not named (--all, a wildcard, a variable or\n"
                                     "a $(...)): it may reach main, and the docs check needs the commit that lands.\n"
                                     "Name both ends: git push origin <full-sha>:main")
                     for dst in hits:
                         if dst == "*":
                             continue
-                        src = op.sources.get(dst) or "HEAD"
-                        sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
+                        sha = bound_source(call, op.sources.get(dst) or "HEAD", dst, line)
                         docs_gate(root, sha, dst, op.remote, environ)
+
+
+def docs_on(root, dst):
+    """The docs check guards `dst` when the working tree or `dst` itself opted in."""
+    if pages.enabled(pages.FsTree(root)):
+        return True
+    b = gitops.run_git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{dst}^{{commit}}")
+    return bool(b) and pages.enabled(pages.GitTree(root, b))
+
+
+def bound_source(call, src, dst, line):
+    """The commit a docs-gated move installs, bound so the commit checked is the commit that lands:
+    the source is a literal full SHA, and nothing earlier in the call can move a ref first."""
+    if line.get("earlier"):
+        raise Block(
+            f"refusing to move '{dst}' in a call that runs other commands first: an earlier command can\n"
+            "move a branch after this check reads it, so the commit checked would not be the commit that\n"
+            "lands. Run the move alone, in its own call.")
+    if not FULL_SHA_RE.match(src or ""):
+        raise Block(
+            f"refusing to move '{dst}' to '{src}': a branch name or HEAD can move between this check and the\n"
+            "move (another agent or worktree shares the branches). Name the checked commit by its full SHA:\n"
+            f"  git merge --ff-only <full-sha>   or   git push . <full-sha>:{dst}")
+    return gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
 
 
 def docs_gate(root, sha, dst, remote, environ):
@@ -425,8 +474,8 @@ def docs_gate(root, sha, dst, remote, environ):
         return
     try:
         cand = pages.GitTree(root, sha)
-    except ValueError:
-        return
+    except ValueError as exc:
+        raise Block(f"cannot read commit {sha[:12]} for its docs check ({exc}); refusing to move '{dst}'.")
     base = None
     for ref in ([f"refs/remotes/{remote}/{dst}"] if remote and remote != "." else []) + [f"refs/heads/{dst}"]:
         b = gitops.run_git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
