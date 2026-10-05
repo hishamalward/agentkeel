@@ -43,6 +43,8 @@ class Op:
     paths: list = field(default_factory=list)
     path: str = ""
     local: bool = False
+    remote: str = ""
+    sources: dict = field(default_factory=dict)   # push: destination branch -> the rev it receives
 
 
 @dataclass
@@ -230,7 +232,7 @@ def push_ops(call, branch):
         return []
     remote = pos[0] if pos else ""
     refspecs = pos[1:]
-    targets, deleted = [], []
+    targets, deleted, sources = [], [], {}
     if everything:
         targets.append("*")
     for spec in refspecs:
@@ -250,11 +252,14 @@ def push_ops(call, branch):
         if delete:
             deleted.append(dst)
         targets.append("*" if "*" in dst else dst)
+        sources.setdefault(dst, src or "")
     if not refspecs and not everything:
         targets.append(branch or "HEAD")
+        sources[branch or "HEAD"] = "HEAD"
         up = upstream_branch(call, branch)
         if up:
             targets.append(up)
+            sources[up] = "HEAD"
         name = remote or "origin"
         configured = [call.config[k] for k in call.config if k == f"remote.{name}.push".lower()]
         configured += (run_git(call, "config", "--get-all", f"remote.{name}.push") or "").split("\n")
@@ -263,9 +268,11 @@ def push_ops(call, branch):
             if dst in ("HEAD", "@"):
                 dst = branch or "HEAD"
             targets.append("*" if "*" in dst else _strip_ref(dst))
+            src_part = spec.lstrip("+").split(":", 1)[0] if ":" in spec else "HEAD"
+            sources[_strip_ref(dst)] = src_part or "HEAD"
             if spec.startswith("+"):
                 force = True
-    ops = [Op("push", targets=targets, local=(remote == "."))]
+    ops = [Op("push", targets=targets, local=(remote == "."), remote=remote, sources=sources)]
     if force:
         ops.append(Op("destructive", name="force push"))
     for d in deleted:

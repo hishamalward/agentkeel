@@ -174,6 +174,18 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class InstallContract(unittest.TestCase):
+    def test_installer_ships_every_core_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ak_install_c", INSTALL)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        core = os.path.join(os.path.dirname(INSTALL), "hooks", "agentkeel_core")
+        self.assertEqual(sorted(mod.CORE_FILES), sorted(f for f in os.listdir(core) if f.endswith(".py")))
+        hooks = os.path.join(os.path.dirname(INSTALL), "hooks")
+        shipped = set(mod.HOOK_FILES) | {"session-start.py"}  # session-start ships only with the plugin
+        self.assertEqual(shipped, {f for f in os.listdir(hooks) if f.endswith((".py", ".sh"))})
+
+
 class UserHookWithAgentkeelName(unittest.TestCase):
     def test_user_entry_and_file_survive_install_and_uninstall(self):
         with tempfile.TemporaryDirectory() as t:

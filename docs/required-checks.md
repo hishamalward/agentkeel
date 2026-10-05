@@ -9,6 +9,29 @@ Passing checks are evidence, not a promise: they prove the tests the workflow ru
 commit. A repository admin can still bypass the rule if the settings allow it (see the last
 section).
 
+## Two ways to hold main
+
+| Setup | Who it stops | Needs |
+|---|---|---|
+| **Branch protection** requires `agentkeel-required` (below) | everyone, at GitHub | a public repository, or GitHub Pro/Team for a private one |
+| **The agentkeel push gate** plus the deploy waiting for CI | every agent, before its push runs; the deploy for anyone | nothing paid |
+
+GitHub Free has no branch protection or rulesets on private repositories (the API answers "Upgrade
+to GitHub Pro or make this repository public to enable this feature"). There, use the push gate:
+put `"require_check_before_push": "agentkeel-required"` in `agentkeel.json`, and an agent's push
+or `gh pr merge` into a protected branch is refused unless that check passed on the exact commit
+being shipped. A human can still push to `main` by hand, but with the deploy waiting for CI an
+untested commit is not deployed. The gate asks GitHub through `gh`, using the check-runs API or,
+for a token that cannot read checks, the Actions jobs of that commit; if it cannot get an answer,
+it refuses.
+
+Checked on 2026-10-04 in a private throwaway repository with the push gate and real Actions runs:
+a candidate whose tests failed was refused (`'agentkeel-required' ended failure`), as was one
+whose check had not run yet; a docs-only candidate skipped the app tests, passed the required
+check, was allowed, and `main` moved to it; a green candidate built on an older `main` was
+rejected by git as non-fast-forward, and after a rebase its new commit was refused until its
+own check ran.
+
 ## The shipping path
 
 1. Push the task branch: `git push origin feat/<task>` (needs the `push` permission).

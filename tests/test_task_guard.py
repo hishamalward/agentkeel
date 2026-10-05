@@ -528,3 +528,72 @@ class StageReviewFindings(RepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_GH = """#!/usr/bin/env python3
+import json, os, sys
+state = json.load(open(os.environ["FAKE_GH_STATE"]))
+a = sys.argv[1:]
+if a[:2] == ["pr", "view"]:
+    print(state.get("pr_head", "")); sys.exit(0)
+if a[:1] == ["api"]:
+    sha = a[1].split("/commits/")[1].split("/")[0]
+    runs = state.get("runs", {}).get(sha, [])
+    print(json.dumps({"check_runs": runs})); sys.exit(0)
+sys.exit(1)
+"""
+
+
+class PushGate(RepoCase):
+    """agentkeel.json require_check_before_push: an agent ships only a commit whose check passed."""
+
+    def setUp(self):
+        super().setUp()
+        self.branch("feat/x")
+        git(self.repo, "remote", "add", "origin", "https://github.com/someone/somerepo.git")
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            json.dump({"require_check_before_push": "agentkeel-required"}, fh)
+        self.gh = os.path.join(self.tmp, "fake-gh")
+        with open(self.gh, "w") as fh:
+            fh.write(FAKE_GH)
+        os.chmod(self.gh, 0o755)
+        self.state = os.path.join(self.tmp, "gh-state.json")
+        self.sha = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.declare(allow=("implement", "merge", "push"))
+
+    def runs(self, *conclusions, status="completed"):
+        runs = [{"name": "agentkeel-required", "status": status, "conclusion": c,
+                 "started_at": f"2026-10-04T00:00:0{i}Z"} for i, c in enumerate(conclusions)]
+        with open(self.state, "w") as fh:
+            json.dump({"runs": {self.sha: runs}, "pr_head": self.sha}, fh)
+
+    def push(self, command="git push origin feat/x:main"):
+        return self.hook(self.bash(command), env={"AGENTKEEL_GH": self.gh, "FAKE_GH_STATE": self.state})
+
+    def test_green_check_on_the_exact_commit_ships(self):
+        self.runs("success")
+        self.assertEqual(self.push()[0], 0)
+        self.assertEqual(self.push("gh pr merge 3 --merge")[0], 0)
+
+    def test_failed_missing_or_pending_check_refused(self):
+        for setup, word in ((lambda: self.runs("failure"), "ended failure"), (lambda: self.runs(), "no 'agentkeel-required'"),
+                            (lambda: self.runs(None, status="in_progress"), "still in_progress")):
+            setup()
+            code, err = self.push()
+            self.assertEqual(code, 2); self.assertIn(word, err)
+            self.assertEqual(self.push("gh pr merge 3 --merge")[0], 2)
+
+    def test_latest_run_wins(self):
+        self.runs("failure", "success")
+        self.assertEqual(self.push()[0], 0)
+        self.runs("success", "failure")
+        self.assertEqual(self.push()[0], 2)
+
+    def test_feature_branch_push_needs_no_check(self):
+        self.runs("failure")
+        self.assertEqual(self.push("git push origin feat/x")[0], 0)
+
+    def test_unverifiable_is_refused(self):
+        self.runs("success")
+        code, err = self.hook(self.bash("git push origin feat/x:main"), env={"AGENTKEEL_GH": "/nonexistent/gh"})
+        self.assertEqual(code, 2); self.assertIn("could not ask GitHub", err)

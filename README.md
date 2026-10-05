@@ -159,7 +159,8 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
 | A third plan-gate dispatch | prevents when the prompt carries `[plan-gate]`; heuristic otherwise | `test_plan_gate_guard.py` |
 | A plan over 300 lines | warns after the write | `test_plan_size_guard.py` |
-| One review round per scope (G3); tests green before shipping (G4) | guidance only | |
+| An agent ships to `main` only a commit whose required check passed (`require_check_before_push` in `agentkeel.json`) | prevents, for agent pushes and `gh pr merge`; refuses when GitHub cannot be asked | `test_task_guard.py` (PushGate); live on a throwaway GitHub repository |
+| One review round per scope (G3) | guidance only | |
 | Shell writes that are not git (`sed -i`, `>`, `rm`), commands inside scripts or npm scripts, other tools and hosts | unsupported | |
 | The same protections on Codex (file edits through `apply_patch`, shell, subagents) | prevents, as above | `test_hosts.py` (SameDecision, CapturedShapes) |
 | A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: every tool reaches the guard, and an unreadable writer is refused with a reason | `test_hosts.py` (ConfiguredRoute) |

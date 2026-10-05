@@ -37,7 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, host, patch as patchmod, record, shell  # noqa: E402
+from agentkeel_core import checks, gitops, host, patch as patchmod, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -353,6 +353,24 @@ def judge_git(sc, rec, environ, session, line):
             else:
                 where = (hits[0] if hits[0] != "*" else "every branch") if hits else ", ".join(op.targets)
                 need(rec, "push", f"a push to '{where}'")
+                if hits and pol["require_check"]:
+                    for dst in hits:
+                        src = op.sources.get(dst) or "HEAD"
+                        sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
+                        require_green(root, op.remote, sha, pol["require_check"], dst, environ)
+
+
+def require_green(root, remote, sha, name, dst, environ):
+    """The push gate: the exact commit that lands on a protected branch passed the required check."""
+    if not sha:
+        raise Block(f"cannot tell which commit would land on '{dst}', so its '{name}' check cannot be\n"
+                    "verified. Push an explicit branch or commit (git push origin <branch>:main).")
+    state, detail = checks.conclusion(root, remote, sha, name, environ)
+    if state != "success":
+        raise Block(
+            f"refusing to ship {sha[:12]} to '{dst}': {detail}.\n"
+            "This repository requires the check to pass on the exact commit before main moves.\n"
+            "Push the branch, wait for the check to pass on it, then move main to that same commit.")
 
 
 def judge_command(command, cwd, rec, environ, session, line=None):
@@ -372,9 +390,15 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             continue
         texts = {" ".join(argv), " ".join([os.path.basename(sc.argv[0])] + sc.argv[1:])}
         root = gitops.toplevel(sc.cwd)
-        for perm, patterns in record.policy(os.path.realpath(root) if root else None)["commands"].items():
+        pol = record.policy(os.path.realpath(root) if root else None)
+        for perm, patterns in pol["commands"].items():
             if any(re.search(p, t) for p in patterns for t in texts):
                 need(rec, perm, f"`{' '.join(sc.argv)[:60]}`")
+        if pol["require_check"] and argv[:3] == ["gh", "pr", "merge"]:
+            pr = next((a for a in argv[3:] if not a.startswith("-")), "")
+            sha = checks.pr_head(sc.cwd, pr, environ)
+            require_green(os.path.realpath(root) if root else sc.cwd, "origin", sha or "",
+                          pol["require_check"], "the pull request's base", environ)
 
 
 def decide(payload, environ=os.environ):

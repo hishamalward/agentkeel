@@ -219,7 +219,8 @@ def policy(root):
     for k, v in (data.get("commands") or {}).items():
         if k in commands and isinstance(v, list):
             commands[k] += [str(x) for x in v]
-    return {"protected": protected, "commands": commands}
+    return {"protected": protected, "commands": commands,
+            "require_check": str(data.get("require_check_before_push") or "")}
 
 
 # ---- spec frontmatter -----------------------------------------------------------------------

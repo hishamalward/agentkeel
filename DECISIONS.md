@@ -170,5 +170,9 @@ same commit. `docs/required-checks.md` lists what can still bypass it.
 **Why**: A hook guards the agent, not the branch, and a local pre-push hook can be skipped. CI that
 runs after a push to `main` reports after the deploy started. A required check that is skipped for
 docs-only changes would block them forever, so the one required job always reports.
+Where branch protection is not available (GitHub Free, private repository), the
+same rule is held for agents by the push gate: with `require_check_before_push` in
+`agentkeel.json`, an agent's push or `gh pr merge` into a protected branch needs the check to have
+passed on the exact commit, and the deploy waits for CI for everyone else.
 **Replaces**: "G4: tests green on the branch" as guidance only.
 
