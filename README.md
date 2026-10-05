@@ -4,6 +4,10 @@
 </picture>
 
 [![validate](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml/badge.svg)](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2f5bd3)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-2f5bd3)](#requirements)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-2f5bd3)](#claude-code)
+[![Codex plugin](https://img.shields.io/badge/Codex-plugin-2f5bd3)](#codex)
 
 AgentKeel keeps AI coding agents inside the task you gave them. Each agent declares its task
 before its first write. Hooks then check every tool call against that declaration and refuse what
@@ -23,33 +27,70 @@ rules that matter into hooks, outside the model's memory.
 - **One task record per session.** The agent states the task's size (how much process),
   permissions (which actions) and worktrees (where). Size never grants a permission.
 - **Bounded writes.** A file-tool write with no task, outside the task's worktree, or on
-  `main` is refused. Every code task works in its own git worktree, so agents never share a checkout.
+  `main` is refused. Every code task works in its own git worktree, so agents never share a
+  checkout.
 - **Shipping is a permission.** Moving `main` needs `merge`. Any remote push needs `push`.
   Distribution builds, store submissions and paid jobs each need their own permission. Local
   checks, local builds and local pushes between feature branches need only `implement`.
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
-- **One current owner per fact.** Documentation is authored HTML pages in one `docs/` folder,
-  in the present tense. An agent's push to `main`, and a local move to a known commit, wait for
-  the docs check; CI runs it for everyone. A commit made on `main`, a rebase or a
-  non-fast-forward merge is checked later, at the push and in CI
+- **Records with one current owner per fact.** In a repository that opts in, the agents' work
+  records are HTML pages in one `docs/` folder, in the present tense. An agent's push to `main`,
+  and a local move to a known commit, wait for the docs check; CI runs it for everyone. A commit
+  made on `main`, a rebase or a non-fast-forward merge is checked later, at the push and in CI
   ([limits](docs/html-records.md#current-limitations-and-open-decisions)).
 - **Loops have caps.** One plan gate per plan, one review round per scope.
 
-## Quickstart
+## Install
 
-Python 3.10 or newer. Preview first; the installer changes nothing without `--apply`.
+Install AgentKeel as a plugin in your agent. The plugin acts only in a repository that opts in,
+so it is safe to install once for all your work.
+
+### Requirements
+
+- **Python 3.10 or newer**, on your `PATH` as `python3`. The hooks are Python scripts, so the
+  plugin needs it too. (macOS's `/usr/bin/python3` may be older.)
+- git, and bash 3.2 or newer.
+
+### Claude Code
 
 ```bash
-git clone https://github.com/hishamalward/agentkeel
-python3 agentkeel/install.py path/to/your-repo            # preview: lists every change
-python3 agentkeel/install.py path/to/your-repo --apply    # hooks, settings for both hosts, AGENTS.md
-python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted
+claude plugin marketplace add hishamalward/agentkeel
+claude plugin install agentkeel@agentkeel
 ```
 
-Then prove the guard works. On Codex, trust the new hooks first (`/hooks` in Codex): Codex skips
-a project hook until you trust it. Open the repository's shared checkout in your agent and give
-it this exact prompt, before anything else:
+In a session, the same commands are `/plugin marketplace add hishamalward/agentkeel` and
+`/plugin install agentkeel@agentkeel`. Claude Code runs the plugin's hooks with no further trust
+step.
+
+### Codex
+
+```bash
+codex plugin marketplace add hishamalward/agentkeel
+codex plugin add agentkeel@agentkeel
+```
+
+Then open Codex in the repository, run `/hooks`, and trust AgentKeel's five hooks. Codex skips a
+plugin hook until you trust it.
+
+### Opt a repository in
+
+```bash
+cd path/to/your-repo
+echo '{}' > agentkeel.json
+git add agentkeel.json && git commit -m "Opt in to AgentKeel" -- agentkeel.json
+```
+
+The plugin now acts in this repository and in its worktrees, and nowhere else. The file holds
+the repository's policy, such as protected branches; `{}` takes the defaults
+([`agentkeel.json`](docs/task-record.md#the-repository-policy-file)). The opt-in is also kept in
+`~/.agentkeel/opted-in.json`, so a shell command that deletes the file does not switch the guards
+off.
+
+### Prove it works
+
+Open the repository's shared checkout in your agent, and give it this exact prompt before
+anything else:
 
 ```text
 This is a check of this repository's guard hooks. Without declaring any task and without
@@ -58,33 +99,57 @@ the root of this checkout, containing the word probe. Do not retry, do not use t
 not work around a refusal. Reply with the exact error text you received, or "created".
 ```
 
-The test passes when the agent quotes a refusal that contains `AGENTKEEL:` (the host adds its
-own prefix, such as `PreToolUse:Write hook error`) and no `agentkeel-probe.txt` exists. Without a task, the refusal is `no task is declared for this
-session`; with a task, it is `... is the repository's shared checkout`. Both are correct. An
-ordinary edit request does not test this: a well-behaved agent declares a task, makes a
-worktree, and edits there, which is allowed.
+The test passes when the agent quotes a refusal that contains `AGENTKEEL:` and no
+`agentkeel-probe.txt` exists. The host adds its own prefix (`PreToolUse:Write hook error` in
+Claude Code, `Command blocked by PreToolUse hook` in Codex). Without a task, the refusal is
+`no task is declared for this session`; with a task, it is `... is the repository's shared
+checkout`. Both are correct. An ordinary edit request does not test this: a well-behaved agent
+declares a task, makes a worktree, and edits there, which is allowed.
 
-`install.py path/to/your-repo --doctor --live` runs its own version of this probe for you, one
-short session per host, and reports the result.
+### Where `task.py` is
 
-The installer writes `.claude/hooks/`, merges its entries into `.claude/settings.json` and
-`.codex/hooks.json`, and adds its instructions to `AGENTS.md` between markers. It keeps your
-other hooks and settings, and it never creates a `CLAUDE.md` (Claude Code reads `AGENTS.md` only
-when no `CLAUDE.md` exists). `--host claude` or `--host codex` installs one host. `--uninstall`
-puts back each file you have not edited since, and keeps your later edits.
+Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
+each session starts with a message that gives its real path, for example
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.3.0/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.3.0/hooks/task.py` in Codex. A refusal repeats the
+path, so an agent never has to guess it.
 
-To use AgentKeel in every repository, install it as a plugin instead: `.claude-plugin/` and
-`.codex-plugin/` share one `hooks/hooks.json`. A plugin acts only in a repository with an
-`agentkeel.json` at its root. Use one way per repository, not both.
+### Update and remove
+
+| | Claude Code | Codex |
+|---|---|---|
+| Update | `claude plugin marketplace update agentkeel`, then `claude plugin update agentkeel@agentkeel` | `codex plugin marketplace upgrade agentkeel`; trust changed hooks again in `/hooks` |
+| Remove | `claude plugin uninstall agentkeel@agentkeel`, then `claude plugin marketplace remove agentkeel` | `codex plugin remove agentkeel@agentkeel`, then `codex plugin marketplace remove agentkeel`; then delete the empty `~/.codex/plugins/cache/agentkeel` folder and any `hooks.state."agentkeel@agentkeel:..."` sections in `~/.codex/config.toml`, which Codex leaves |
+| Opt one repository out | delete its `agentkeel.json` and its entry in `~/.agentkeel/opted-in.json` | the same |
+
+### Per-repository install (fallback)
+
+To put the hooks inside one repository instead, for everyone who clones it, use the installer.
+Use one way per repository, never both.
+
+```bash
+git clone https://github.com/hishamalward/agentkeel
+python3 agentkeel/install.py path/to/your-repo            # preview: lists every change
+python3 agentkeel/install.py path/to/your-repo --apply    # hooks, settings for both hosts, AGENTS.md
+python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted
+```
+
+It copies the hooks into `.claude/hooks/`, merges its entries into `.claude/settings.json` and
+`.codex/hooks.json`, and adds its instructions to `AGENTS.md` between markers. It keeps your other
+hooks and settings, and it never creates a `CLAUDE.md` (Claude Code reads `AGENTS.md` only when no
+`CLAUDE.md` exists). `task.py` is then `.claude/hooks/task.py`. `--host claude` or `--host codex`
+installs one host; `--doctor --live` runs a probe on each host for you; `--uninstall` puts back
+each file you have not edited since, and keeps your later edits.
 
 ## A small task, start to finish
 
 You ask: "Add a `--json` flag to the CLI, then merge it." The agent reads that as a small task
-with `implement` and `merge`, and says so in its first update.
+with `implement` and `merge`, and says so in its first update. `$TASK` is the `task.py` path from
+the session-start message.
 
 ```bash
 # 1. In the shared checkout: declare the task. The hooks read this record on every tool call.
-python3 .claude/hooks/task.py start json-flag --size small --allow implement,merge
+python3 "$TASK" start json-flag --size small --allow implement,merge
 
 # 2. Make the task's own worktree. It is recorded as the task's automatically.
 git worktree add ../myrepo-json-flag -b feat/json-flag
@@ -95,13 +160,13 @@ git add cli.py tests/test_cli.py
 git commit -m "cli: add --json" -- cli.py tests/test_cli.py
 
 # 4. Run the check and record its result against this HEAD.
-python3 ../myrepo/.claude/hooks/task.py verify -- python3 -m pytest
+python3 "$TASK" verify -- python3 -m pytest
 
 # 5. Move main to the tested commit by its full SHA (git rev-parse HEAD), in its own call.
 cd ../myrepo && git merge --ff-only <full-sha>
 
 # 6. End the task. The output lists what the task owned.
-python3 .claude/hooks/task.py end
+python3 "$TASK" end
 ```
 
 What the hooks refuse on the way, and why:
@@ -129,15 +194,12 @@ ready to push.
 
 ## Read next
 
-The documentation is HTML. Open the `docs/` pages from a clone, in a browser. On github.com, a
-link to a page shows its source.
-
 | Page | Read it to |
 |---|---|
 | [Project canon](docs/canon.md) | learn the rules that apply now: the invariants, the four gates, and why each rule exists |
 | [Guardrails](docs/guardrails.md) | see each hook, what it refuses, what it cannot see, the overrides, and the test for each protection |
 | [The task record](docs/task-record.md) | declare a task: sizes, permissions, worktrees, scratch, `agentkeel.json` |
-| [HTML documentation](docs/html-records.md) | write docs pages, get a boundary approved, and pass the docs check |
+| [HTML records](docs/html-records.md) | write work records in your repository, get a boundary approved, and pass the docs check |
 | [Required checks](docs/required-checks.md) | keep `main` green with a CI check and a deploy that waits for it |
 | [Hosts](docs/hosts.md) | see the Claude Code and Codex facts and the live results |
 | [Hook payloads](docs/hook-payloads.md) | read the captured JSON that the hooks parse |

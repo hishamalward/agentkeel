@@ -56,6 +56,7 @@ Run on 2026-10-04 with Claude Code 2.1.289 (`claude -p`, Sonnet) and Codex CLI 0
 
 - The Codex run used `--dangerously-bypass-hook-trust` for that run only. A separate Codex plugin run trusted its five hooks by hand in `/hooks`, with no bypass, and refused an undeclared write and a `cat .env`.
 - The Claude plugin (`claude --plugin-dir`) refused an undeclared write in a repository with `agentkeel.json`, printed the real `task.py` path at session start, and did nothing in a repository without one.
+- On 2026-10-05 both plugins were installed from GitHub (the `docs/docs-pass` branch) with the commands in the README, in a throwaway repository with `agentkeel.json`. The README's probe prompt was refused on both hosts and created no file: Claude Code (2.1.289, Sonnet) answered `PreToolUse:Write hook error: ... AGENTKEEL: no task is declared for this session`; Codex (0.160.0) answered `Command blocked by PreToolUse hook: AGENTKEEL: no task is declared for this session`. Each session-start message gave the real `task.py` path in the plugin cache. The update and removal commands ran clean on both. The Codex run used `--dangerously-bypass-hook-trust`; trusting plugin hooks by hand in `/hooks` was proven in an earlier run.
 - On 2026-10-05 both hosts also ran the HTML record checks live: the details are on [HTML records](html-records.md#verification).
 
 ## Other hosts
