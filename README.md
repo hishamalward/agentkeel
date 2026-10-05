@@ -256,9 +256,7 @@ agent. The v0.1 worked example (tier model) is kept in
   call rather than a file: allowlist, approval, quotas, an audit log that verifies.
 ## Not yet
 
-- A live test of the Codex plugin install, and of the required-checks template on a real hosted
-  repository (the template and its selector are tested locally; see
-  [`docs/required-checks.md`](docs/required-checks.md)).
+- A live test of the Codex plugin install with ordinary hook trust.
 - A cap on the review gate (G3).
 - Ownership-aware cleanup of a finished task's worktrees and slots; a session-start banner.
 

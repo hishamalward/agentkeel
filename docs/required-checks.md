@@ -30,7 +30,11 @@ a candidate whose tests failed was refused (`'agentkeel-required' ended failure`
 whose check had not run yet; a docs-only candidate skipped the app tests, passed the required
 check, was allowed, and `main` moved to it; a green candidate built on an older `main` was
 rejected by git as non-fast-forward, and after a rebase its new commit was refused until its
-own check ran.
+own check ran. The same repository was connected to a Railway test service with wait for CI on
+(`checkSuites: true` on the service's GitHub deploy trigger; the API name of the dashboard
+setting): a failing commit pushed straight to `main` by hand was never deployed, and a passing
+commit was held `WAITING` while its run was in progress and deployed once it passed. Both test
+resources were deleted afterwards.
 
 ## The shipping path
 
@@ -89,8 +93,9 @@ The same settings exist in the web UI (Settings, Branches) and as a repository r
 The deploy must not start on a commit whose check has not passed.
 
 - **Railway**: in the service's settings, enable waiting for GitHub check suites ("Wait for CI")
-  for the GitHub-connected deploy. Railway then holds the deploy of a pushed commit until its
-  checks finish, and skips it if they fail.
+  for the GitHub-connected deploy (in the API: `deploymentTriggerUpdate` with
+  `checkSuites: true`). Railway then holds the deploy of a pushed commit as `WAITING` until its
+  checks finish, and does not deploy it if they fail (verified 2026-10-04).
 - **Vercel, Netlify and others**: use their equivalent "wait for checks" or "ignored build step"
   setting, or deploy from CI after `agentkeel-required` passes instead of on push.
 
