@@ -34,6 +34,14 @@ class TaskCommand(RepoCase):
         self.assertIn("shared checkout", out.stdout)
         self.assertTrue(os.path.isdir(self.record()["scratch"]))
 
+    def test_write_root_inside_a_repository_refused(self):
+        out = self.task("start", "review-report", "--size", "large", "--allow", "review",
+                        "--write-root", os.path.join(self.primary, "src"), cwd=self.primary)
+        self.assertEqual(out.returncode, 2); self.assertIn("inside the repository", out.stderr)
+        report = os.path.join(self.tmp, "report"); os.makedirs(report)
+        self.assertEqual(self.task("start", "r", "--size", "small", "--allow", "review",
+                                   "--write-root", report).returncode, 0)
+
     def test_no_session_id_refused(self):
         out = self.task("start", "x", "--size", "small", "--allow", "implement", session=None)
         self.assertEqual(out.returncode, 2); self.assertIn("no session id", out.stderr)

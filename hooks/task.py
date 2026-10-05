@@ -63,6 +63,11 @@ def start(args, environ):
     for r in roots:
         if r in too_wide or r.startswith(record.home(environ) + os.sep):
             return fail(f"--write-root {r} is too wide or is agentkeel's own state")
+        inside = gitops.toplevel(r if os.path.isdir(r) else os.path.dirname(r) or "/")
+        if inside:
+            return fail(f"--write-root {r} is inside the repository {inside}.\n"
+                        "Write roots are report folders outside any repository. To change files in a\n"
+                        "repository, use --allow implement in the task's own worktree.")
     if "review" in perms and "implement" not in perms and not roots:
         sys.stderr.write("agentkeel: note: a review task writes only to its --write-root folders; none given,\n"
                          "so every write will be refused.\n")

@@ -52,7 +52,7 @@ One command, run by the agent before its first write, from its reading of the hu
 | Question | Answers | What the hooks do with it |
 |---|---|---|
 | **Size**: how much process? | `small`: own branch and worktree, no plan or subagents, one check. `medium`: tests, one review round. `large`: approved spec, plan table gated once, per-task and branch review | `large`: no edit outside `docs/` until the spec is approved, then only its `Changes` paths |
-| **Permissions**: which actions? | `review` (write only the `--write-root` folders), `implement` (edit, commit, local checks and builds), `merge` (move a protected branch locally), `push` (any push to a remote, and deploy commands); a PR merge needs both `merge` and `push`, `distribution-build`, `store-submission`, `paid-job` | each action is refused without its permission; "merge and push" grants both and never a distribution build |
+| **Permissions**: which actions? | `review` (write only the `--write-root` report folders, which lie outside any repository), `implement` (edit, commit, local checks and builds), `merge` (move a protected branch locally), `push` (any push to a remote, and deploy commands); a PR merge needs both `merge` and `push`, `distribution-build`, `store-submission`, `paid-job` | each action is refused without its permission; "merge and push" grants both and never a distribution build |
 | **Resources**: where? | the worktree it was declared in, any worktree it creates with `git worktree add`, and `--write-root` folders | writes outside them are refused; another agent's worktree is never writable |
 
 The record is bound to the agent session (Claude Code's session id; subagents share it), stored
@@ -137,7 +137,7 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | Protection | Kind | Tested in |
 |---|---|---|
 | No write without a task declared by this session; a second session cannot reuse it | prevents | `test_task_guard.py` (NoTask, SessionBinding) |
-| Writes only inside the task's worktrees, write roots and its own scratch (its scratch folder, or a temp path naming its session); another task's temp files are not writable; a review writes only its report folder; `git worktree add` claims only a path that does not exist yet | prevents | WriteRoots, ReviewFindings |
+| Writes only inside the task's worktrees, write roots and its own scratch (its scratch folder, or a temp path naming its session); another task's temp files are not writable; a review writes only its report folder, and a write root never reaches into a repository; `git worktree add` claims only a path that does not exist yet | prevents | WriteRoots, ReviewFindings |
 | Code edits only in the task's own linked worktree, never the shared checkout (whatever branch it is on), and never on a protected branch (`main`, `master`, or `agentkeel.json`), at every size | prevents | Branches, StageReviewFindings |
 | Commits name their paths (`-- <paths>`), so another agent's staged files never ride along | prevents | Commits |
 | `main` moves locally (commit, merge, ff, reset, rebase, update-ref, `fetch .:main`) only with `merge` | prevents | Shipping |
@@ -145,7 +145,7 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | Force push, remote branch delete, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` (the stash is shared by every worktree) | prevents, with a logged one-command override | Destructive |
 | `eas build`, `eas submit`, `eas update`, `npm publish`, deploy commands, repo-defined paid jobs only with their permission (also through `npx`, `pnpm exec`, `npm exec`; a `--dry-run` is not the action) | prevents, for the listed command shapes | CommandClasses |
 | Hook config, `agentkeel.json` and agentkeel state not editable by the agent's file tools | prevents | ProtectedConfig |
-| A large task edits nothing outside `docs/` before approval, then only its `Changes` list; the agent cannot approve a spec or change an approved one (except to mark it superseded); write roots do not lift either rule | prevents, for the agent's file tools and `task.py` | LargeAndSpecApproval, StageReviewFindings |
+| A large task edits nothing outside `docs/` before approval, then only its `Changes` list; the agent cannot approve a spec or change an approved one (except to mark it superseded) | prevents, for the agent's file tools and `task.py` | LargeAndSpecApproval, StageReviewFindings |
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
 | A third plan-gate dispatch | prevents when the prompt carries `[plan-gate]`; heuristic otherwise | `test_plan_gate_guard.py` |
 | A plan over 300 lines | warns after the write | `test_plan_size_guard.py` |

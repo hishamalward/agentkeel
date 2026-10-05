@@ -15,7 +15,7 @@ and proceed. Ask only when information is missing, the request is unclear, or an
 go past it. They are separate questions; changing one never changes the other.
 - Size (how much process): small = its own branch and worktree, no plan or subagents, one check;
   medium = tests and one review round; large = an approved spec, a plan table gated once, reviews.
-- Permissions (what actions): review (writes only --write-root folders), implement (edit, commit
+- Permissions (what actions): review (writes only --write-root report folders, outside the repo), implement (edit, commit
   with explicit paths, local checks and builds), merge (move a protected branch), push (any push),
   distribution-build, store-submission, paid-job. "Merge and push" grants both; it never grants
   a distribution build. Finishing work and shipping it are separate decisions.

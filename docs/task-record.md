@@ -27,7 +27,7 @@ on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktr
 
 | Permission | Allows |
 |---|---|
-| `review` | writing the `--write-root` folders only (a report page, an audit) |
+| `review` | writing the `--write-root` folders only (report folders outside any repository) |
 | `implement` | editing the task's own worktrees, commits with explicit paths, local checks and local builds, local pushes between non-protected branches, files in the task's scratch |
 | `merge` | `gh pr merge` (together with `push`); moving a protected branch locally: a commit on it, `merge`, `merge --ff-only`, `reset`, `rebase`, `update-ref`, `fetch . x:main`, `branch -f` |
 | `push` | every push to a remote, the task's own branch included; deploy commands (`railway up`, `vercel --prod`, `fly deploy`, `netlify deploy --prod`) |
@@ -49,8 +49,10 @@ on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktr
 - **Scratch**: each record has a scratch folder (`$TMPDIR/agentkeel-scratch/<session>`, printed by
   `task.py start`). Temp paths that name the session (Claude Code's own scratchpad does) are
   scratch too. Any other temp file belongs to someone else.
-- **Write roots are places, not exemptions**: a write root lifts the worktree and branch rules
-  for its folder, never the spec-approval rule or a large task's `Changes` list.
+- **Write roots are report folders outside any repository.** `task.py start` refuses one inside
+  a repository, and the guard ignores one there: repository files are written only through the
+  task's own worktree, under every rule above. A review that must land in the repository (an
+  audit under `docs/`) is an `implement` task in its own worktree.
 - **Every code task has its own worktree**, even when you are the only agent, and the guard
   enforces it: the shared checkout never takes code edits, whatever branch it is on, and
   `task.py start` there records no worktree. `git worktree add

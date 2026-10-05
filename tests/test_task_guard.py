@@ -486,8 +486,9 @@ class StageReviewFindings(RepoCase):
         approved = "---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\nbody\n"
         with open(spec, "w") as fh:
             fh.write("---\nstatus: draft\n---\n")
-        self.declare(allow=("review",), write_roots=[specs])
-        self.assertEqual(self.code(self.write(spec, content=approved)), 2)
+        for allow in (("review",), ("implement",)):
+            self.declare(allow=allow, write_roots=[specs])
+            self.assertEqual(self.code(self.write(spec, content=approved)), 2, allow)
         self.assertEqual(self.code(self.write(spec, content="---\nstatus: draft\n---\nmore\n")), 0)
         with open(spec, "w") as fh:
             fh.write(approved)
@@ -497,6 +498,25 @@ class StageReviewFindings(RepoCase):
     def test_write_root_inside_a_large_task_keeps_the_blast_radius(self):
         self.declare(size="large", task="json-flag", write_roots=[os.path.join(self.repo, "src")])
         self.assertEqual(self.code(self.write("src/a.py")), 2)
+
+    def test_write_root_never_reaches_repository_source(self):
+        shared_src = os.path.join(self.primary, "src")
+        for size, allow in (("large", ("review",)), ("large", ("implement",)), ("small", ("implement",))):
+            self.declare(size=size, allow=allow, worktrees=[], write_roots=[shared_src])
+            code, err = self.hook(self.write(os.path.join(shared_src, "app.py")))
+            self.assertEqual(code, 2, (size, allow))
+        other = os.path.join(self.tmp, "foreign-wt")
+        git(self.primary, "worktree", "add", "-q", other, "-b", "feat/foreign")
+        self.declare(allow=("implement",), write_roots=[other])
+        self.assertEqual(self.code(self.write(os.path.join(other, "a.py"))), 2)
+        git(self.repo, "checkout", "-q", "main")
+        self.declare(allow=("implement",), write_roots=[os.path.join(self.repo, "src")])
+        self.assertEqual(self.code(self.write("src/a.py")), 2)  # protected branch
+
+    def test_report_folder_outside_the_repo_still_works(self):
+        report = os.path.join(self.tmp, "reports", "r1"); os.makedirs(report)
+        self.declare(allow=("review",), write_roots=[report])
+        self.assertEqual(self.code(self.write(os.path.join(report, "page.html"))), 0)
 
     def test_shared_checkout_never_takes_code_edits(self):
         git(self.primary, "checkout", "-q", "-b", "feat/in-shared")

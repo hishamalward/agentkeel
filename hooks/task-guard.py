@@ -9,7 +9,7 @@ record (hooks/task.py) and judges every operation in the tool call against it:
     - a task must be declared for this session
     - the agent cannot approve a spec or change an approved one; a large task writes nothing
       outside docs/ before its spec is approved, then only its Changes list (write roots included)
-    - the task's --write-root folders are writable
+    - the task's --write-root folders (report folders outside any repository) are writable
     - otherwise the target must be inside one of the task's own linked worktrees (never the
       shared checkout), the task must have `implement`, and the branch must not be protected
     - temp files outside any repository: only the task's scratch (its scratch folder, or a temp
@@ -137,11 +137,11 @@ def judge_edit(tool, tool_input, cwd, rec, environ):
     if rel and re.match(r"^docs/specs/[^/]+\.md$", rel):
         judge_spec_edit(tool, tool_input, target, rel)
     large = bool(rel) and rec.get("size") == "large" and not rel.startswith("docs/")
-    if any(under(target, r) for r in rec.get("write_roots") or []):
-        if large and root in (rec.get("worktrees") or []):
-            judge_large_path(rel, root, rec)
-        return
     if root is None:
+        # Write roots are report folders outside any repository. Inside a repository they grant
+        # nothing: source is written only through the task's own worktree, by the rules below.
+        if any(under(target, r) for r in rec.get("write_roots") or []):
+            return
         if "implement" in perms and own_scratch(target, rec, environ):
             return
         raise Block(
