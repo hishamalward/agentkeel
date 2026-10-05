@@ -38,11 +38,15 @@ class RepoCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = os.path.realpath(self._tmp.name)
+        # The shared checkout (`primary`) stays on `base`; tasks work in `repo`, a linked worktree
+        # that starts on main, as every code task does (its own worktree, never the shared one).
+        self.primary = os.path.join(self.tmp, "primary")
         self.repo = os.path.join(self.tmp, "repo")
         self.home = os.path.join(self.tmp, "agentkeel-home")
+        subprocess.run(["git", "init", "-q", "-b", "base", self.primary], check=True)
+        git(self.primary, "commit", "-q", "--allow-empty", "-m", "init")
+        git(self.primary, "worktree", "add", "-q", self.repo, "-b", "main")
         os.makedirs(os.path.join(self.repo, "src"))
-        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
-        git(self.repo, "commit", "-q", "--allow-empty", "-m", "init")
         self.env = {"AGENTKEEL_HOME": self.home}
 
     def tearDown(self):

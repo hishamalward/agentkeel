@@ -55,7 +55,8 @@ def start(args, environ):
                     + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
     cwd = os.getcwd()
     top = gitops.toplevel(cwd)
-    worktrees = [os.path.realpath(top)] if top else []
+    shared = bool(top) and gitops.is_primary(top)
+    worktrees = [os.path.realpath(top)] if top and not shared else []
     worktrees += [realpath(p, cwd) for p in args.worktree or []]
     roots = [realpath(p, cwd) for p in args.write_root or []]
     too_wide = {"/", os.path.realpath(os.path.expanduser("~")), record.home(environ)}
@@ -92,11 +93,19 @@ def start(args, environ):
     for r in roots:
         if r not in rec["write_roots"]:
             rec["write_roots"].append(r)
+    import tempfile
+    rec["scratch"] = os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch",
+                                  record._safe(session))
+    os.makedirs(rec["scratch"], exist_ok=True)
     path = record.save(rec, environ)
     print(f"agentkeel: task '{args.task}', size {args.size}, permissions {', '.join(rec['permissions'])}")
     print(f"  worktrees: {', '.join(rec['worktrees']) or '(none)'}")
     if rec["write_roots"]:
         print(f"  write roots: {', '.join(rec['write_roots'])}")
+    print(f"  scratch: {rec['scratch']}")
+    if shared and "implement" in rec["permissions"]:
+        print(f"  note: {top} is the shared checkout. Code edits happen in this task's own worktree:\n"
+              f"    git worktree add ../{os.path.basename(top)}-{args.task} -b feat/{args.task}")
     print(f"  record: {path}")
     return 0
 

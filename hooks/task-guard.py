@@ -7,18 +7,19 @@ record (hooks/task.py) and judges every operation in the tool call against it:
   file edits (Write, Edit, NotebookEdit)
     - agentkeel state, hook configuration and agentkeel.json are never edited by the agent
     - a task must be declared for this session
-    - the task's --write-root folders are always writable
-    - otherwise the target must be inside one of the task's worktrees, the task must have
-      `implement`, and that worktree must not be on a protected branch
-    - plain temp files outside any repository are scratch, writable with `implement`
-    - size large: nothing outside docs/ before docs/specs/<task>-spec.md is approved, then only
-      the paths its Changes list names; the agent cannot write the approval itself
+    - the agent cannot approve a spec or change an approved one; a large task writes nothing
+      outside docs/ before its spec is approved, then only its Changes list (write roots included)
+    - the task's --write-root folders are writable
+    - otherwise the target must be inside one of the task's own linked worktrees (never the
+      shared checkout), the task must have `implement`, and the branch must not be protected
+    - temp files outside any repository: only the task's scratch (its scratch folder, or a temp
+      path naming its session), with `implement`
 
   shell commands (Bash): every simple command and every git operation in the line, not the first
     - commit: needs `implement` in a worktree the task owns, and explicit paths
     - a protected branch moves locally (commit on it, merge, ff, reset, update-ref, fetch x:main):
       needs `merge`
-    - a push whose destination is a protected branch: needs `push`
+    - every push to a remote: needs `push`; `gh pr merge` needs `merge` and `push`
     - force push, reset --hard, whole-tree checkout or restore, clean -f, branch -D, stash
       drop/clear/pop: refused unless the command itself carries AGENTKEEL_ALLOW_DESTRUCTIVE=1
     - distribution builds, store submissions, deploy commands and paid jobs: need their own
@@ -128,20 +129,36 @@ def judge_edit(tool, tool_input, cwd, rec, environ):
             "edit and let them make it.")
     if not rec:
         raise Block(NO_TASK)
-    for r in rec.get("write_roots") or []:
-        if under(target, r):
-            return
     root = gitops.toplevel(nearest_dir(target))
     root = os.path.realpath(root) if root else None
+    rel = os.path.relpath(target, root).replace(os.sep, "/") if root else None
     perms = set(rec.get("permissions") or [])
+    # Spec approval and a large task's blast radius hold everywhere, write roots included.
+    if rel and re.match(r"^docs/specs/[^/]+\.md$", rel):
+        judge_spec_edit(tool, tool_input, target, rel)
+    large = bool(rel) and rec.get("size") == "large" and not rel.startswith("docs/")
+    if any(under(target, r) for r in rec.get("write_roots") or []):
+        if large and root in (rec.get("worktrees") or []):
+            judge_large_path(rel, root, rec)
+        return
     if root is None:
-        if any(under(target, t) for t in temp_roots(environ)) and "implement" in perms:
-            return  # scratch outside any repository
+        if "implement" in perms and own_scratch(target, rec, environ):
+            return
         raise Block(
-            f"refusing to write {target}: it is not in this task's worktrees or write roots.\n"
+            f"refusing to write {target}: it is not in this task's worktrees, write roots or scratch.\n"
             f"Task '{rec.get('task')}' owns: {', '.join(rec.get('worktrees') or []) or '(no worktree)'}"
-            f"{'; write roots: ' + ', '.join(rec.get('write_roots')) if rec.get('write_roots') else ''}.\n"
-            "If this path is really part of the task, re-declare with --write-root <folder>.")
+            f"{'; write roots: ' + ', '.join(rec.get('write_roots')) if rec.get('write_roots') else ''}"
+            f"{'; scratch: ' + rec['scratch'] if rec.get('scratch') else ''}.\n"
+            "Temp files go in the task's scratch folder. If this path is really part of the task,\n"
+            "re-declare with --write-root <folder>.")
+    owned_repos = {gitops.common_dir(w) for w in rec.get("worktrees") or [] if os.path.isdir(w)}
+    if gitops.is_primary(root) and (not owned_repos or gitops.common_dir(root) in owned_repos):
+        raise Block(
+            f"refusing to write {target}: {root} is the repository's shared checkout.\n"
+            "Every code task, small ones included, works in its own worktree, so the shared checkout\n"
+            "stays free for other agents' merges:\n"
+            f"  git worktree add ../{os.path.basename(root)}-{rec.get('task')} -b feat/{rec.get('task')}\n"
+            "then work there (the new worktree is recorded as this task's automatically).")
     if root not in (rec.get("worktrees") or []):
         raise Block(
             f"refusing to write {target}: it belongs to another worktree ({root}).\n"
@@ -159,23 +176,34 @@ def judge_edit(tool, tool_input, cwd, rec, environ):
             "branch in its own worktree:\n"
             f"  git worktree add ../<repo>-{rec.get('task')} -b feat/{rec.get('task')}\n"
             "then work there (the new worktree is recorded as this task's automatically).")
-    rel = os.path.relpath(target, root).replace(os.sep, "/")
-    if re.match(r"^docs/specs/[^/]+\.md$", rel):
-        text = new_content(tool, tool_input, target)
-        before = record.read(target)
-        was_approved = record.approval(before or "")[0]
-        if was_approved and text is not None and (record.frontmatter(text) or {}).get("status") != "superseded":
-            raise Block(
-                f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
-                "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
-                "the human. Stop and tell them what changed.")
-        if text is not None and record.approval(text)[0] and not was_approved:
-            raise Block(
-                f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
-                "Ask the human to approve it. They run, in their own terminal:\n"
-                f"  .claude/hooks/task.py approve {rel}")
-    if rec.get("size") == "large" and not rel.startswith("docs/"):
+    if large:
         judge_large_path(rel, root, rec)
+
+
+def own_scratch(target, rec, environ):
+    """A temp path this task owns: its scratch folder, or a temp path naming its session (Claude
+    Code's own scratchpad does). Another task's temp files are not scratch."""
+    if rec.get("scratch") and under(target, rec["scratch"]):
+        return True
+    if not any(under(target, t) for t in temp_roots(environ)):
+        return False
+    return str(rec.get("session_id")) in target.split(os.sep)
+
+
+def judge_spec_edit(tool, tool_input, target, rel):
+    text = new_content(tool, tool_input, target)
+    before = record.read(target)
+    was_approved = record.approval(before or "")[0]
+    if was_approved and text is not None and (record.frontmatter(text) or {}).get("status") != "superseded":
+        raise Block(
+            f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
+            "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
+            "the human. Stop and tell them what changed.")
+    if text is not None and record.approval(text)[0] and not was_approved:
+        raise Block(
+            f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
+            "Ask the human to approve it. They run, in their own terminal:\n"
+            f"  .claude/hooks/task.py approve {rel}")
 
 
 def judge_large_path(rel, root, rec):
@@ -305,13 +333,14 @@ def judge_git(sc, rec, environ, session, line):
             need(rec, "merge", f"moving the protected branch '{op.targets[0] if op.targets else '?'}' ({op.name})")
         elif op.kind == "push":
             hits = [t for t in op.targets if t in protected or t == "*"]
-            if hits:
-                if op.local:
+            if op.local:
+                if hits:
                     need(rec, "merge", f"moving '{hits[0]}' with a local push")
                 else:
-                    need(rec, "push", f"a push to '{hits[0] if hits[0] != '*' else 'every branch'}'")
-            elif not rec:
-                raise Block(NO_TASK)
+                    need(rec, "implement", "a local push between branches")
+            else:
+                where = (hits[0] if hits[0] != "*" else "every branch") if hits else ", ".join(op.targets)
+                need(rec, "push", f"a push to '{where}'")
 
 
 def judge_command(command, cwd, rec, environ, session, line=None):

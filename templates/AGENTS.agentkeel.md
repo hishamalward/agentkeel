@@ -16,10 +16,11 @@ go past it. They are separate questions; changing one never changes the other.
 - Size (how much process): small = its own branch and worktree, no plan or subagents, one check;
   medium = tests and one review round; large = an approved spec, a plan table gated once, reviews.
 - Permissions (what actions): review (writes only --write-root folders), implement (edit, commit
-  with explicit paths, local checks and builds), merge (move a protected branch), push (push one),
+  with explicit paths, local checks and builds), merge (move a protected branch), push (any push),
   distribution-build, store-submission, paid-job. "Merge and push" grants both; it never grants
   a distribution build. Finishing work and shipping it are separate decisions.
-- Resources: every code task gets its own worktree; `git worktree add` records it as the task's.
+- Resources: every code task gets its own worktree, never the shared checkout; `git worktree
+  add` records it. Temp files go in the scratch folder `task.py start` prints.
 When in doubt pick the smaller size. A task never grows on its own: stop and say so.
 
 **Gates** (work stops until a named owner produces named evidence):

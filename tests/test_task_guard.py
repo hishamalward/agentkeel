@@ -84,9 +84,19 @@ class WriteRoots(RepoCase):
         code, err = self.hook(self.write(os.path.join(other, "a.py")))
         self.assertEqual(code, 2); self.assertIn("another worktree", err)
 
-    def test_scratch_outside_any_repo_allowed_with_implement(self):
+    def test_own_scratch_allowed_with_implement(self):
         self.declare(); self.branch("feat/x")
-        self.assertEqual(self.hook(self.write(os.path.join(self.tmp, "scratch", "n.txt")))[0], 0)
+        session_dir = os.path.join(self.tmp, "claude-scratch", SESSION, "scratchpad")
+        self.assertEqual(self.hook(self.write(os.path.join(session_dir, "n.txt")))[0], 0)
+
+    def test_another_tasks_temp_file_blocked_for_implement(self):
+        self.declare(); self.branch("feat/x")
+        foreign = os.path.join(self.tmp, "other-session", "report.html")
+        os.makedirs(os.path.dirname(foreign))
+        with open(foreign, "w") as fh:
+            fh.write("theirs")
+        code, err = self.hook(self.write(foreign))
+        self.assertEqual(code, 2); self.assertIn("scratch", err)
 
     def test_outside_everything_blocked(self):
         self.declare(); self.branch("feat/x")
@@ -172,6 +182,7 @@ class Shipping(RepoCase):
         for c in ("git push origin main", "git push origin HEAD:main", "git push origin feat/x:main",
                   "git push origin refs/heads/feat/x:refs/heads/main"):
             self.assert_blocked(c, "'push' permission")
+        self.declare(allow=("implement", "push"))
         self.assertEqual(self.hook(self.bash("git push origin feat/x"))[0], 0)
         self.assertEqual(self.hook(self.bash("git push -u origin feat/x"))[0], 0)
 
@@ -440,6 +451,59 @@ class ReviewFindings(RepoCase):
     def test_dry_runs_are_not_the_action(self):
         for c in ("npm publish --dry-run", "git push --dry-run origin main"):
             self.assertEqual(self.hook(self.bash(c))[0], 0, c)
+
+
+class StageReviewFindings(RepoCase):
+    """Regression tests for the Stage 1 review (2026-10-04), one class of cases per finding."""
+
+    def setUp(self):
+        super().setUp()
+        self.branch("feat/x")
+
+    def code(self, payload):
+        return self.hook(payload)[0]
+
+    def test_every_remote_push_needs_push(self):
+        report = os.path.join(self.tmp, "report"); os.makedirs(report)
+        self.declare(allow=("review",), write_roots=[report])
+        self.assertEqual(self.code(self.bash("git push origin feat/example")), 2)
+        self.declare(allow=("implement",))
+        self.assertEqual(self.code(self.bash("git push origin feat/example")), 2)
+        self.assertEqual(self.code(self.bash("git push . feat/x:feat/y")), 0)  # a local ref move
+
+    def test_pr_merge_needs_merge_and_push(self):
+        self.declare(allow=("implement", "push"))
+        self.assertEqual(self.code(self.bash("gh pr merge 123 --merge")), 2)
+        self.declare(allow=("implement", "merge"))
+        self.assertEqual(self.code(self.bash("gh pr merge 123 --merge")), 2)
+        self.declare(allow=("implement", "merge", "push"))
+        self.assertEqual(self.code(self.bash("gh pr merge 123 --merge")), 0)
+        self.assertEqual(self.code(self.bash("git push origin main")), 0)
+
+    def test_write_roots_keep_the_approval_checks(self):
+        specs = os.path.join(self.repo, "docs", "specs"); os.makedirs(specs)
+        spec = os.path.join(specs, "x-spec.md")
+        approved = "---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\nbody\n"
+        with open(spec, "w") as fh:
+            fh.write("---\nstatus: draft\n---\n")
+        self.declare(allow=("review",), write_roots=[specs])
+        self.assertEqual(self.code(self.write(spec, content=approved)), 2)
+        self.assertEqual(self.code(self.write(spec, content="---\nstatus: draft\n---\nmore\n")), 0)
+        with open(spec, "w") as fh:
+            fh.write(approved)
+        self.assertEqual(self.code(self.write(spec, content=approved + "widened\n")), 2)
+        self.assertEqual(self.code(self.write(os.path.join(specs, "notes.md"), content="x")), 0)
+
+    def test_write_root_inside_a_large_task_keeps_the_blast_radius(self):
+        self.declare(size="large", task="json-flag", write_roots=[os.path.join(self.repo, "src")])
+        self.assertEqual(self.code(self.write("src/a.py")), 2)
+
+    def test_shared_checkout_never_takes_code_edits(self):
+        git(self.primary, "checkout", "-q", "-b", "feat/in-shared")
+        self.declare(worktrees=[self.repo])
+        code, err = self.hook(self.write(os.path.join(self.primary, "a.py")))
+        self.assertEqual(code, 2); self.assertIn("shared checkout", err)
+        self.assertEqual(self.code(self.write("src/a.py")), 0)  # its own worktree works
 
 
 if __name__ == "__main__":

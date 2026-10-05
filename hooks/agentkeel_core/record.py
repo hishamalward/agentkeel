@@ -33,6 +33,7 @@ DEFAULT_COMMANDS = {
                            r"^fastlane\b.*\b(gym|build_app|build_ios_app|build_android_app)\b"],
     "store-submission": [r"^eas submit\b", r"^eas update\b", r"^npm publish\b", r"^xcrun altool\b.*--upload",
                          r"^fastlane\b.*\b(deliver|pilot|supply|upload_to_app_store|upload_to_testflight|upload_to_play_store)\b"],
+    "merge": [r"^gh pr merge\b"],  # a PR merge moves the remote base branch: merge and push
     "push": [r"^gh pr merge\b", r"^railway up\b", r"^vercel\b.*--prod\b", r"^fly deploy\b", r"^netlify deploy\b.*--prod\b"],
     "paid-job": [],
 }

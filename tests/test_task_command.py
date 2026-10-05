@@ -27,6 +27,13 @@ class TaskCommand(RepoCase):
         self.assertEqual(rec["permissions"], ["implement", "merge"])
         self.assertEqual(rec["worktrees"], [self.repo])
 
+    def test_shared_checkout_is_not_recorded_as_the_tasks_worktree(self):
+        out = self.task("start", "x", "--size", "small", "--allow", "implement", cwd=self.primary)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(self.record()["worktrees"], [])
+        self.assertIn("shared checkout", out.stdout)
+        self.assertTrue(os.path.isdir(self.record()["scratch"]))
+
     def test_no_session_id_refused(self):
         out = self.task("start", "x", "--size", "small", "--allow", "implement", session=None)
         self.assertEqual(out.returncode, 2); self.assertIn("no session id", out.stderr)

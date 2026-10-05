@@ -135,6 +135,13 @@ def toplevel(call_or_cwd):
     return run_git(call_or_cwd, "rev-parse", "--show-toplevel")
 
 
+def is_primary(cwd):
+    """True for a repository's main checkout (the shared one), False for a linked worktree."""
+    git_dir = run_git(cwd, "rev-parse", "--path-format=absolute", "--git-dir")
+    common = common_dir(cwd)
+    return bool(git_dir and common) and os.path.realpath(git_dir) == common
+
+
 def common_dir(call_or_cwd):
     d = run_git(call_or_cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
     return os.path.realpath(d) if d else None
