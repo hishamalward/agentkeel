@@ -13,8 +13,8 @@ distribution-build, store-submission, paid-job. Size never grants a permission: 
 separate answers to separate questions. "merge and push" in the human's request means
 --allow implement,merge,push; a distribution build is never implied by shipping.
 
-The record is bound to this session (CLAUDE_CODE_SESSION_ID, or AGENTKEEL_SESSION_ID for other
-hosts) and stored in AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it.
+The record is bound to this session (CLAUDE_CODE_SESSION_ID in Claude Code, CODEX_THREAD_ID in
+Codex, AGENTKEEL_SESSION_ID for other hosts) and stored in AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it.
 `approve` is refused when an agent runs it through its shell tool; the human runs it in a
 terminal of their own, outside the agent session.
 """
@@ -45,7 +45,9 @@ def start(args, environ):
     session = record.session_from_env(environ)
     if not session:
         return fail("no session id. Run this from the agent session (Claude Code sets\n"
-                    "CLAUDE_CODE_SESSION_ID), or set AGENTKEEL_SESSION_ID for another host.")
+                    "CLAUDE_CODE_SESSION_ID, Codex sets CODEX_THREAD_ID), or set AGENTKEEL_SESSION_ID\n"
+                    "for another host. If both are set and the running agent cannot be found, set\n"
+                    "AGENTKEEL_SESSION_ID to the right one.")
     if not args.task or set(args.task) - TASK_ID_CHARS:
         return fail("task id must be kebab-case (a-z, 0-9, -), e.g. json-flag")
     perms = [p.strip() for p in (args.allow or "").split(",") if p.strip()]

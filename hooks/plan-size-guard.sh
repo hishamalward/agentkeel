@@ -30,18 +30,35 @@ if [ "${1:-}" = "--selftest" ]; then
 fi
 
 INPUT=$(cat)
-FILE=$(printf '%s' "$INPUT" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))
-except Exception: print("")' 2>/dev/null)
+HOOKS_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "${1:-}" = "--plugin" ]; then  # plugin hooks act only in repositories that opted in
+  TOP=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+  [ -f "$TOP/agentkeel.json" ] || exit 0
+fi
+# Every file the call wrote: file_path for Claude Code's Write/Edit, each path in a Codex
+# apply_patch envelope (read by the shared core, so both hosts are judged the same way).
+FILES=$(printf '%s' "$INPUT" | python3 -c 'import json,sys,os
+sys.path.insert(0, sys.argv[1])
+try:
+    from agentkeel_core import host
+    p = json.load(sys.stdin)
+    for e in host.events(p, p.get("cwd") or os.getcwd()):
+        if e.kind == "edit": print(e.path)
+except Exception:
+    pass' "$HOOKS_DIR" 2>/dev/null)
 
-case "$FILE" in
-  */docs/plans/*plan*.md) ;;
-  *) exit 0 ;;
-esac
-[ -f "$FILE" ] || exit 0
-
-LINES=$(wc -l < "$FILE" | tr -d ' ')
-[ "$LINES" -gt "$LIMIT" ] || exit 0
+FILE=""; LINES=0
+while IFS= read -r f; do
+  case "$f" in
+    */docs/plans/*plan*.md)
+      [ -f "$f" ] || continue
+      n=$(wc -l < "$f" | tr -d ' ')
+      if [ "$n" -gt "$LIMIT" ]; then FILE="$f"; LINES="$n"; break; fi ;;
+  esac
+done <<EOF_FILES
+$FILES
+EOF_FILES
+[ -n "$FILE" ] || exit 0
 
 cat >&2 <<MSG
 PLAN SIZE GUARD: $(basename "$FILE") is now $LINES lines; the limit is $LIMIT.

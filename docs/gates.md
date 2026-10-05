@@ -45,4 +45,5 @@ every push to `main` deployed. Conflicts are resolved on the branch; there is no
 branch. The hooks refuse moving `main` without `merge` (a commit on it, a merge, a
 fast-forward, a reset, an update-ref) and pushing it without `push`. They cannot prove the tests
 passed: that needs a required check on the candidate commit before `main` moves, with deployment
-waiting for it, which is CI's job and the next stage.
+waiting for it, which is CI's job: [`required-checks.md`](required-checks.md) has the template and
+the settings.

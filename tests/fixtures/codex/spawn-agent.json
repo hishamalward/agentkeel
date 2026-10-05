@@ -1,0 +1,15 @@
+{
+  "cwd": "<repo>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "session_id": "01a109a7-6149-7971-905f-4c71e8a3435a",
+  "tool_input": {
+    "message": "<encrypted by Codex; not readable by hooks>",
+    "task_name": "echo_sub"
+  },
+  "tool_name": "collaborationspawn_agent",
+  "tool_use_id": "call_e3954f7898614c9ab7517d213897fcae",
+  "transcript_path": null,
+  "turn_id": "01a109a7-627a-7183-9bfa-2ead3ac74584"
+}

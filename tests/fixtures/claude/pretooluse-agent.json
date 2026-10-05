@@ -1,0 +1,18 @@
+{
+  "cwd": "<repo>",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "<uuid>",
+  "session_id": "<uuid>",
+  "tool_input": {
+    "description": "Reply with the word done",
+    "prompt": "reply with the single word done",
+    "run_in_background": false
+  },
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_017Rgnaxy73ozi6xM3nh6KW4",
+  "transcript_path": "<home>/.claude/projects/<slug>/<session>.jsonl"
+}

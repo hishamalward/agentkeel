@@ -12,7 +12,7 @@ T = os.path.join(HOOKS, "task.py")
 
 class TaskCommand(RepoCase):
     def task(self, *args, session=SESSION, cwd=None):
-        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "AGENTKEEL_SESSION_ID")}
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "AGENTKEEL_SESSION_ID", "CODEX_THREAD_ID")}
         env.update(self.env)
         if session:
             env["CLAUDE_CODE_SESSION_ID"] = session

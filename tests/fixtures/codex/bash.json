@@ -1,0 +1,14 @@
+{
+  "cwd": "<repo>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "session_id": "01a109a7-6149-7971-905f-4c71e8a3435a",
+  "tool_input": {
+    "command": "echo thread=$CODEX_THREAD_ID session=$CODEX_SESSION_ID"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "exec-7796add9-0498-4c32-98e9-d8682ae86201",
+  "transcript_path": null,
+  "turn_id": "01a109a7-627a-7183-9bfa-2ead3ac74584"
+}

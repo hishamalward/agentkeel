@@ -20,7 +20,8 @@ verifies each success criterion. Four gates each name an owner. Four hooks and o
 the write path from inside the harness, outside the model's memory.
 
 What it does today, stated by kind of protection, is in the [capability table](#what-it-protects-and-what-it-does-not).
-Version 0.2 supports Claude Code. Codex support is the next stage and is not claimed here.
+Version 0.3 supports Claude Code and Codex, from one core: both hosts give the same decision and
+the same refusal text for the same task and the same act ([verified live](#verified-live)).
 
 ## The invariants
 
@@ -55,7 +56,8 @@ One command, run by the agent before its first write, from its reading of the hu
 | **Permissions**: which actions? | `review` (write only the `--write-root` report folders, which lie outside any repository), `implement` (edit, commit, local checks and builds), `merge` (move a protected branch locally), `push` (any push to a remote, and deploy commands); a PR merge needs both `merge` and `push`, `distribution-build`, `store-submission`, `paid-job` | each action is refused without its permission; "merge and push" grants both and never a distribution build |
 | **Resources**: where? | the worktree it was declared in, any worktree it creates with `git worktree add`, and `--write-root` folders | writes outside them are refused; another agent's worktree is never writable |
 
-The record is bound to the agent session (Claude Code's session id; subagents share it), stored
+The record is bound to the agent session (the host's session id; a subagent's tool calls carry
+its parent's on both hosts), stored
 in `~/.agentkeel/tasks/` (`AGENTKEEL_HOME`), and never editable by the agent's file tools. A
 second session cannot reuse it. Changing the size never changes the permissions; widening the
 permissions is said out loud on stderr and kept in the record's history. The agent states its
@@ -99,7 +101,7 @@ Verification is not a gate; it is the evidence rule every gate consumes.
 | G1 | Spec approval | Human | size `large`; spec `status: draft` | `status: approved`, `approved_by`, `approved_on` in frontmatter; a `D-NNN` entry | `task-guard.py` refuses non-doc edits before it, and refuses the agent writing the approval |
 | G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists | the plan table with every scope column `yes`; findings applied | `plan-gate-guard.py` refuses a third dispatch (heuristic; see the table below); `plan-size-guard.sh` reports a plan over 300 lines after the write |
 | G3 | Review | AI reviewer, one round per scope | per task: the task's diff; whole branch: all tasks done | findings applied; no second round without the human | guidance only |
-| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moves only with the merge permission, is pushed only with the push permission | `task-guard.py`; tests before `main` moves need a required CI check (next stage), not a hook |
+| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moves only with the merge permission, is pushed only with the push permission | `task-guard.py`; tests before `main` moves: the required-checks template ([`docs/required-checks.md`](docs/required-checks.md)), which is CI's job, not a hook's |
 
 Two gates are human-owned (G1, G4), two are AI-owned (G2, G3). [`docs/gates.md`](docs/gates.md)
 has a paragraph per gate.
@@ -116,13 +118,21 @@ simple command (after `&&`, `;`, `|`, newlines, line continuations, `$(...)`, `b
 and reads every git global option (`-C`, `-c`, `--git-dir`, `GIT_DIR`) and alias, including one
 defined earlier in the same line, so the second push in a line is judged like the first.
 
+Guards never read a host's tool names. `agentkeel_core/host.py` turns each host's call into the
+same events first: a file edit (Claude Code's `Write`/`Edit`/`NotebookEdit`, every path in a
+Codex `apply_patch`, both ends of a move), a shell command (`Bash` on both), or a subagent
+dispatch (`Agent`; Codex's `spawn_agent`). A tool that may write but has no adapter is refused
+with a reason, never silently allowed. The shapes are pinned by real captured payloads in
+`tests/fixtures/`; facts per host are in [`docs/hosts.md`](docs/hosts.md).
+
 | Hook | Event | Refuses |
 |---|---|---|
 | `task.py` | (the command) | declares, shows, records a check (`verify -- <cmd>`), ends a task; `approve` is the human's |
-| `task-guard.py` | PreToolUse `Write\|Edit\|NotebookEdit\|Bash` | everything in the first block of the table below |
+| `task-guard.py` | PreToolUse: Claude `Write\|Edit\|NotebookEdit\|Bash`; Codex `Bash\|apply_patch` | everything in the first block of the table below |
 | `secret-guard.py` | PreToolUse `Bash` | printing `.env*` (not `.env.example`), key files, credentials; bare `env`/`printenv`; `echo $ANY_KEY_OR_TOKEN`; `git show`/`diff` of `.env` |
-| `plan-gate-guard.py` | PreToolUse `Agent` | a third gate dispatch naming the same plan, counted per repository under a file lock |
-| `plan-size-guard.sh` | PostToolUse `Write\|Edit` | reports a `docs/plans/*plan*.md` over 300 lines (the write has happened) |
+| `plan-gate-guard.py` | PreToolUse `Agent` (Codex: `spawn_agent`) | a third gate dispatch for the same plan, counted per repository under a file lock; on Codex, whose dispatch message is encrypted, a `task_name` starting `plan_gate` counted per task |
+| `plan-size-guard.sh` | PostToolUse `Write\|Edit` (Codex: `apply_patch`) | reports a `docs/plans/*plan*.md` over 300 lines (the write has happened) |
+| `session-start.py` | SessionStart, plugin only | prints the task command with this install's real path |
 
 Two overrides exist, both written on the command itself so they apply once and show in the
 transcript, and both logged to `~/.agentkeel/overrides.jsonl`: `AGENTKEEL_ALLOW_DESTRUCTIVE=1 git
@@ -151,7 +161,9 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | A plan over 300 lines | warns after the write | `test_plan_size_guard.py` |
 | One review round per scope (G3); tests green before shipping (G4) | guidance only | |
 | Shell writes that are not git (`sed -i`, `>`, `rm`), commands inside scripts or npm scripts, other tools and hosts | unsupported | |
-| Codex, Cursor and other hosts | unsupported in 0.2 (next stage) | |
+| The same protections on Codex (file edits through `apply_patch`, shell, subagents) | prevents, as above | `test_hosts.py` (SameDecision, CapturedShapes) |
+| A tool that may write but has no adapter | prevents (refused as a visible gap) | `test_hosts.py` |
+| Cursor and other hosts | guidance only: they read `AGENTS.md`, no adapter | |
 
 ## The three registers
 
@@ -170,42 +182,62 @@ a `D-NNN`, or "nothing existing covers this"). When the log grows past about fif
 the status index into its own present-tense register; not before.
 ## Quickstart (5 minutes)
 
+Two ways in. A **project install** puts the hooks in the repository, for everyone who opens it:
+
 ```bash
 git clone https://github.com/hishamalward/agentkeel
 python3 agentkeel/install.py path/to/your-repo            # preview: lists every change, makes none
-python3 agentkeel/install.py path/to/your-repo --apply    # copy hooks, merge settings, update AGENTS.md
+python3 agentkeel/install.py path/to/your-repo --apply    # hooks, settings for both hosts, AGENTS.md
+python3 agentkeel/install.py path/to/your-repo --doctor   # what is installed and trusted (--live proves it)
 ```
 
 The installer copies the hooks into `.claude/hooks/`, merges its entries into
-`.claude/settings.json` without touching your other hooks or settings, and writes the instruction
-fragment into `AGENTS.md` between markers. It never creates a `CLAUDE.md`: Claude Code reads
-`AGENTS.md` only when no `CLAUDE.md` exists, so creating one would hide the instructions. If your
-repo has one, the installer says so and leaves it alone. `--uninstall` reverses all of it.
+`.claude/settings.json` (Claude Code) and `.codex/hooks.json` (Codex) without touching your other
+hooks or settings, and writes the instruction fragment into `AGENTS.md` between markers.
+`--host claude` or `--host codex` limits it to one. It never creates a `CLAUDE.md`: Claude Code
+reads `AGENTS.md` only when no `CLAUDE.md` exists, so creating one would hide the instructions. If
+your repo has one, or a `.codex/config.toml` that already defines hooks of the same name, the
+installer says so and leaves it alone. `--uninstall` reverses all of it, back to the original
+bytes of every file it changed.
 
-Installed is not active. Start a new Claude Code session in the repo and ask for a one-line edit
-before declaring anything; it must be refused with `no task is declared for this session`.
+A **plugin** carries the same hooks in your agent instead: `.claude-plugin/` and `.codex-plugin/`
+share one `hooks/hooks.json`. Plugin hooks run in every repository, so they act only in a
+repository that opts in with an `agentkeel.json` at its root, and a session-start hook tells the
+agent the task command's real path. Use one way per repository, not both.
 
-## Verified in Claude Code
+Installed is not active. Codex runs a new project hook only after you trust it (`/hooks` in
+Codex); `--doctor` shows what is missing. Then ask for a one-line edit before declaring anything;
+it must be refused with `no task is declared for this session` (`--doctor --live` does this for
+you, one short session per host).
 
-Run 2026-10-04 on commit `d485372` with Claude Code 2.1.289 (`claude -p`, Sonnet) in a throwaway
-repo with a local bare remote, installed with `install.py --apply`. Later commits tightened the
-rules (every push needs `push`; the shared checkout never takes code edits), so some refusal texts
-now differ; the unit tests cover the current behaviour. The model was told to attempt each step once and
-quote the hook. Results, with the hook's text where it refused:
+## Verified live
 
-| Step | Result |
-|---|---|
-| edit `cli.py` before declaring a task | refused: `no task is declared for this session` |
-| `task.py start words-label --size small --allow implement`, then `git worktree add ../demo-words -b feat/words-label`, then the edit there | allowed; the new worktree was recorded as the task's |
-| `git commit -am 'label output'` | refused: `refusing a commit that does not name its paths` |
-| `git commit -m 'label output' -- cli.py` | allowed |
-| `git push origin feat/words-label && git push origin main` | refused before either push ran: `a push to 'main' needs the 'push' permission; task 'words-label' has implement` |
-| a subagent edits `cli.py` in the main checkout, before any task | refused: `no task is declared for this session` |
-| the same subagent edit after `--allow implement,merge,push` | refused: `this worktree is on the protected branch 'main'` (subagents share the session's record) |
-| "merge and push": `git -C <main> merge --ff-only feat/words-label && git -C <main> push origin main` | allowed on the first try; the remote moved to the branch's commit |
-| `git push --force origin main` with every permission | refused: `refusing force push` |
+Run 2026-10-04 with Claude Code 2.1.289 (`claude -p`, Sonnet) and Codex CLI 0.160.0 (`codex exec`,
+low reasoning) in two throwaway repositories with local bare remotes, each installed with
+`install.py --apply`. Both models got the same eight steps, were told to attempt each once and to
+quote the hook, and gave the same result at every step. The Codex run used
+`--dangerously-bypass-hook-trust` instead of trusting the hooks by hand, and ran inside a Claude
+Code shell, so both hosts' session variables were set; `task.py` picked Codex's.
 
-The v0.1 worked example (tier model) is kept in
+| Step | Claude Code | Codex |
+|---|---|---|
+| create `notes.txt` before declaring a task (file tool) | refused: `no task is declared for this session` | refused, same text (through `apply_patch`) |
+| `task.py start parity --size small --allow implement` in the shared checkout | allowed; no worktree recorded, the note names the command | same |
+| `git worktree add ../wt -b feat/parity`, then create `../wt/notes.txt` | allowed | allowed |
+| `git add notes.txt && git commit -m notes -- notes.txt` in the worktree | allowed | allowed |
+| `git push origin feat/parity && git push origin main` | refused at the first push: `a push to 'feat/parity' needs the 'push' permission` | same |
+| `cat .env` | refused by the secret guard | same |
+| a subagent creates a file in the task's worktree | allowed | allowed |
+| a subagent writes in the shared checkout (separate Codex run) | (Stage 1 run: refused) | refused: `... is the repository's shared checkout` |
+
+Also live: the Claude plugin (`claude --plugin-dir`) refused an undeclared write in a repository
+with `agentkeel.json` and named its real `task.py` path at session start, and did nothing in a
+repository without one. The Codex plugin manifest is not yet tested in a live session.
+
+One difference found: inside a Codex subagent, `CODEX_THREAD_ID` is the subagent's own id, so
+`task.py show` and `task.py verify` run by a Codex subagent find no task, while its tool calls are
+still judged against the parent's record. Declare the task and record evidence from the main
+agent. The v0.1 worked example (tier model) is kept in
 [`docs/learning/worked-example-v0.1.md`](docs/learning/worked-example-v0.1.md).
 
 ## Relationship to other work
@@ -218,10 +250,9 @@ The v0.1 worked example (tier model) is kept in
   call rather than a file: allowlist, approval, quotas, an audit log that verifies.
 ## Not yet
 
-- Codex and other hosts: an adapter that turns `apply_patch` and other host events into the same
-  operations, real captured payloads as fixtures, plugins for both hosts, and a doctor command that
-  proves the hooks loaded (next stage).
-- A required CI check before `main` moves, with deployment waiting for it (next stage).
+- A live test of the Codex plugin install, and of the required-checks template on a real hosted
+  repository (the template and its selector are tested locally; see
+  [`docs/required-checks.md`](docs/required-checks.md)).
 - A cap on the review gate (G3).
 - Ownership-aware cleanup of a finished task's worktrees and slots; a session-start banner.
 
@@ -238,7 +269,7 @@ CI runs the same suite on macOS and Linux, on Python 3.10 and 3.13, plus every h
 
 For whoever owns this next: [docs/learning/how-it-works.html](docs/learning/how-it-works.html) is the
 v0.1 tour, and [docs/spec.md](docs/spec.md) the v0.1 contract; [`DECISIONS.md`](DECISIONS.md) D-004 to
-D-007 record what v0.2 changed and why.
+D-010 record what v0.2 and v0.3 changed and why.
 
 ## License
 

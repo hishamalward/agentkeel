@@ -122,6 +122,8 @@ def main():
             return 0
     except Exception:
         return 0
+    if record.plugin_inactive(sys.argv, payload):
+        return 0
     try:
         return decide(payload)
     except Exception as exc:

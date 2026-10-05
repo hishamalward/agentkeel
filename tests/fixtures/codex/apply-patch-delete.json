@@ -1,0 +1,14 @@
+{
+  "cwd": "<repo>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "session_id": "01a109a7-6149-7971-905f-4c71e8a3435a",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Delete File: c.py\n*** End Patch"
+  },
+  "tool_name": "apply_patch",
+  "tool_use_id": "exec-2f3b25d4-3beb-4614-921b-056c533a451c",
+  "transcript_path": null,
+  "turn_id": "01a109a7-627a-7183-9bfa-2ead3ac74584"
+}

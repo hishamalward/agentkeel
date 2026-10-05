@@ -1,0 +1,14 @@
+{
+  "cwd": "<repo>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "session_id": "01a109a7-6149-7971-905f-4c71e8a3435a",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: b.py\n*** Move to: b2.py\n@@\n-b = 1\n+b = 2\n*** End Patch"
+  },
+  "tool_name": "apply_patch",
+  "tool_use_id": "exec-9f28f4e2-d377-4226-ba60-476f69f99c25",
+  "transcript_path": null,
+  "turn_id": "01a109a7-627a-7183-9bfa-2ead3ac74584"
+}

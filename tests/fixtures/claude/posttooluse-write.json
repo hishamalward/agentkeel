@@ -1,0 +1,26 @@
+{
+  "cwd": "<repo>",
+  "duration_ms": 8,
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "prompt_id": "<uuid>",
+  "session_id": "<uuid>",
+  "tool_input": {
+    "content": "print('hi')\n",
+    "file_path": "<repo>/hello.py"
+  },
+  "tool_name": "Write",
+  "tool_response": {
+    "content": "print('hi')\n",
+    "filePath": "<repo>/hello.py",
+    "originalFile": null,
+    "structuredPatch": [],
+    "type": "create",
+    "userModified": false
+  },
+  "tool_use_id": "toolu_017hKsoxcTfzGuPjsXXuK4Dz",
+  "transcript_path": "<home>/.claude/projects/<slug>/<session>.jsonl"
+}

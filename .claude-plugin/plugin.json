@@ -1,0 +1,10 @@
+{
+  "name": "agentkeel",
+  "version": "0.3.0",
+  "description": "Bounded writes for coding agents: a task record (size, permissions, resources) that guards read before every edit, commit, push and build. Acts only in repositories with an agentkeel.json.",
+  "author": { "name": "Hisham Al-Ward" },
+  "homepage": "https://github.com/hishamalward/agentkeel",
+  "repository": "https://github.com/hishamalward/agentkeel",
+  "license": "MIT",
+  "keywords": ["guardrails", "hooks", "git", "agents"]
+}

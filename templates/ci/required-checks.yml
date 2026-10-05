@@ -1,0 +1,46 @@
+# agentkeel required checks. Copy to .github/workflows/agentkeel-checks.yml and
+# templates/ci/select_checks.py to .github/agentkeel/select_checks.py, then follow
+# docs/required-checks.md: the protected branch requires the `agentkeel-required` check, and the
+# deploy waits for it. Set the repository variable AGENTKEEL_TEST_COMMAND (default: npm test)
+# and, if your app needs it, AGENTKEEL_SETUP_COMMAND (default: npm ci).
+name: agentkeel-checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.select.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: select
+        run: python3 .github/agentkeel/select_checks.py --base origin/${{ github.event.repository.default_branch }} --head ${{ github.sha }} >> "$GITHUB_OUTPUT"
+
+  app-tests:
+    needs: select
+    if: needs.select.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: ${{ vars.AGENTKEEL_SETUP_COMMAND || 'npm ci' }}
+      - run: ${{ vars.AGENTKEEL_TEST_COMMAND || 'npm test' }}
+
+  # The one check the protected branch requires. It always reports, so a docs-only change
+  # (app tests skipped) is green and a failed or cancelled test job is red.
+  agentkeel-required:
+    needs: [select, app-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "select: ${{ needs.select.result }}, app-tests: ${{ needs.app-tests.result }}"
+          test "${{ needs.select.result }}" = "success"
+          case "${{ needs.app-tests.result }}" in success|skipped) ;; *) exit 1 ;; esac

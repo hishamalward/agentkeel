@@ -20,7 +20,7 @@ def run_hook(name, payload, env=None, cwd=None):
     path = os.path.join(HOOKS, name)
     cmd = [sys.executable, path] if name.endswith(".py") else ["bash", path]
     data = payload if isinstance(payload, str) else json.dumps(payload)
-    clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "AGENTKEEL_SESSION_ID")}
+    clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "AGENTKEEL_SESSION_ID", "CODEX_THREAD_ID")}
     out = subprocess.run(cmd, input=data, text=True, capture_output=True, cwd=cwd,
                          env={**clean, **GIT_ENV, **(env or {})}, timeout=60)
     return out.returncode, out.stderr

@@ -1,0 +1,19 @@
+{
+  "cwd": "<repo>",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "<uuid>",
+  "session_id": "<uuid>",
+  "tool_input": {
+    "file_path": "<repo>/hello.py",
+    "new_string": "print('hello')",
+    "old_string": "print('hi')",
+    "replace_all": false
+  },
+  "tool_name": "Edit",
+  "tool_use_id": "toolu_01NkCiG7D3gWiCiE8heVKjXW",
+  "transcript_path": "<home>/.claude/projects/<slug>/<session>.jsonl"
+}

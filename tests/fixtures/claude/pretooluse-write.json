@@ -1,0 +1,17 @@
+{
+  "cwd": "<repo>",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "<uuid>",
+  "session_id": "<uuid>",
+  "tool_input": {
+    "content": "print('hi')\n",
+    "file_path": "<repo>/hello.py"
+  },
+  "tool_name": "Write",
+  "tool_use_id": "toolu_017hKsoxcTfzGuPjsXXuK4Dz",
+  "transcript_path": "<home>/.claude/projects/<slug>/<session>.jsonl"
+}

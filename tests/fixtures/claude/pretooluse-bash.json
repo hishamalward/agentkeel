@@ -1,0 +1,17 @@
+{
+  "cwd": "<repo>",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "<uuid>",
+  "session_id": "<uuid>",
+  "tool_input": {
+    "command": "echo captured > note.txt",
+    "description": "Write \"captured\" to note.txt"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_01GP5nSSjpC7b7NjX6w98R2S",
+  "transcript_path": "<home>/.claude/projects/<slug>/<session>.jsonl"
+}

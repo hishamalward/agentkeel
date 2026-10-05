@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Install agentkeel into a repository for Claude Code. Preview by default.
+"""Install agentkeel into a repository for Claude Code and Codex. Preview by default.
 
   python3 install.py <repo>              show what would change, change nothing
   python3 install.py <repo> --apply      make those changes
   python3 install.py <repo> --uninstall  preview removal (add --apply to remove)
+  python3 install.py <repo> --doctor     check what is installed and trusted (--live: prove it)
+  --host claude|codex|all                which hosts (default all)
 
 What it does, and what it never does:
   - copies the hooks and agentkeel_core/ into <repo>/.claude/hooks/
-  - merges the hook entries into <repo>/.claude/settings.json; existing hooks and settings are
-    kept, nothing is overwritten, and the v0.1 entries (tier-guard, write-path-guard) are removed
+  - merges the hook entries into <repo>/.claude/settings.json (Claude Code) and
+    <repo>/.codex/hooks.json (Codex); existing hooks and settings are kept, nothing is
+    overwritten, and the v0.1 entries (tier-guard, write-path-guard) are removed
   - writes the instruction fragment into AGENTS.md between agentkeel markers (creating AGENTS.md
     if needed). It never creates a CLAUDE.md: Claude Code loads CLAUDE.md instead of AGENTS.md
     when one exists, so a CLAUDE.md would hide these instructions. If one exists, it says so.
 
-Installed is not active. Claude Code reads the hooks when a session starts; the report ends with
-the one test that proves they loaded. Codex is not supported in this version (Stage 2).
+Installed is not active. Hosts read hooks when a session starts, and Codex runs a new project
+hook only after the human trusts it (/hooks in codex). --doctor reports what is installed and
+trusted; --doctor --live proves each host refuses an undeclared write.
 """
 import argparse
 import json
@@ -25,7 +29,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK_FILES = ["task.py", "task-guard.py", "secret-guard.py", "plan-gate-guard.py", "plan-size-guard.sh"]
-CORE_FILES = ["__init__.py", "shell.py", "gitops.py", "record.py"]
+CORE_FILES = ["__init__.py", "shell.py", "gitops.py", "record.py", "patch.py", "host.py"]
 OBSOLETE = ["tier.sh", "tier-guard.py", "write-path-guard.py"]
 START, END = "<!-- agentkeel:start -->", "<!-- agentkeel:end -->"
 
@@ -95,7 +99,13 @@ def agents_text(current, fragment, remove):
     return (current.rstrip("\n") + "\n\n" if current.strip() else "") + block
 
 
-def plan(repo, remove):
+HOST_CONFIG = {
+    "claude": (os.path.join(".claude", "settings.json"), "claude-hooks.json"),
+    "codex": (os.path.join(".codex", "hooks.json"), "codex-hooks.json"),
+}
+
+
+def plan(repo, remove, hosts=("claude", "codex")):
     actions = []  # (description, function)
     skipped = []
     hooks_dir = os.path.join(repo, ".claude", "hooks")
@@ -119,9 +129,12 @@ def plan(repo, remove):
             if os.path.exists(dst) and is_ours(dst):
                 actions.append((f"remove {os.path.relpath(dst, repo)}", lambda d=dst: os.remove(d)))
         if os.path.isdir(core):
-            actions.append((f"remove {os.path.relpath(core, repo)}/ if empty",
-                            lambda: (shutil.rmtree(os.path.join(core, "__pycache__"), ignore_errors=True),
-                                     os.rmdir(core) if not os.listdir(core) else None)))
+            def tidy():
+                shutil.rmtree(os.path.join(core, "__pycache__"), ignore_errors=True)
+                for d in (core, hooks_dir):
+                    if os.path.isdir(d) and not os.listdir(d):
+                        os.rmdir(d)
+            actions.append((f"remove {os.path.relpath(core, repo)}/ and .claude/hooks/ if empty", tidy))
     else:
         for name in CORE_FILES:
             src, dst = os.path.join(HERE, "hooks", "agentkeel_core", name), os.path.join(core, name)
@@ -133,21 +146,17 @@ def plan(repo, remove):
         if os.path.exists(dst) and is_ours(dst):
             actions.append((f"remove v0.1 hook {os.path.relpath(dst, repo)}", lambda d=dst: os.remove(d)))
 
-    settings_path = os.path.join(repo, ".claude", "settings.json")
-    try:
-        with open(settings_path, encoding="utf-8") as fh:
-            existing = json.load(fh)
-    except FileNotFoundError:
-        existing = {}
-    except ValueError as exc:
-        raise SystemExit(f"install: {settings_path} is not valid JSON ({exc}); fix it first, nothing changed")
-    with open(os.path.join(HERE, "templates", "claude-hooks.json"), encoding="utf-8") as fh:
-        template = json.load(fh)
-    new = merged_settings(json.loads(json.dumps(existing)), template, remove)
-    if new != existing:
-        verb = "remove agentkeel entries from" if remove else "merge agentkeel hook entries into"
-        actions.append((f"{verb} .claude/settings.json (other hooks and settings kept)",
-                        lambda: atomic_write(settings_path, json.dumps(new, indent=2) + "\n")))
+    for h in hosts:
+        rel, template_name = HOST_CONFIG[h]
+        actions += config_actions(repo, rel, template_name, remove, drop_when_empty=(h == "codex"))
+    toml = os.path.join(repo, ".codex", "config.toml")
+    if "codex" in hosts and os.path.exists(toml):
+        text = open(toml, encoding="utf-8").read()
+        doubled = [n for n in HOOK_FILES if n.rsplit(".", 1)[0] in text]
+        if doubled:
+            skipped.append(".codex/config.toml already defines hooks named " + ", ".join(doubled) +
+                           "; Codex loads both files, so each would run twice (a plan-gate dispatch\n"
+                           "    would count twice). Remove those entries from config.toml by hand")
 
     agents_path = os.path.join(repo, "AGENTS.md")
     current = open(agents_path, encoding="utf-8").read() if os.path.exists(agents_path) else ""
@@ -168,17 +177,185 @@ def plan(repo, remove):
     return actions, skipped
 
 
+def backup_path(path):
+    """Where the original bytes of a config file are kept between install and uninstall."""
+    import hashlib
+    home = os.path.realpath(os.path.expanduser(os.environ.get("AGENTKEEL_HOME") or "~/.agentkeel"))
+    key = hashlib.sha256(os.path.realpath(path).encode()).hexdigest()[:16]
+    return os.path.join(home, "install-backups", key)
+
+
+def prune(d):
+    if os.path.isdir(d) and not os.listdir(d):
+        os.rmdir(d)
+
+
+def save_original(path):
+    b = backup_path(path)
+    if os.path.exists(b):
+        return  # keep the first original across repeated installs
+    os.makedirs(os.path.dirname(b), exist_ok=True)
+    if os.path.exists(path):
+        shutil.copy2(path, b)
+    else:
+        open(b + ".absent", "w").close()
+
+
+def restore_or_write(path, new, remove):
+    """On uninstall, put back the original bytes when the content is the same as before install."""
+    b = backup_path(path)
+    if remove and os.path.exists(b):
+        try:
+            with open(b, encoding="utf-8") as fh:
+                original = json.load(fh)
+        except (OSError, ValueError):
+            original = None
+        if original == new:
+            mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else None
+            shutil.copyfile(b, os.path.realpath(path))
+            if mode is not None:
+                os.chmod(os.path.realpath(path), mode)
+            os.remove(b)
+            prune(os.path.dirname(b))
+            return
+    atomic_write(path, json.dumps(new, indent=2) + "\n")
+
+
+def config_actions(repo, rel, template_name, remove, drop_when_empty):
+    path = os.path.join(repo, rel)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            existing = json.load(fh)
+    except FileNotFoundError:
+        existing = None
+    except ValueError as exc:
+        raise SystemExit(f"install: {path} is not valid JSON ({exc}); fix it first, nothing changed")
+    if existing is None and remove:
+        return []
+    with open(os.path.join(HERE, "templates", template_name), encoding="utf-8") as fh:
+        template = json.load(fh)
+    new = merged_settings(json.loads(json.dumps(existing or {})), template, remove)
+    if new == existing:
+        return []
+    if remove and (not new) and (drop_when_empty or os.path.exists(backup_path(path) + ".absent")):
+        def drop():
+            os.remove(path)
+            for leftover in (backup_path(path) + ".absent", backup_path(path)):
+                if os.path.exists(leftover):
+                    os.remove(leftover)
+            prune(os.path.dirname(backup_path(path)))
+            if not os.listdir(os.path.dirname(path)):
+                os.rmdir(os.path.dirname(path))
+        return [(f"remove {rel} (it held only agentkeel hooks)", drop)]
+    verb = "remove agentkeel entries from" if remove else "merge agentkeel hook entries into"
+
+    def write():
+        if not remove:
+            save_original(path)
+        restore_or_write(path, new, remove)
+    return [(f"{verb} {rel} (other hooks and settings kept)", write)]
+
+
+PROBE = "agentkeel-doctor-probe.txt"
+PROBE_PROMPT = (f"This is an automated check of this repository's guard hooks. Without declaring any task, "
+                f"use your file editing tool once to create the file {PROBE} containing the word probe. "
+                "Do not retry, do not use the shell, and do not work around a refusal. Reply with the exact "
+                "error text you received, or 'created' if it worked.")
+
+
+def doctor(repo, hosts, live):
+    """Report, per host, what is installed, trusted and (with --live) proven to refuse."""
+    import re
+    import subprocess
+    rows = []
+
+    def row(host, check, ok, detail=""):
+        rows.append((host, check, ok, detail))
+
+    hooks_dir = os.path.join(repo, ".claude", "hooks")
+    for name in HOOK_FILES + [os.path.join("agentkeel_core", n) for n in CORE_FILES]:
+        p = os.path.join(hooks_dir, name)
+        if not (os.path.exists(p) and is_ours(p)):
+            row("all", f"hook file {name}", False, "missing or not agentkeel's")
+    if not any(r[1].startswith("hook file") for r in rows):
+        row("all", "hook files", True, ".claude/hooks/ complete")
+    for name in HOOK_FILES:
+        p = os.path.join(hooks_dir, name)
+        if os.path.exists(p):
+            cmd = ["bash", p, "--selftest"] if name.endswith(".sh") else ["python3", p, "--selftest"]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            row("all", f"selftest {name}", out.returncode == 0, "" if out.returncode == 0 else out.stdout[-200:])
+    for h in hosts:
+        rel, _ = HOST_CONFIG[h]
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            cmds = [x.get("command", "") for groups in cfg.get("hooks", {}).values() for g in groups for x in g.get("hooks", [])]
+            n = sum(1 for c in cmds if ours(c))
+            row(h, f"{rel} entries", n >= 4, f"{n} agentkeel hook entries")
+        except (OSError, ValueError) as exc:
+            row(h, f"{rel} entries", False, str(exc)[:80])
+    if "codex" in hosts:
+        try:
+            with open(os.path.expanduser("~/.codex/config.toml"), encoding="utf-8") as fh:
+                text = fh.read()  # read for two markers only; nothing from it is printed
+            trusted_project = re.search(r'\[projects\."' + re.escape(repo) + r'"\][^\[]*trust_level\s*=\s*"trusted"', text)
+            hook_key = os.path.join(repo, ".codex", "hooks.json") + ":"
+            trusted_hooks = text.count(hook_key)
+            row("codex", "project trusted", bool(trusted_project), "" if trusted_project else "open codex in the repo and trust it")
+            row("codex", "hooks trusted", trusted_hooks >= 4,
+                f"{trusted_hooks} trust entries for .codex/hooks.json (hash not re-verified); run /hooks in codex if low")
+        except OSError:
+            row("codex", "trust", False, "~/.codex/config.toml not readable")
+    if live:
+        for h in hosts:
+            probe = os.path.join(repo, PROBE)
+            if h == "claude":
+                cmd = ["claude", "-p", "--model", "sonnet", "--permission-mode", "bypassPermissions", PROBE_PROMPT]
+            else:
+                cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral",
+                       "-c", 'model_reasoning_effort="low"', "-C", repo, PROBE_PROMPT]
+            env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")}
+            try:
+                out = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=600, env=env)
+                text = out.stdout + out.stderr
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                text = str(exc)
+            created = os.path.exists(probe)
+            refused = "no task is declared" in text
+            row(h, "live refusal reaches the agent", refused and not created,
+                "refused before the write" if refused and not created else
+                ("THE PROBE FILE WAS CREATED: hooks not active" if created else "no refusal text seen in the output"))
+            if created:
+                os.remove(probe)
+    width = max(len(r[1]) for r in rows) if rows else 10
+    for host_, check, ok, detail in rows:
+        print(f"  {'PASS' if ok else 'FAIL'}  {host_:6} {check:<{width}}  {detail}")
+    if not live:
+        print("\n  Not verified live. Run again with --live to prove each host refuses a write\n"
+              "  (one short model session per host).")
+    return 0 if all(r[2] for r in rows) else 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("repo")
     p.add_argument("--apply", action="store_true")
     p.add_argument("--uninstall", action="store_true")
+    p.add_argument("--host", choices=("claude", "codex", "all"), default="all",
+                   help="which agent hosts to configure (default: all)")
+    p.add_argument("--doctor", action="store_true", help="check the installation; changes nothing")
+    p.add_argument("--live", action="store_true", help="with --doctor: one short model session per host")
     args = p.parse_args(argv)
+    hosts = ("claude", "codex") if args.host == "all" else (args.host,)
     repo = os.path.realpath(args.repo)
     if not os.path.isdir(os.path.join(repo, ".git")) and not os.path.isfile(os.path.join(repo, ".git")):
         print(f"install: {repo} is not the top of a git repository", file=sys.stderr)
         return 2
-    actions, skipped = plan(repo, args.uninstall)
+    if args.doctor:
+        print(f"agentkeel doctor for {repo}")
+        return doctor(repo, hosts, args.live)
+    actions, skipped = plan(repo, args.uninstall, hosts)
     mode = "apply" if args.apply else "preview (nothing changed; add --apply)"
     print(f"agentkeel {'uninstall' if args.uninstall else 'install'} into {repo}: {mode}")
     for desc, _ in actions:
@@ -196,9 +373,13 @@ def main(argv=None):
                   f"instructions are hidden from Claude. Add the line `@AGENTS.md` to {name}, or move its\n"
                   "content into AGENTS.md and delete it. This installer does not touch it.")
     if args.apply and not args.uninstall:
-        print("\nConfigured, not yet verified. Hooks load when a Claude Code session starts. To prove it,\n"
-              "start a new session in the repo and ask for a one-line edit before declaring a task:\n"
-              "the edit must be refused with 'no task is declared for this session'.")
+        print("\nConfigured, not yet verified. Hooks load when a session starts.")
+        if "codex" in hosts:
+            print("Codex skips new or changed project hooks until you trust them: open `codex` in the\n"
+                  "repo, run /hooks, and trust the agentkeel entries (the project must be trusted too).")
+        print(f"Then run `python3 {os.path.abspath(__file__)} {repo} --doctor` to check, and prove it live:\n"
+              "ask for a one-line edit before declaring a task; it must be refused with\n"
+              "'no task is declared for this session'.")
     if args.uninstall and args.apply:
         print(f"\nTask records and logs in {os.path.expanduser('~/.agentkeel')} are kept; delete that folder by hand if wanted.")
     return 0

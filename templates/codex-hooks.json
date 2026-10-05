@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/task-guard.py\"", "timeout": 30, "statusMessage": "agentkeel: checking the task record" }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/secret-guard.py\"", "timeout": 30, "statusMessage": "agentkeel: checking for printed secrets" }
+        ]
+      },
+      {
+        "matcher": "^Agent$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/plan-gate-guard.py\"", "timeout": 30, "statusMessage": "agentkeel: checking the one-gate plan policy" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write)$",
+        "hooks": [
+          { "type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/plan-size-guard.sh\"", "timeout": 30, "statusMessage": "agentkeel: checking plan size" }
+        ]
+      }
+    ]
+  }
+}

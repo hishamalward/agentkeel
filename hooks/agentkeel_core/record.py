@@ -24,7 +24,10 @@ SIZES = ("small", "medium", "large")
 PERMISSIONS = ("review", "implement", "merge", "push", "distribution-build", "store-submission",
                "paid-job")
 DEFAULT_PROTECTED = ("main", "master")
-SESSION_ENV = ("AGENTKEEL_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
+# The session id each host gives the shell commands it runs. When one agent runs inside another
+# (Codex started from a Claude Code shell), both variables are set; the nearest agent process
+# among this process's ancestors is the one actually running the command.
+HOST_SESSION_ENV = {"claude": "CLAUDE_CODE_SESSION_ID", "codex": "CODEX_THREAD_ID"}
 
 # Command classes that are never implied by shipping (decision 2). Matched against the command's
 # argv joined by spaces, after `npx eas-cli` and friends are normalised to the tool name.
@@ -43,10 +46,44 @@ def home(environ=os.environ):
     return os.path.realpath(os.path.expanduser(environ.get("AGENTKEEL_HOME") or "~/.agentkeel"))
 
 
+def nearest_host(pid=None):
+    """'claude' or 'codex': the closest agent process above `pid` (default: this process)."""
+    import subprocess
+    pid = pid or os.getpid()
+    for _ in range(40):
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+        except Exception:
+            return None
+        if not out:
+            return None
+        ppid, _, comm = out.partition(" ")
+        name = os.path.basename(comm.strip()).lower()
+        if name == "claude":
+            return "claude"
+        if name.startswith("codex"):
+            return "codex"
+        try:
+            pid = int(ppid)
+        except ValueError:
+            return None
+        if pid <= 1:
+            return None
+    return None
+
+
 def session_from_env(environ=os.environ):
-    for name in SESSION_ENV:
-        if environ.get(name):
-            return environ[name]
+    """This command's agent session id. AGENTKEEL_SESSION_ID wins (other hosts set it); else the
+    variable of the nearest agent process; else whichever host variable is set, if only one is."""
+    if environ.get("AGENTKEEL_SESSION_ID"):
+        return environ["AGENTKEEL_SESSION_ID"]
+    present = {h: environ[v] for h, v in HOST_SESSION_ENV.items() if environ.get(v)}
+    if len(present) == 1:
+        return next(iter(present.values()))
+    if present:
+        h = nearest_host()
+        return present.get(h) if h else None
     return None
 
 
@@ -112,6 +149,16 @@ def log_override(name, command, session_id, environ=os.environ):
                                  "command": command[:500]}) + "\n")
     except Exception:
         pass
+
+
+def plugin_inactive(argv, payload):
+    """Plugin hooks run in every repository; a guard started with --plugin acts only where the
+    repository opted in with an agentkeel.json at its root. A project install needs no file."""
+    if "--plugin" not in argv:
+        return False
+    from . import gitops
+    top = gitops.toplevel(payload.get("cwd") or os.getcwd())
+    return not (top and os.path.exists(os.path.join(top, "agentkeel.json")))
 
 
 def policy(root):

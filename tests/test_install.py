@@ -34,7 +34,8 @@ class Install(unittest.TestCase):
             return fh.read()
 
     def run_install(self, *args):
-        return subprocess.run([sys.executable, INSTALL, self.repo, *args], capture_output=True, text=True)
+        env = {**os.environ, "AGENTKEEL_HOME": os.path.join(self._tmp.name, "agentkeel-home")}
+        return subprocess.run([sys.executable, INSTALL, self.repo, *args], capture_output=True, text=True, env=env)
 
     def commands(self):
         hooks = json.loads(self.get(".claude/settings.json")).get("hooks", {})
@@ -87,7 +88,7 @@ class Install(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(json.loads(self.get(".claude/settings.json")), self.settings)
         self.assertEqual(self.get("AGENTS.md"), "# Rules\n\nBe kind.\n")
-        self.assertEqual(os.listdir(os.path.join(self.repo, ".claude", "hooks")), [])
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".claude", "hooks")))
 
     def test_agents_md_created_and_removed_when_absent(self):
         os.remove(os.path.join(self.repo, "AGENTS.md"))
@@ -128,6 +129,45 @@ class Install(unittest.TestCase):
         out = self.run_install("--apply")
         self.assertNotEqual(out.returncode, 0); self.assertIn("broken agentkeel block", out.stderr)
         self.assertNotIn("Traceback", out.stderr)
+
+    def test_codex_hooks_installed_and_removed(self):
+        self.run_install("--apply")
+        cfg = json.loads(self.get(".codex/hooks.json"))
+        cmds = [h["command"] for g in cfg["hooks"]["PreToolUse"] for h in g["hooks"]]
+        self.assertTrue(any("/.claude/hooks/task-guard.py" in c for c in cmds))
+        self.run_install("--uninstall", "--apply")
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".codex", "hooks.json")))
+
+    def test_host_flag_limits_the_change(self):
+        self.run_install("--apply", "--host", "claude")
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".codex", "hooks.json")))
+
+    def test_existing_codex_toml_hooks_are_flagged(self):
+        os.makedirs(os.path.join(self.repo, ".codex"))
+        self.put(".codex/config.toml", '[[hooks.PreToolUse]]\nmatcher = "^Agent$"\n'
+                 '[[hooks.PreToolUse.hooks]]\ncommand = "python3 .codex/hooks/plan-gate-guard.py"\n')
+        out = self.run_install()
+        self.assertIn("would run twice", out.stdout)
+
+    def test_doctor_reports_without_changing_anything(self):
+        self.run_install("--apply")
+        before = self.get(".claude/settings.json")
+        out = self.run_install("--doctor", "--host", "claude")
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertIn("PASS  claude", out.stdout); self.assertIn("Not verified live", out.stdout)
+        self.assertEqual(self.get(".claude/settings.json"), before)
+        os.remove(os.path.join(self.repo, ".claude", "hooks", "task-guard.py"))
+        self.assertEqual(self.run_install("--doctor", "--host", "claude").returncode, 1)
+
+    def test_uninstall_restores_the_original_bytes(self):
+        original = '{"permissions":{"allow":["Bash(ls:*)"]}}\n'
+        self.put(".claude/settings.json", original)
+        self.run_install("--apply"); self.run_install("--apply")
+        self.run_install("--uninstall", "--apply")
+        self.assertEqual(self.get(".claude/settings.json"), original)
+        left = [os.path.join(d, f) for d, _, fs in os.walk(self.repo) if ".git" not in d for f in fs]
+        self.assertEqual(sorted(os.path.relpath(p, self.repo) for p in left), [".claude/settings.json", "AGENTS.md"])
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".claude", "hooks")))
 
 
 if __name__ == "__main__":

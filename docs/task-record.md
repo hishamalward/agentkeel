@@ -38,7 +38,8 @@ on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktr
 ## Rules
 
 - **No record, no writes.** A record belongs to one session. A second session, or a record file
-  copied under another name, grants nothing. Subagents share their parent's session.
+  copied under another name, grants nothing. A subagent's tool calls carry its parent's session
+  on both hosts (in Codex its own shell has its own id, so run task.py from the main agent).
 - **Size never grants a permission.** Re-declaring with a different size keeps the permissions
   exactly as given. Widening the permissions is printed on stderr and kept in `history`; say it
   in your next update.

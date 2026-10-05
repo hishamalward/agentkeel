@@ -18,6 +18,9 @@ fifty entries, split the status index into its own present-tense register; not b
 | D-005 | Judge every git operation in a command line, not the first | Active |
 | D-006 | Overrides are written on the command, apply once, and are logged | Active |
 | D-007 | Install into AGENTS.md, never CLAUDE.md; claims labelled by kind | Active |
+| D-008 | Guards read host-neutral events; Codex is the second adapter | Active |
+| D-009 | Plugins act only in repositories that opt in; uninstall restores bytes | Active |
+| D-010 | Tests before main is a required CI check, not a hook | Active |
 
 ## D-001: Plans never carry code (2026-08-23)
 
@@ -117,4 +120,52 @@ after the write; G3 had no hook; G4 did not check tests).
 **Replaces**: the copy-by-hand quickstart and `templates/CLAUDE.agentkeel.md` (now
 `templates/AGENTS.agentkeel.md`); the repo's own inert `.claude/settings.json` (now
 `templates/claude-hooks.json`).
+
+## D-008: Guards read host-neutral events; Codex is the second adapter (2026-10-04)
+
+**Status**: Active.
+**Decision**: `agentkeel_core/host.py` turns each host's tool call into events (file edit, shell
+command, subagent dispatch, or a gap) before any guard runs. Claude Code and Codex are the two
+adapters; their payload shapes are pinned by captured fixtures, and a parity test runs the same
+task and act through both and requires the same exit code and the same refusal text. A tool that
+may write but has no adapter is refused with a reason. `task.py` takes the session id of the
+nearest agent process when both hosts' variables are set. On Codex, plan gates are named by a
+`task_name` starting `plan_gate` and counted per task.
+**Why**: A Codex `apply_patch` edit with no task passed every v0.2 guard, because the guards read
+Claude tool names. The capture run found what the docs did not say: Codex encrypts the subagent
+message (so the `[plan-gate]` marker cannot work there), reports the dispatch as
+`collaborationspawn_agent`, and gives a subagent's shell its own thread id while its tool calls
+carry the parent's. Running Codex from a Claude Code shell set both session variables.
+**Replaces**: tool-name checks inside each guard; "the `[plan-gate]` marker is the deterministic
+path" as a cross-host rule (it stays the rule on Claude Code).
+
+## D-009: Plugins act only in repositories that opt in; uninstall restores bytes (2026-10-04)
+
+**Status**: Active.
+**Decision**: One `hooks/hooks.json` serves a Claude Code plugin (`.claude-plugin/`) and a Codex
+plugin (`.codex-plugin/`). Plugin hook commands pass `--plugin`, and a guard started that way acts
+only where the repository has an `agentkeel.json` at its root; a session-start hook then prints the
+task command with the plugin's real path. The project installer configures both hosts
+(`--host` to limit), warns when `.codex/config.toml` already defines hooks of the same name, has a
+`--doctor` that reports what is installed and trusted (`--live` proves a refusal per host), and on
+`--uninstall` restores each config file's original bytes when its content is unchanged.
+**Why**: Plugin hooks run in every repository the user opens; refusing every write everywhere
+would make the plugin unusable. A Codex hook is skipped until the human trusts it, so "installed"
+and "active" differ, and the doctor has to say which. Stage 2 asked that uninstall leave nothing
+behind; rewriting a JSON file with new formatting left a diff.
+**Replaces**: "Codex is not supported in this version" in the installer; the copy-only install as
+the one way in.
+
+## D-010: Tests before main is a required CI check, not a hook (2026-10-04)
+
+**Status**: Active.
+**Decision**: `templates/ci/required-checks.yml` and `select_checks.py` run the app tests on the
+candidate commit unless it changes only documentation, and report one always-present check,
+`agentkeel-required`. The protected branch requires it (up to date, admins included) and the
+deploy waits for it; the shipping path is push the branch, wait for green, move `main` to the
+same commit. `docs/required-checks.md` lists what can still bypass it.
+**Why**: A hook guards the agent, not the branch, and a local pre-push hook can be skipped. CI that
+runs after a push to `main` reports after the deploy started. A required check that is skipped for
+docs-only changes would block them forever, so the one required job always reports.
+**Replaces**: "G4: tests green on the branch" as guidance only.
 

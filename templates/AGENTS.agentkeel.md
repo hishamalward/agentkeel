@@ -22,6 +22,8 @@ go past it. They are separate questions; changing one never changes the other.
 - Resources: every code task gets its own worktree, never the shared checkout; `git worktree
   add` records it. Temp files go in the scratch folder `task.py start` prints.
 When in doubt pick the smaller size. A task never grows on its own: stop and say so.
+The main agent declares the task; subagents work under it (in Codex a subagent's own shell
+cannot see the record, so run task.py from the main agent).
 
 **Gates** (work stops until a named owner produces named evidence):
 - G1 Spec approval, human: the human runs `task.py approve <task-id>` in their own terminal.

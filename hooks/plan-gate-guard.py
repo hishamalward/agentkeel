@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agentkeel plan-gate guard (PreToolUse, matcher Agent).
+"""agentkeel plan-gate guard (PreToolUse; Claude Code matcher Agent, Codex matcher spawn_agent).
 
 Invariant 3, every loop has a cap. A plan is gated ONCE: one plan reviewer and one scope auditor,
 in parallel, before task 1. Re-gating the revised plan is what turned a control into a loop
@@ -17,6 +17,10 @@ the marker `[plan-gate]` (deterministic, preferred) or reads like a review of th
 (heuristic: "gate a", "scope audit", "review the plan", "plan ... verdict"). Task reviews and the
 whole-branch review name a diff or a review package, never just a plan, and are excluded.
 
+Codex encrypts a spawn_agent message before hooks see it, so there the gate is named in the
+task name instead: a task_name starting with `plan_gate` (or `plan-gate`) counts, and the count is
+kept per task (this session's task record) because the plan file is not visible.
+
 The heuristic is a heuristic. A dispatch worded to avoid it will get through; the marker is the
 honest path and the README says so. Exit 0 allows; exit 2 refuses; unparseable input allows.
 """
@@ -28,7 +32,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, record  # noqa: E402
+from agentkeel_core import gitops, host, record  # noqa: E402
+
+NAME_MARKER_RE = re.compile(r"^plan[_-]gate", re.IGNORECASE)
 
 LIMIT = 2  # one round = one plan reviewer + one scope auditor
 MARKER = "[plan-gate]"
@@ -51,9 +57,20 @@ def repo_key(payload, environ=os.environ):
 
 
 def decide(payload, environ=os.environ):
-    if payload.get("tool_name") != "Agent":
+    cwd = payload.get("cwd") or os.getcwd()
+    dispatches = [e for e in host.events(payload, cwd) if e.kind == "dispatch"]
+    if not dispatches:
         return 0
-    prompt = str((payload.get("tool_input") or {}).get("prompt", ""))
+    ev = dispatches[0]
+    if ev.tool.endswith("spawn_agent"):
+        if not NAME_MARKER_RE.match(ev.name):
+            return 0
+        rec = record.load(payload.get("session_id"), environ)
+        plan = f"task:{rec['task']}" if rec else f"session:{payload.get('session_id')}"
+        path = state_path(environ)
+        with record.locked(path):
+            return count(path, f"{repo_key(payload, environ)}::{plan}", plan)
+    prompt = ev.prompt
     if not prompt:
         return 0
     marked = MARKER in prompt
@@ -103,6 +120,8 @@ def main():
         if not isinstance(payload, dict):
             return 0
     except Exception:
+        return 0
+    if record.plugin_inactive(sys.argv, payload):
         return 0
     try:
         return decide(payload)

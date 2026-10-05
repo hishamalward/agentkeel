@@ -1,0 +1,40 @@
+{
+  "description": "agentkeel: task record, git boundary, secrets and plan-gate guards. Acts only in repositories with an agentkeel.json.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/session-start.py\" --plugin", "timeout": 30 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write|NotebookEdit)$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/task-guard.py\" --plugin", "timeout": 30 }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/secret-guard.py\" --plugin", "timeout": 30 }
+        ]
+      },
+      {
+        "matcher": "^Agent$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/plan-gate-guard.py\" --plugin", "timeout": 30 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write)$",
+        "hooks": [
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/plan-size-guard.sh\" --plugin", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}

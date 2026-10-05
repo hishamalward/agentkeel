@@ -37,7 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, record, shell  # noqa: E402
+from agentkeel_core import gitops, host, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -92,10 +92,13 @@ def is_config(path, environ):
     return False
 
 
+# The command as it really is for this install (a project copy or a plugin folder).
+TASK_CMD = 'python3 "%s"' % os.path.join(os.path.dirname(os.path.abspath(__file__)), "task.py")
+
 NO_TASK = (
     "no task is declared for this session.\n\n"
     "Declare it in one command, from your reading of the human's request, then retry:\n"
-    "  .claude/hooks/task.py start <task-id> --size small|medium|large --allow <permissions>\n\n"
+    f"  {TASK_CMD} start <task-id> --size small|medium|large --allow <permissions>\n\n"
     "Permissions: review (write only --write-root folders), implement, merge, push,\n"
     "distribution-build, store-submission, paid-job. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
@@ -104,23 +107,21 @@ NO_TASK = (
 
 # ---- file edits -----------------------------------------------------------------------------
 
-def new_content(tool, tool_input, target):
-    if tool == "Write":
-        return str(tool_input.get("content", ""))
-    if tool == "Edit":
-        old = record.read(target)
+def new_content(ev):
+    """The whole new text of the edited file when it can be known, else None."""
+    if ev.full_text is not None:
+        return ev.full_text
+    if ev.edit:
+        old = record.read(ev.path)
         if old is None:
             return None
-        a, b = str(tool_input.get("old_string", "")), str(tool_input.get("new_string", ""))
-        return old.replace(a, b) if tool_input.get("replace_all") else old.replace(a, b, 1)
+        a, b = str(ev.edit.get("old_string") or ""), str(ev.edit.get("new_string") or "")
+        return old.replace(a, b) if ev.edit.get("replace_all") else old.replace(a, b, 1)
     return None
 
 
-def judge_edit(tool, tool_input, cwd, rec, environ):
-    raw = tool_input.get("file_path") or tool_input.get("notebook_path")
-    if not raw:
-        return
-    target = os.path.realpath(os.path.join(cwd, os.path.expanduser(str(raw))))
+def judge_edit(ev, rec, environ):
+    target = ev.path
     if is_config(target, environ):
         raise Block(
             f"refusing to edit {target}.\n"
@@ -135,7 +136,7 @@ def judge_edit(tool, tool_input, cwd, rec, environ):
     perms = set(rec.get("permissions") or [])
     # Spec approval and a large task's blast radius hold everywhere, write roots included.
     if rel and re.match(r"^docs/specs/[^/]+\.md$", rel):
-        judge_spec_edit(tool, tool_input, target, rel)
+        judge_spec_edit(ev, rel)
     large = bool(rel) and rec.get("size") == "large" and not rel.startswith("docs/")
     if root is None:
         # Write roots are report folders outside any repository. Inside a repository they grant
@@ -190,20 +191,34 @@ def own_scratch(target, rec, environ):
     return str(rec.get("session_id")) in target.split(os.sep)
 
 
-def judge_spec_edit(tool, tool_input, target, rel):
-    text = new_content(tool, tool_input, target)
-    before = record.read(target)
+APPROVED_LINE = re.compile(r"^\s*status\s*:\s*approved\b", re.IGNORECASE)
+SUPERSEDED_LINE = re.compile(r"^\s*status\s*:\s*superseded\b", re.IGNORECASE)
+
+
+def judge_spec_edit(ev, rel):
+    before = record.read(ev.path)
     was_approved = record.approval(before or "")[0]
-    if was_approved and text is not None and (record.frontmatter(text) or {}).get("status") != "superseded":
+    text = new_content(ev)
+    if text is None and ev.change is not None:
+        # a patch to an existing file: only its added lines are known
+        added = ev.change.added
+        becomes_superseded = any(SUPERSEDED_LINE.match(l) for l in added)
+        becomes_approved = any(APPROVED_LINE.match(l) for l in added)
+    elif text is not None:
+        becomes_superseded = (record.frontmatter(text) or {}).get("status") == "superseded"
+        becomes_approved = record.approval(text)[0]
+    else:
+        becomes_superseded, becomes_approved = False, False
+    if was_approved and (ev.change is not None and ev.change.kind in ("delete", "move-to") or not becomes_superseded):
         raise Block(
             f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
             "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
             "the human. Stop and tell them what changed.")
-    if text is not None and record.approval(text)[0] and not was_approved:
+    if becomes_approved and not was_approved:
         raise Block(
             f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
             "Ask the human to approve it. They run, in their own terminal:\n"
-            f"  .claude/hooks/task.py approve {rel}")
+            f"  {TASK_CMD} approve {rel}")
 
 
 def judge_large_path(rel, root, rec):
@@ -219,7 +234,7 @@ def judge_large_path(rel, root, rec):
         raise Block(
             f"size large needs an approved spec before any edit outside docs/.\n"
             f"{os.path.relpath(spec, root)} {why}. Approval is the human's: they run\n"
-            f"  .claude/hooks/task.py approve {rec.get('task')}\n"
+            f"  {TASK_CMD} approve {rec.get('task')}\n"
             "Edits under docs/ are allowed meanwhile.")
     changes, must_not = record.blast_radius(text)
     if record.matches(rel, must_not):
@@ -366,18 +381,20 @@ def judge_command(command, cwd, rec, environ, session, line=None):
 
 
 def decide(payload, environ=os.environ):
-    tool = payload.get("tool_name")
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return 0
     cwd = payload.get("cwd") or environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     session = payload.get("session_id")
     rec = record.load(session, environ) if session else None
     try:
-        if tool in ("Write", "Edit", "NotebookEdit"):
-            judge_edit(tool, tool_input, cwd, rec, environ)
-        elif tool == "Bash":
-            judge_command(str(tool_input.get("command", "")), cwd, rec, environ, session)
+        for ev in host.events(payload, cwd):
+            if ev.kind == "edit":
+                judge_edit(ev, rec, environ)
+            elif ev.kind == "command":
+                judge_command(ev.command, cwd, rec, environ, session)
+            elif ev.kind == "gap":
+                raise Block(
+                    f"agentkeel cannot read the tool '{ev.tool}' and it may write, so it is refused rather\n"
+                    "than silently allowed. Use a tool agentkeel reads (file edits, apply_patch, shell),\n"
+                    "or tell the human this tool needs an adapter.")
     except Block as b:
         return block(str(b))
     return 0
@@ -391,6 +408,8 @@ def main():
         if not isinstance(payload, dict):
             return 0
     except Exception:
+        return 0
+    if record.plugin_inactive(sys.argv, payload):
         return 0
     try:
         return decide(payload)

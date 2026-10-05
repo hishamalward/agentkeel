@@ -1,5 +1,9 @@
 # Hook payloads, captured
 
+> Codex payloads (CLI 0.160.0, captured 2026-10-04) are in `tests/fixtures/codex/`, with paths
+> scrubbed and the encrypted dispatch message replaced; the facts they pin are in
+> [`hosts.md`](hosts.md). The Claude Code payloads below are also in `tests/fixtures/claude/`.
+
 Captured 2026-08-23 from a real non-interactive run (`claude -p`, Claude Code 2.1.241) in a throwaway repo whose hooks appended stdin to a file. Paths are scrubbed to `<repo>`. These are the shapes the hooks in `hooks/` parse; nothing here is from memory or from documentation.
 
 ## Common envelope
