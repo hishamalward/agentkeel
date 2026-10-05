@@ -108,17 +108,31 @@ def merged_settings(existing, template, remove, left_alone=()):
     return existing
 
 
-def agents_text(current, fragment, remove):
+def agents_insert(current, fragment):
+    """(new text, separator): the block replaces an existing one in place, or is appended after a
+    separator that gives one blank line. Nothing outside the block changes."""
     block = f"{START}\n{fragment.rstrip()}\n{END}\n"
     if START in current and END in current:
-        before, rest = current.split(START, 1)
-        after = rest.split(END, 1)[1].lstrip("\n")
-        if remove:
-            return (before.rstrip("\n") + "\n" + (("\n" + after) if after else "")).lstrip("\n")
-        return before + block + (("\n" + after) if after else "")
-    if remove:
+        i, j = current.index(START), current.index(END) + len(END)
+        if current[j:j + 1] == "\n":
+            j += 1
+        return current[:i] + block + current[j:], None
+    sep = "" if not current else ("\n" if current.endswith("\n") else "\n\n")
+    return current + sep + block, sep
+
+
+def agents_remove(current, sep):
+    """The text without the block (and the separator install added, when it is still there);
+    every other byte, the user's later edits included, stays as it is."""
+    if START not in current or END not in current:
         return current
-    return (current.rstrip("\n") + "\n\n" if current.strip() else "") + block
+    i, j = current.index(START), current.index(END) + len(END)
+    if current[j:j + 1] == "\n":
+        j += 1
+    before, after = current[:i], current[j:]
+    if sep and not after and before.endswith(sep):
+        before = before[:-len(sep)]
+    return before + after
 
 
 HOST_CONFIG = {
@@ -185,38 +199,13 @@ def plan(repo, remove, hosts=("claude", "codex")):
                            "    would count twice). Remove those entries from config.toml by hand")
 
     agents_path = os.path.join(repo, "AGENTS.md")
-    current = open(agents_path, encoding="utf-8").read() if os.path.exists(agents_path) else ""
+    current = open(agents_path, encoding="utf-8", newline="").read() if os.path.exists(agents_path) else ""
     with open(os.path.join(HERE, "templates", "AGENTS.agentkeel.md"), encoding="utf-8") as fh:
         fragment = fh.read()
     if (START in current) != (END in current) or (START in current and current.index(END) < current.index(START)):
         raise SystemExit("install: AGENTS.md has a broken agentkeel block (one marker missing or out of\n"
                          "order); fix the markers by hand. Nothing changed.")
-    text = agents_text(current, fragment, remove)
-    if remove and os.path.exists(backup_path(agents_path)):
-        text = restore_text(agents_path, text)
-    if text != current:
-        verb = "remove the agentkeel block from" if remove else ("update the agentkeel block in" if START in current
-                                                                  else "add the agentkeel block to")
-        if remove and not text.strip() and not (os.path.exists(backup_path(agents_path)) and
-                                                 not os.path.exists(backup_path(agents_path) + ".absent")):
-            def drop_agents():
-                os.remove(agents_path)
-                for leftover in (backup_path(agents_path), backup_path(agents_path) + ".absent"):
-                    if os.path.exists(leftover):
-                        os.remove(leftover)
-                prune(os.path.dirname(backup_path(agents_path)))
-            actions.append(("remove AGENTS.md (it held only the agentkeel block)", drop_agents))
-        else:
-            def write_agents():
-                if not remove:
-                    save_original(agents_path)
-                atomic_write(agents_path, text)
-                if remove:
-                    for leftover in (backup_path(agents_path), backup_path(agents_path) + ".absent"):
-                        if os.path.exists(leftover):
-                            os.remove(leftover)
-                    prune(os.path.dirname(backup_path(agents_path)))
-            actions.append((f"{verb} AGENTS.md{'' if current or remove else ' (new file)'}", write_agents))
+    actions += agents_actions(agents_path, current, fragment, remove, os.path.exists(agents_path))
     return actions, skipped
 
 
@@ -264,17 +253,78 @@ def restore_or_write(path, new, remove):
     atomic_write(path, json.dumps(new, indent=2) + "\n")
 
 
-def restore_text(path, without_block):
-    """The original bytes when the file, without the agentkeel block, still says what it said before
-    install (whitespace aside); otherwise the text without the block, keeping the user's edits."""
-    b = backup_path(path)
+def _read_bytes(path):
     try:
-        with open(b, "rb") as fh:
-            original = fh.read().decode("utf-8")
+        with open(path, "rb") as fh:
+            return fh.read()
     except OSError:
-        return without_block
-    norm = lambda t: "\n".join(l.rstrip() for l in t.replace("\r\n", "\n").strip().split("\n"))
-    return original if norm(original) == norm(without_block) else without_block
+        return None
+
+
+def agents_actions(path, current, fragment, remove, exists):
+    """Install: insert the block, keep the pre-install bytes once, and snapshot the installed bytes.
+    Uninstall: if the file still matches the snapshot exactly, put the pre-install bytes back (or
+    delete a file install created); if the user edited it, remove only the block."""
+    b = backup_path(path)
+    meta_path, snap_path = b + ".meta", b + ".installed"
+    try:
+        with open(meta_path) as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        meta = {}
+    if remove:
+        if START not in current:
+            return []
+        unchanged = _read_bytes(snap_path) == current.encode("utf-8")
+        original = _read_bytes(b)
+        if unchanged and (original is not None or meta.get("absent")):
+            new = None if meta.get("absent") else original
+        else:
+            text = agents_remove(current, meta.get("sep"))
+            new = None if (not text.strip() and meta.get("absent")) else text.encode("utf-8")
+
+        def apply_remove():
+            if new is None:
+                os.remove(path)
+            else:
+                mode = os.stat(path).st_mode & 0o777
+                real = os.path.realpath(path)
+                with open(real, "wb") as fh:
+                    fh.write(new)
+                os.chmod(real, mode)
+            for leftover in (b, meta_path, snap_path, b + ".absent"):
+                if os.path.exists(leftover):
+                    os.remove(leftover)
+            prune(os.path.dirname(b))
+        return [("remove AGENTS.md (install created it)" if new is None else
+                 "remove the agentkeel block from AGENTS.md", apply_remove)]
+    text, sep = agents_insert(current, fragment)
+    if text == current:
+        return []
+
+    def apply_install():
+        os.makedirs(os.path.dirname(b), exist_ok=True)
+        snap = _read_bytes(snap_path)
+        if snap is not None and snap != current.encode("utf-8"):
+            # edited since the last install: the pre-install bytes no longer describe this file
+            for stale in (b,):
+                if os.path.exists(stale):
+                    os.remove(stale)
+            meta.pop("absent", None)
+        elif not os.path.exists(b) and not meta.get("absent") and snap is None:
+            if exists:
+                shutil.copyfile(os.path.realpath(path), b)
+            else:
+                meta["absent"] = True
+        if sep is not None:
+            meta["sep"] = sep
+        with open(meta_path, "w") as fh:
+            json.dump(meta, fh)
+        atomic_write(path, text)
+        with open(snap_path, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+    verb = "update the agentkeel block in" if START in current else "add the agentkeel block to"
+    return [(f"{verb} AGENTS.md{'' if exists else ' (new file)'}", apply_install)]
 
 
 def config_actions(repo, rel, template_name, remove, drop_when_empty, left_alone=()):

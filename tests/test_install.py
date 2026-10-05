@@ -235,6 +235,29 @@ class StageTwoReviewInstall(unittest.TestCase):
         self.assertIn("## Added later by the user", text); self.assertIn("# Rules", text)
         self.assertNotIn("agentkeel:start", text)
 
+    def test_whitespace_only_edits_after_install_survive(self):
+        for original, edit in ((b"Line one\nLine two\n", lambda t: t.replace(b"Line one\n", b"Line one  \n", 1)),
+                               (b"# R\n\nbody\n", lambda t: t.replace(b"# R\n\n", b"# R\n\n\n", 1)),
+                               (b"# R\nbody\n", lambda t: t.replace(b"# R\n", b"# R\r\n", 1))):
+            with open(os.path.join(self.repo, "AGENTS.md"), "wb") as fh:
+                fh.write(original)
+            self.run_install("--apply")
+            edited = edit(self.agents())
+            with open(os.path.join(self.repo, "AGENTS.md"), "wb") as fh:
+                fh.write(edited)
+            self.run_install("--uninstall", "--apply")
+            self.assertEqual(self.agents(), edit(original), original)
+
+    def test_reinstall_after_an_edit_does_not_restore_stale_bytes(self):
+        with open(os.path.join(self.repo, "AGENTS.md"), "wb") as fh:
+            fh.write(b"# R\n")
+        self.run_install("--apply")
+        with open(os.path.join(self.repo, "AGENTS.md"), "ab") as fh:
+            fh.write(b"\nlater\n")
+        self.run_install("--apply")
+        self.run_install("--uninstall", "--apply")
+        self.assertIn(b"later", self.agents())
+
     def test_doctor_never_touches_an_existing_file(self):
         import importlib.util
         from unittest import mock
