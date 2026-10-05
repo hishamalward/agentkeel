@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hosts</title>
+<link rel="stylesheet" href="keel.css">
+</head>
+<body>
+<main>
+<header class="page">
+  <div class="kicker">Feature state &middot; created 261004</div>
+  <h1>Hosts</h1>
+</header>
+<p>agentkeel's guards read events, not tool names (<code>hooks/agentkeel_core/host.py</code>). This page is the per-host fact sheet those events are built on. Every row was checked against a captured payload (<code>tests/fixtures/</code>) or a live run on 2026-10-04 unless it says otherwise.</p>
+<table><thead><tr><th>Fact</th><th>Claude Code 2.1.289</th><th>Codex CLI 0.160.0</th></tr></thead><tbody>
+<tr><td>Project hook config</td><td><code>.claude/settings.json</code></td><td><code>.codex/hooks.json</code> (also <code>config.toml</code>; both load)</td></tr>
+<tr><td>Plugin manifest</td><td><code>.claude-plugin/plugin.json</code>, hooks at <code>hooks/hooks.json</code></td><td><code>.codex-plugin/plugin.json</code> with <code>&quot;hooks&quot;: &quot;./hooks/hooks.json&quot;</code></td></tr>
+<tr><td>Plugin root in a hook command</td><td><code>${CLAUDE_PLUGIN_ROOT}</code></td><td><code>${PLUGIN_ROOT}</code> (and <code>CLAUDE_PLUGIN_ROOT</code>, per the docs)</td></tr>
+<tr><td>Session id in the hook payload</td><td><code>session_id</code></td><td><code>session_id</code> (the thread id)</td></tr>
+<tr><td>Session id in the agent's shell</td><td><code>CLAUDE_CODE_SESSION_ID</code></td><td><code>CODEX_THREAD_ID</code></td></tr>
+<tr><td>A subagent's tool calls carry</td><td>the parent's <code>session_id</code></td><td>the parent's <code>session_id</code></td></tr>
+<tr><td>A subagent's shell sees</td><td>the parent's id</td><td>its own <code>CODEX_THREAD_ID</code> (so <code>task.py</code> there finds no task)</td></tr>
+<tr><td>File edit</td><td><code>Write</code> (<code>file_path</code>, <code>content</code>), <code>Edit</code> (<code>old_string</code>, <code>new_string</code>), <code>NotebookEdit</code></td><td><code>apply_patch</code>, the whole envelope in <code>tool_input.command</code>, paths relative to <code>cwd</code>; agentkeel also reads a patch under the <code>Edit</code>/<code>Write</code> names, inside a shell <code>apply_patch</code> command, after an indented header, and in a second envelope</td></tr>
+<tr><td>Shell</td><td><code>Bash</code>, <code>tool_input.command</code></td><td><code>Bash</code>, <code>tool_input.command</code></td></tr>
+<tr><td>Subagent dispatch</td><td><code>Agent</code>, readable <code>prompt</code></td><td><code>collaborationspawn_agent</code>, <code>task_name</code> readable, <code>message</code> encrypted; agentkeel matches `^(Agent\</td><td>.*spawn_agent)$<code> and a third </code>plan_gate*` dispatch was refused live before launch</td></tr>
+<tr><td>Block</td><td>exit 2, reason on stderr, shown to the model</td><td>exit 2, reason on stderr, shown as <code>Command blocked by PreToolUse hook: &lt;reason&gt;</code></td></tr>
+<tr><td>Trust</td><td>project settings load when the folder is trusted</td><td>a new or changed non-managed hook is skipped until trusted (<code>/hooks</code>); <code>codex exec --dangerously-bypass-hook-trust</code> skips the check for one run</td></tr>
+<tr><td>SessionStart context</td><td>stdout is added to the session</td><td>stdout is added as a developer instruction, which the model ranks above the user's prompt (verified)</td></tr>
+<tr><td>Plugin hook trust</td><td></td><td>stored as <code>hooks.state.&quot;&lt;plugin&gt;@&lt;marketplace&gt;:hooks/hooks.json:&lt;event&gt;:&lt;i&gt;:&lt;j&gt;&quot;</code>; <code>codex plugin remove</code> leaves these entries and an empty cache folder</td></tr>
+<tr><td>Shell runner</td><td>the <code>Bash</code> tool's process</td><td>a background app-server daemon, often in a sandbox that cannot inspect processes or write outside the workspace</td></tr>
+</tbody></table>
+<section id="which-tools-reach-the-guard">
+<h2>Which tools reach the guard</h2>
+<p>The task guard is configured for every tool (<code>*</code>) on both hosts, and decides in <code>host.py</code>: file edits, shell and dispatches are judged; reads, planning, messaging and scheduling tools pass (a scheduled prompt runs later as ordinary, judged tool calls); MCP tools pass and are outside agentkeel; any other tool whose name suggests a write (<code>write_stdin</code> among them) is refused as a visible gap.</p>
+</section>
+<section id="consequences">
+<h2>Consequences</h2>
+<ul>
+<li><strong>One process, two ids.</strong> When one agent runs inside the other (Codex started from a Claude Code shell), both session variables are set. <code>task.py</code> takes the variable of the nearest agent process above it; <code>AGENTKEEL_SESSION_ID</code> overrides both. The guards never guess: they read <code>session_id</code> from the payload.</li>
+<li><strong>Plan gates on Codex.</strong> The dispatch message is encrypted before hooks see it, so the <code>[plan-gate]</code> marker cannot be read. A gate dispatch is named instead: a <code>task_name</code> starting <code>plan_gate</code> counts, per task, because the plan file is not visible either.</li>
+<li>**Codex subagents and <code>task.py</code>.** Declare the task and record evidence (<code>task.py verify</code>) from the main agent; a subagent's own shell has its own thread id.</li>
+<li><strong>A patch is judged on its result.</strong> For a docs page, agentkeel applies the patch to the current text and runs the same approval check a Claude <code>Edit</code> gets; a patch whose hunks do not fit an approved page is refused rather than guessed at.</li>
+<li><strong>Choosing the session inside a shell.</strong> When the agent's shell cannot tell which session runs it (both hosts' variables set, a sandbox that hides the process tree), <code>task.py</code> refuses rather than guess, because a guess can act on another session's task record. The session-start message prints the session's id; the agent then gives it inline, <code>AGENTKEEL_SESSION_ID=&lt;id&gt; python3 task.py ...</code>, and the guard, which sees the true id in the payload, refuses any other value (also inside <code>bash -c</code>, <code>sh -c</code>, <code>env</code> and <code>eval</code>) and any <code>export</code> of it (an exported id would reach every process the shell starts, other agents included). Keep <code>AGENTKEEL_HOME</code> writable from the agent's sandbox (Codex <code>workspace-write</code> blocks writes outside the workspace; add the folder or use a profile that allows it).</li>
+<li><strong>Removing the Codex plugin fully.</strong> After <code>codex plugin remove &lt;plugin&gt;@&lt;marketplace&gt;</code> and <code>codex plugin marketplace remove &lt;marketplace&gt;</code>, delete the <code>hooks.state.&quot;&lt;plugin&gt;@&lt;marketplace&gt;:...&quot;</code> sections from <code>~/.codex/config.toml</code> and the empty cache folder; Codex leaves both.</li>
+<li><strong>Trust is a human step on Codex.</strong> <code>install.py --doctor</code> reads <code>~/.codex/config.toml</code> for the project's trust and for trust entries naming <code>.codex/hooks.json</code>; it does not recompute hashes.</li>
+</ul>
+</section>
+<section id="other-hosts">
+<h2>Other hosts</h2>
+<p>Cursor, Copilot and others read <code>AGENTS.md</code>, so they get the instructions. They have no adapter here, so for them agentkeel is guidance only. An adapter is a function in <code>host.py</code> that turns the host's payload into the same events, plus captured fixtures and a parity test.</p>
+</section>
+</main>
+</body>
+</html>

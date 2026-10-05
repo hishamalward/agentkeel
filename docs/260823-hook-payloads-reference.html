@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hook payloads, captured</title>
+<link rel="stylesheet" href="keel.css">
+</head>
+<body>
+<main>
+<header class="page">
+  <div class="kicker">Reference &middot; created 260823</div>
+  <h1>Hook payloads, captured</h1>
+</header>
+<blockquote><p>Codex payloads (CLI 0.160.0, captured 2026-10-04) are in <code>tests/fixtures/codex/</code>, with paths scrubbed and the encrypted dispatch message replaced; the facts they pin are in <a href="261004-hosts-state.html">the hosts page</a>. The Claude Code payloads below are also in <code>tests/fixtures/claude/</code>.</p></blockquote>
+<p>Captured 2026-08-23 from a real non-interactive run (<code>claude -p</code>, Claude Code 2.1.241) in a throwaway repo whose hooks appended stdin to a file. Paths are scrubbed to <code>&lt;repo&gt;</code>. These are the shapes the hooks in <code>hooks/</code> parse; nothing here is from memory or from documentation.</p>
+<section id="common-envelope">
+<h2>Common envelope</h2>
+<p>Every event carries <code>session_id</code>, <code>transcript_path</code>, <code>cwd</code>, <code>prompt_id</code>, <code>permission_mode</code>, <code>hook_event_name</code>, <code>tool_name</code>, <code>tool_input</code>. <code>cwd</code> is the directory the session runs in (the same as <code>CLAUDE_PROJECT_DIR</code> in the hook's environment for a single-root session). PostToolUse adds <code>tool_response</code>.</p>
+<p>Exit codes, as observed: <code>0</code> allows; <code>2</code> blocks the tool call and the hook's stderr is shown to the model as the reason. Anything else is reported but does not block.</p>
+</section>
+<section id="pretooluse-bash">
+<h2>PreToolUse, <code>Bash</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PreToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Bash&quot;,
+  &quot;tool_input&quot;: {
+    &quot;command&quot;: &quot;echo captured &gt; note.txt&quot;,
+    &quot;description&quot;: &quot;Write \&quot;captured\&quot; to note.txt&quot;
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_01GP5nSSjpC7b7NjX6w98R2S&quot;
+}</code></pre>
+</section>
+<section id="pretooluse-write">
+<h2>PreToolUse, <code>Write</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PreToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Write&quot;,
+  &quot;tool_input&quot;: {
+    &quot;file_path&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;content&quot;: &quot;print(&#x27;hi&#x27;)\n&quot;
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_017hKsoxcTfzGuPjsXXuK4Dz&quot;
+}</code></pre>
+</section>
+<section id="pretooluse-edit">
+<h2>PreToolUse, <code>Edit</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PreToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Edit&quot;,
+  &quot;tool_input&quot;: {
+    &quot;file_path&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;old_string&quot;: &quot;print(&#x27;hi&#x27;)&quot;,
+    &quot;new_string&quot;: &quot;print(&#x27;hello&#x27;)&quot;,
+    &quot;replace_all&quot;: false
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_01NkCiG7D3gWiCiE8heVKjXW&quot;
+}</code></pre>
+</section>
+<section id="pretooluse-agent">
+<h2>PreToolUse, <code>Agent</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PreToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Agent&quot;,
+  &quot;tool_input&quot;: {
+    &quot;description&quot;: &quot;Reply with the word done&quot;,
+    &quot;prompt&quot;: &quot;reply with the single word done&quot;,
+    &quot;run_in_background&quot;: false
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_017Rgnaxy73ozi6xM3nh6KW4&quot;
+}</code></pre>
+</section>
+<section id="posttooluse-bash">
+<h2>PostToolUse, <code>Bash</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PostToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Bash&quot;,
+  &quot;tool_input&quot;: {
+    &quot;command&quot;: &quot;echo captured &gt; note.txt&quot;,
+    &quot;description&quot;: &quot;Write \&quot;captured\&quot; to note.txt&quot;
+  },
+  &quot;tool_response&quot;: {
+    &quot;stdout&quot;: &quot;&quot;,
+    &quot;stderr&quot;: &quot;&quot;,
+    &quot;interrupted&quot;: false,
+    &quot;isImage&quot;: false,
+    &quot;noOutputExpected&quot;: false
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_01GP5nSSjpC7b7NjX6w98R2S&quot;,
+  &quot;duration_ms&quot;: 58
+}</code></pre>
+</section>
+<section id="posttooluse-write">
+<h2>PostToolUse, <code>Write</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PostToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Write&quot;,
+  &quot;tool_input&quot;: {
+    &quot;file_path&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;content&quot;: &quot;print(&#x27;hi&#x27;)\n&quot;
+  },
+  &quot;tool_response&quot;: {
+    &quot;type&quot;: &quot;create&quot;,
+    &quot;filePath&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;content&quot;: &quot;print(&#x27;hi&#x27;)\n&quot;,
+    &quot;structuredPatch&quot;: [],
+    &quot;originalFile&quot;: null,
+    &quot;userModified&quot;: false
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_017hKsoxcTfzGuPjsXXuK4Dz&quot;,
+  &quot;duration_ms&quot;: 8
+}</code></pre>
+</section>
+<section id="posttooluse-edit">
+<h2>PostToolUse, <code>Edit</code></h2>
+<pre><code>{
+  &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;transcript_path&quot;: &quot;&lt;home&gt;/.claude/projects/&lt;slug&gt;/&lt;session&gt;.jsonl&quot;,
+  &quot;cwd&quot;: &quot;&lt;repo&gt;&quot;,
+  &quot;prompt_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;effort&quot;: {
+    &quot;level&quot;: &quot;high&quot;
+  },
+  &quot;hook_event_name&quot;: &quot;PostToolUse&quot;,
+  &quot;tool_name&quot;: &quot;Edit&quot;,
+  &quot;tool_input&quot;: {
+    &quot;file_path&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;old_string&quot;: &quot;print(&#x27;hi&#x27;)&quot;,
+    &quot;new_string&quot;: &quot;print(&#x27;hello&#x27;)&quot;,
+    &quot;replace_all&quot;: false
+  },
+  &quot;tool_response&quot;: {
+    &quot;filePath&quot;: &quot;&lt;repo&gt;/hello.py&quot;,
+    &quot;oldString&quot;: &quot;print(&#x27;hi&#x27;)&quot;,
+    &quot;newString&quot;: &quot;print(&#x27;hello&#x27;)&quot;,
+    &quot;originalFile&quot;: &quot;print(&#x27;hi&#x27;)\n&quot;,
+    &quot;structuredPatch&quot;: [
+      {
+        &quot;oldStart&quot;: 1,
+        &quot;oldLines&quot;: 1,
+        &quot;newStart&quot;: 1,
+        &quot;newLines&quot;: 1,
+        &quot;lines&quot;: [
+          &quot;-print(&#x27;hi&#x27;)&quot;,
+          &quot;+print(&#x27;hello&#x27;)&quot;
+        ]
+      }
+    ],
+    &quot;userModified&quot;: false,
+    &quot;replaceAll&quot;: false
+  },
+  &quot;tool_use_id&quot;: &quot;toolu_01NkCiG7D3gWiCiE8heVKjXW&quot;,
+  &quot;duration_ms&quot;: 6
+}</code></pre>
+</section>
+</main>
+</body>
+</html>

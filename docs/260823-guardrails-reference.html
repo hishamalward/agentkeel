@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardrails</title>
+<link rel="stylesheet" href="keel.css">
+</head>
+<body>
+<main>
+<header class="page">
+  <div class="kicker">Reference &middot; created 260823</div>
+  <h1>Guardrails</h1>
+</header>
+<section id="the-pattern-on-every-write-path">
+<h2>The pattern on every write path</h2>
+<p>Reused from <a href="https://github.com/hishamalward/toilscan">toilscan</a>'s <code>apply</code> path, where it is enforced in code:</p>
+<ol>
+<li><strong>Read-only by default.</strong> The default invocation previews; nothing is written until the caller authorizes it explicitly (a flag, an approval, a declared permission).</li>
+<li><strong>Explicit authorization to apply</strong>, per operation, never "apply all" by default.</li>
+<li><strong>Stable IDs</strong> for the things being written, so a re-run recognizes what it already did.</li>
+<li><strong>Atomic writes</strong>: write to a temp file beside the target, then rename. A crash leaves the old file or the new file, never half of one.</li>
+<li><strong>A recoverable journal</strong> of what was written, so the last apply can be undone.</li>
+<li>**Never move or push <code>main</code><strong> without the merge or push permission; </strong>never edit outside your task's worktrees<strong>; </strong>never print a secret**.</li>
+</ol>
+<p>The hooks in this repo enforce item 6 and the permission half of item 2. Items 1, 3, 4 and 5 are how to build a tool that writes; the hooks cannot enforce them from outside and the README does not claim they do.</p>
+</section>
+<section id="what-the-hooks-see-and-what-they-cannot">
+<h2>What the hooks see, and what they cannot</h2>
+<p>Hooks run on tool calls. They see the call as JSON (<a href="260823-hook-payloads-reference.html">the captured hook payloads</a>), not the filesystem and not the process that results. So the guarantee is "the agent's tool calls were bounded", not "nothing else touched the tree". Concretely:</p>
+<table><thead><tr><th>Guard</th><th>Sees</th><th>Does not see</th></tr></thead><tbody>
+<tr><td><code>task-guard.py</code></td><td><code>Write</code>, <code>Edit</code>, <code>NotebookEdit</code> paths; every simple command in a <code>Bash</code> line (after <code>&amp;&amp;</code>, <code>;</code>, pipes, newlines, <code>$(...)</code>, <code>bash -c</code>, <code>eval</code>, <code>cd</code>), every git operation in it with its global options and aliases</td><td><code>sed -i</code>, redirects, <code>mv</code>, a script or npm script that writes or runs git; variables and globs (not expanded)</td></tr>
+<tr><td><code>secret-guard.py</code></td><td>shell commands that print env files, key files, the environment, secret-named variables</td><td>a program that reads and prints the value; a secret in a file under a name the list does not know</td></tr>
+<tr><td><code>plan-gate-guard.py</code></td><td><code>Agent</code> dispatches naming a plan file, with the <code>[plan-gate]</code> marker or the gate words</td><td>a dispatch worded to avoid the heuristic</td></tr>
+<tr><td><code>plan-size-guard.sh</code></td><td>the line count of a plan file after a write</td><td>a plan split across files</td></tr>
+</tbody></table>
+<p>The README's capability table labels each protection as prevents, warns after, guidance only or unsupported.</p>
+<p>Two overrides exist (<code>AGENTKEEL_ALLOW_DESTRUCTIVE=1</code>, <code>AGENTKEEL_SHOW_SECRETS=1</code>). Each is written on the command it applies to, so it applies once and the transcript shows it, and each use is appended to <code>~/.agentkeel/overrides.jsonl</code>. Shipping has no override: it is a permission.</p>
+</section>
+<section id="isolation-is-a-different-problem">
+<h2>Isolation is a different problem</h2>
+<p>A git worktree isolates the filesystem and nothing else. The database, the ports, the job queue and the simulator stay shared, and two agents on one machine will collide there first. That is runtime isolation and it lives in <a href="https://github.com/hishamalward/agent-slots">agent-slots</a>, where one integer derives a worktree, a database, two ports and a queue schema. agentkeel does not duplicate it.</p>
+</section>
+</main>
+</body>
+</html>

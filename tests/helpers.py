@@ -26,6 +26,30 @@ def run_hook(name, payload, env=None, cwd=None):
     return out.returncode, out.stderr
 
 
+def state_page(changes=("cli.py", "tests/"), must_not=("cli_legacy.py",), boundary=True, working=False,
+               title="Feature", extra=""):
+    """A minimal state page: optional boundary (with its Changes and Must-not lists) and Working section."""
+    li = lambda items: "".join(f"<li><code>{i}</code></li>" for i in items)
+    b = (f'<section data-keel-boundary id="boundary"><h2>Agreed</h2><p>Outcome.</p>\n'
+         f"<ul data-keel-changes>{li(changes)}</ul>\n<ul data-keel-must-not>{li(must_not)}</ul>\n</section>\n"
+         if boundary else "")
+    w = '<section data-keel-transient="working" id="working"><p>Now: step 2</p></section>\n' if working else ""
+    return (f"<!doctype html>\n<html><head><title>{title}</title>\n</head><body>\n<h1>{title}</h1>\n"
+            f"<section id=\"behavior\"><p>Current behavior.</p></section>\n{b}{w}{extra}</body></html>\n")
+
+
+def approve_file(path, home, by="hisham", on="2026-10-05"):
+    """What the human's task.py approve does: write the approval meta and keep the boundary."""
+    from agentkeel_core import pages, record
+    with open(path, encoding="utf-8") as fh:
+        text = pages.with_approval(os.path.basename(path), fh.read(), by, on)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    b = pages.sections(text, "boundary")[0]
+    record.save_approved_boundary(pages.digest(os.path.basename(path), b), b, {"AGENTKEEL_HOME": home})
+    return text
+
+
 def git(repo, *args):
     subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True,
                    env={**os.environ, **GIT_ENV})

@@ -15,6 +15,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -30,3 +32,8 @@ jobs:
           for f in hooks/*.sh; do bash "$f" --selftest; done
       - name: unit tests
         run: python3 -m unittest discover -s tests -v
+      - name: docs check (this repository's own docs model)
+        run: >-
+          python3 hooks/agentkeel_core/pages.py check --rev ${{ github.sha }}
+          --base "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
+          || (github.ref_name == 'main' && github.event.before) || 'origin/main' }}"

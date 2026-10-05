@@ -45,6 +45,7 @@ class Op:
     local: bool = False
     remote: str = ""
     sources: dict = field(default_factory=dict)   # push: destination branch -> the rev it receives
+    source: str = ""                               # move: the rev the branch becomes, when known
 
 
 @dataclass
@@ -353,8 +354,8 @@ def ops_for(call, protected, branch=None):
     shorts, longs, pos = _flags(args)
     ops = []
 
-    def move(name):
-        ops.append(Op("move", name=name, targets=[branch]))
+    def move(name, source=""):
+        ops.append(Op("move", name=name, targets=[branch], source=source))
 
     if sub == "push":
         return push_ops(call, branch)
@@ -372,7 +373,9 @@ def ops_for(call, protected, branch=None):
             move("commit")
     elif sub in ("merge", "pull", "cherry-pick", "revert", "am"):
         if not longs & {"--abort", "--quit", "--skip"} and on_protected:
-            move(sub)
+            # a fast-forward merge of one named rev makes the branch exactly that rev
+            ff = sub == "merge" and "--ff-only" in longs and len(pos) == 1
+            move(sub, pos[0] if ff else "")
         if sub == "pull":
             for spec in pos[1:]:
                 dst = _strip_ref(spec.split(":", 1)[1]) if ":" in spec else ""
@@ -390,21 +393,23 @@ def ops_for(call, protected, branch=None):
         if "--hard" in longs:
             ops.append(Op("destructive", name="git reset --hard"))
         if on_protected and _moves_by_reset(call):
-            move("reset")
+            move("reset", pos[0] if pos and "--" not in call.args else "")
     elif sub == "update-ref":
         refs = [_strip_ref(p) for p in pos[:1]]
         if "d" in shorts:
             ops.append(Op("destructive", name="git update-ref -d"))
         for r in refs:
             if r in protected:
-                ops.append(Op("move", name="update-ref", targets=[r]))
+                ops.append(Op("move", name="update-ref", targets=[r], source=pos[1] if len(pos) > 1 else ""))
     elif sub == "fetch":
         for spec in pos[1:]:
             spec = spec.lstrip("+")
             if ":" in spec:
                 dst = _strip_ref(spec.split(":", 1)[1])
                 if dst in protected:
-                    ops.append(Op("move", name="fetch into a protected ref", targets=[dst]))
+                    local = pos[0] == "." if pos else False
+                    ops.append(Op("move", name="fetch into a protected ref", targets=[dst],
+                                  source=spec.split(":", 1)[0] if local else ""))
     elif sub == "branch":
         deleting = "d" in shorts or "D" in shorts or "--delete" in longs
         forced = "D" in shorts or "f" in shorts or "--force" in longs

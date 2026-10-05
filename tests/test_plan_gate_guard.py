@@ -19,7 +19,7 @@ class PlanGateGuard(unittest.TestCase):
         return {"tool_name": "Agent", "cwd": self._tmp.name, "tool_input": {"prompt": prompt}}
 
     def test_one_round_of_two_then_refused_marker(self):
-        p = "[plan-gate] Review docs/plans/json-flag-plan.md"
+        p = "[plan-gate] Review docs/261005-json-flag-state.html"
         self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
         self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
         code, err = run_hook(H, self.agent(p), self.env)
@@ -27,23 +27,23 @@ class PlanGateGuard(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self._tmp.name, "plan-gates.json")))
 
     def test_heuristic_detects_gate_words(self):
-        p = "Act as Gate A: review the plan docs/plans/json-flag-plan.md and give a verdict"
+        p = "Act as Gate A: review the plan docs/261005-json-flag-state.html and give a verdict"
         for _ in range(2):
             self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
         self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 2)
 
     def test_implementer_dispatch_not_counted(self):
-        p = "Implement task 3 of docs/plans/json-flag-plan.md"
+        p = "Implement task 3 of docs/261005-json-flag-state.html"
         for _ in range(4):
             self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
 
     def test_task_review_excluded(self):
-        p = "Review the plan docs/plans/json-flag-plan.md against review-package-3.md"
+        p = "Review the plan docs/261005-json-flag-state.html against review-package-3.md"
         for _ in range(4):
             self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
 
     def test_per_plan_counters_independent(self):
-        a = "[plan-gate] docs/plans/a-plan.md"; b = "[plan-gate] docs/plans/b-plan.md"
+        a = "[plan-gate] docs/261005-a-state.html"; b = "[plan-gate] docs/261005-b-state.html"
         for p in (a, a, b, b):
             self.assertEqual(run_hook(H, self.agent(p), self.env)[0], 0)
         self.assertEqual(run_hook(H, self.agent(a), self.env)[0], 2)
@@ -52,7 +52,7 @@ class PlanGateGuard(unittest.TestCase):
     def test_parallel_dispatches_cannot_both_read_the_old_count(self):
         import subprocess, sys, json
         from helpers import HOOKS
-        p = "[plan-gate] Review docs/plans/race-plan.md"
+        p = "[plan-gate] Review docs/261005-race-state.html"
         payload = json.dumps(self.agent(p))
         procs = [subprocess.Popen([sys.executable, os.path.join(HOOKS, H)], stdin=subprocess.PIPE,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,

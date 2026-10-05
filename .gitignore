@@ -14,3 +14,6 @@ build/
 # Editor / harness state
 .claude/settings.local.json
 .env
+
+# Derived docs index (task.py index)
+docs/index.html

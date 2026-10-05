@@ -24,7 +24,7 @@ class RepoContract(unittest.TestCase):
         for dirpath, dirs, files in os.walk(ROOT):
             dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
             for f in files:
-                if f.endswith((".md", ".py", ".sh", ".json", ".yml")):
+                if f.endswith((".md", ".py", ".sh", ".json", ".yml", ".html", ".css")):
                     p = os.path.join(dirpath, f)
                     with open(p, encoding="utf-8", errors="ignore") as fh:
                         if "\u2014" in fh.read():

@@ -6,7 +6,16 @@
   task.py show                     the record for this session
   task.py verify -- <command...>   run a check and record its exit code against HEAD
   task.py end                      drop the record (the task is finished or abandoned)
-  task.py approve <task-id>        HUMAN ONLY: approve docs/specs/<task-id>-spec.md
+  task.py approve <task-id|page>   HUMAN ONLY: approve the boundary of a docs/ page
+
+Documentation (repositories with "docs": "html" in agentkeel.json; see docs/ in agentkeel):
+  task.py new <kind> <family> [--qualifier Q] [--title T] [--boundary]
+                                   start a page from the starter: kind is state, reference,
+                                   audit, mockup, or project (the one project canon)
+  task.py context <page>           the page as plain structured text, for reading
+  task.py finish <page>            remove the page's Working section before main moves
+  task.py check [--rev R] [--base B]   the docs check main moves on (the working folder by default)
+  task.py index                    write the derived docs/index.html (never committed)
 
 Permissions (comma separated, any combination): review, implement, merge, push,
 distribution-build, store-submission, paid-job. Size never grants a permission: they are
@@ -29,7 +38,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, record  # noqa: E402
+from agentkeel_core import gitops, pages, record, starters  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -168,34 +177,162 @@ def end(args, environ):
     return 0
 
 
+def find_page(target, top):
+    """A page path from a path or a feature name (its state page)."""
+    if target.endswith(".html"):
+        return realpath(target, os.getcwd())
+    import glob
+    found = sorted(glob.glob(os.path.join(top, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{target}-state.html")))
+    return found[0] if len(found) == 1 else None
+
+
 def approve(args, environ):
     cwd = os.getcwd()
     top = gitops.toplevel(cwd) or cwd
-    path = args.target if args.target.endswith(".md") else record.spec_path(top, args.target)
-    path = realpath(path, cwd)
-    text = record.read(path)
+    path = find_page(args.target, top)
+    text = record.read(path) if path else None
     if text is None:
-        return fail(f"no spec at {path}")
-    fm = record.frontmatter(text)
-    if fm is None:
-        return fail(f"{path} has no frontmatter block at the top; add one from templates/spec.md")
+        return fail(f"no page for '{args.target}': give a docs/ page path, or a feature with one state page")
     who = gitops.run_git(cwd, "config", "user.name") or os.environ.get("USER", "")
     today = datetime.date.today().isoformat()
-    lines = text.split("\n")
-    end_idx = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
-    wanted = {"status": "approved", "approved_by": who, "approved_on": today}
-    seen = set()
-    for i in range(1, end_idx):
-        key = lines[i].split(":", 1)[0].strip().lower()
-        if key in wanted:
-            lines[i] = f"{key}: {wanted[key]}"
-            seen.add(key)
-    missing = [f"{k}: {v}" for k, v in wanted.items() if k not in seen]
-    lines[end_idx:end_idx] = missing
+    name = os.path.basename(path)
+    try:
+        new = pages.with_approval(name, text, who, today)
+    except ValueError as exc:
+        return fail(str(exc))
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines))
-    print(f"agentkeel: {os.path.relpath(path, top)} approved by {who} on {today}.\n"
-          "Append the D-NNN entry the spec carries in its section 8.")
+        fh.write(new)
+    boundary = pages.sections(new, "boundary")[0]
+    record.save_approved_boundary(pages.digest(name, boundary), boundary, environ)
+    print(f"agentkeel: the boundary of {os.path.relpath(path, top)} is approved by {who} on {today}.\n"
+          "Later edits to it keep main from moving until it is approved again.")
+    return 0
+
+
+def own_page_folder(environ, what):
+    """(record, repository top) when this session may write docs here, else (None, message)."""
+    rec = record.load(record.session_from_env(environ), environ)
+    top = gitops.toplevel(os.getcwd())
+    if not rec:
+        return None, "no task declared for this session; declare one with task.py start"
+    if "implement" not in (rec.get("permissions") or []):
+        return None, f"{what} writes a docs/ page: it needs the 'implement' permission"
+    if not top or os.path.realpath(top) not in (rec.get("worktrees") or []):
+        return None, (f"{what} writes in this task's own worktree; run it there "
+                      f"({', '.join(rec.get('worktrees') or []) or 'none recorded'})")
+    return rec, os.path.realpath(top)
+
+
+def new(args, environ):
+    rec, top = own_page_folder(environ, "task.py new")
+    if rec is None:
+        return fail(top)
+    if args.kind not in ("state", "reference", "audit", "mockup", "project"):
+        return fail("kind is one of: state, reference, audit, mockup, project")
+    family = "project" if args.kind == "project" else args.family
+    if not family or set(family) - TASK_ID_CHARS or (args.qualifier and set(args.qualifier) - TASK_ID_CHARS):
+        return fail("family and qualifier are kebab-case (a-z, 0-9, -)")
+    import glob
+    docs = os.path.join(top, "docs")
+    kind = "reference" if args.kind == "project" else args.kind
+    if kind == "state" or args.kind == "project":
+        existing = glob.glob(os.path.join(docs, f"[0-9][0-9][0-9][0-9][0-9][0-9]-{family}-{kind}.html"))
+        if existing:
+            return fail(f"{os.path.relpath(existing[0], top)} already exists: a feature has one state page "
+                        "and a repository one canon. Edit it.")
+    date = datetime.date.today().strftime("%y%m%d")
+    name = f"{date}-{family}{'-' + args.qualifier if args.qualifier else ''}-{kind}.html"
+    path = os.path.join(docs, name)
+    if os.path.exists(path):
+        return fail(f"{os.path.relpath(path, top)} already exists")
+    title = args.title or ("Project canon" if args.kind == "project" else family.replace("-", " ").capitalize())
+    boundary = args.boundary or (args.kind == "state" and rec.get("size") == "large")
+    os.makedirs(docs, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(starters.page(args.kind, title, date, boundary=boundary))
+    css = os.path.join(docs, "keel.css")
+    if not os.path.exists(css):
+        with open(css, "w", encoding="utf-8") as fh:
+            fh.write(starters.KEEL_CSS)
+        print(f"agentkeel: wrote {os.path.relpath(css, top)}")
+    print(f"agentkeel: wrote {os.path.relpath(path, top)}"
+          + (" (with a boundary for the human to approve)" if boundary else ""))
+    return 0
+
+
+def context(args, environ):
+    text = record.read(realpath(args.page, os.getcwd()))
+    if text is None:
+        return fail(f"cannot read {args.page}")
+    sys.stdout.write(pages.context(text))
+    return 0
+
+
+def finish(args, environ):
+    rec, top = own_page_folder(environ, "task.py finish")
+    if rec is None:
+        return fail(top)
+    path = realpath(args.page, os.getcwd())
+    text = record.read(path)
+    if text is None or not path.startswith(top + os.sep):
+        return fail(f"{args.page} is not a page in this task's worktree")
+    if not pages.sections(text, "working"):
+        print("agentkeel: no Working section; nothing to remove")
+        return 0
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(pages.without_working(text))
+    print(f"agentkeel: removed the Working section of {os.path.relpath(path, top)}.\n"
+          "Anything still unfinished belongs in Remaining scope or Current limitations.")
+    return 0
+
+
+def check(args, environ):
+    top = gitops.toplevel(os.getcwd()) or os.getcwd()
+    return pages.main(["check", "--root", top] + (["--rev", args.rev] if args.rev else [])
+                      + (["--base", args.base] if args.base else []))
+
+
+INDEX_HEAD = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs index</title><link rel="stylesheet" href="keel.css"></head><body><main>
+<header class="page"><div class="kicker">Derived by task.py index &middot; not committed</div><h1>Docs index</h1></header>
+"""
+
+
+def index(args, environ):
+    import html as h
+    top = os.path.realpath(gitops.toplevel(os.getcwd()) or os.getcwd())
+    docs = os.path.join(top, "docs")
+    if not os.path.isdir(docs):
+        return fail("no docs/ folder here")
+    families = {}
+    for name in sorted(os.listdir(docs)):
+        m = pages.NAME_RE.match(name)
+        if not m:
+            continue
+        text = record.read(os.path.join(docs, name)) or ""
+        title = pages.scan(text).title.strip() or name
+        state = pages.boundary_state(name, text)[0]
+        working = bool(pages.sections(text, "working"))
+        families.setdefault(m.group(2), []).append((m.group(3), name, title, state, working))
+    rows = []
+    order = {"state": 0, "reference": 1, "audit": 2, "mockup": 3}
+    for fam in sorted(families, key=lambda f: (f != "project", f)):
+        rows.append(f"<h2>{h.escape(fam)}</h2><ul>")
+        for kind, name, title, state, working in sorted(families[fam], key=lambda r: (order[r[0]], r[1])):
+            tags = f'<span class="tag">{kind}</span>'
+            if state != "none":
+                tags += f' <span class="tag {"ok" if state == "approved" else "warn"}">boundary {state}</span>'
+            if working:
+                tags += ' <span class="tag warn">working</span>'
+            rows.append(f'<li><a href="{h.escape(name)}">{h.escape(title)}</a> {tags}</li>')
+        rows.append("</ul>")
+    out = os.path.join(docs, "index.html")
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(INDEX_HEAD + "\n".join(rows) + "\n</main></body></html>\n")
+    ignored = gitops.run_git(top, "check-ignore", "-q", out) is not None
+    print(f"agentkeel: wrote {os.path.relpath(out, top)}"
+          + ("" if ignored else "\n  note: add docs/index.html to .gitignore; the index is derived and never committed"))
     return 0
 
 
@@ -215,12 +352,25 @@ def main(argv=None, environ=os.environ):
     sub.add_parser("end")
     a = sub.add_parser("approve")
     a.add_argument("target")
+    n = sub.add_parser("new")
+    n.add_argument("kind")
+    n.add_argument("family", nargs="?", default="")
+    n.add_argument("--qualifier")
+    n.add_argument("--title")
+    n.add_argument("--boundary", action="store_true")
+    for name in ("context", "finish"):
+        sub.add_parser(name).add_argument("page")
+    c = sub.add_parser("check")
+    c.add_argument("--rev")
+    c.add_argument("--base")
+    sub.add_parser("index")
     if argv is None:
         argv = sys.argv[1:]
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"start": start, "show": show, "verify": verify, "end": end, "approve": approve}
+    handlers = {"start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
+                "context": context, "finish": finish, "check": check, "index": index}
     if args.action not in handlers:
         p.print_help()
         return 2

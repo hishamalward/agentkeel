@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project canon</title>
+<link rel="stylesheet" href="keel.css">
+</head>
+<body>
+<main>
+<header class="page">
+  <div class="kicker">Project canon &middot; created 260823</div>
+  <h1>Project canon</h1>
+</header>
+<section id="how-to-read">
+<p>The rules that apply to agentkeel now, each with its reason. A feature's own detail lives on its
+state page and is linked, not copied. Instructions for agents in an adopting repository are the
+<code>AGENTS.md</code> fragment (<a href="../templates/AGENTS.agentkeel.md">templates/AGENTS.agentkeel.md</a>).
+Earlier positions and their debates are in Git history.</p>
+</section>
+<section id="invariants">
+<h2>The invariants</h2>
+<p>Every rule in agentkeel serves one of these three. When two rules collide, the invariant decides. When a rule serves none, it is deleted; that is the pruning rule the practice lacked.</p>
+<div id="i1-every-write-is-bounded-before-it-happens">
+<h3>I1. Every write is bounded before it happens</h3>
+<p>A large task's approved boundary names what may change (<code>Changes</code>) and what must not (<code>Must not change</code>). The task record says how much process the task bought (size), which actions it may take (permissions) and where (resources). The hooks refuse what falls outside: a write with no task, a code edit on <code>main</code>, a large-task edit before its boundary is approved or outside its <code>Changes</code>, an edit outside the task's worktrees, a destructive git command, moving or pushing <code>main</code> without the permission.</p>
+<p>Applied to intent, I1 is scope discipline: do the literal ask, then stop. "Update the state page" means update the state page, not also the plan, not also a tidy-up. An adjacent problem you notice gets one line ("also noticed X, want it?"), never a fix. Each expansion is defensible on its own, which is exactly why they accumulate, and the cost is that the human can never tell when a task is finished. Finishing the work and shipping it are two decisions; the second is the human's.</p>
+</div>
+<div id="i2-every-claim-carries-its-evidence">
+<h3>I2. Every claim carries its evidence</h3>
+<p>No completion claim without fresh output pasted. "Should work", "looks correct" and "probably fine" mean the check was not run. Verify at the cheapest layer that can prove the change: a unit test before an integration run, an integration run before a screenshot; hoisting logic into a testable layer moves work from the expensive layer to the cheap one.</p>
+<p>A failed check stops the work and is reported. It is never worked around: the scope is not widened to satisfy the check, and the check is not narrowed to pass. This is the control that caught the plan defects in practice, and it is the one an agent under pressure most wants to skip.</p>
+<p>A check is scoped to the work it checks. A whole-file count behind a two-region edit, or <code>npm run dev | head</code> as proof a server started, are checks that cannot pass or cannot fail; both are plan defects.</p>
+</div>
+<div id="i3-every-loop-has-a-cap-and-only-the-human-re-opens-it">
+<h3>I3. Every loop has a cap, and only the human re-opens it</h3>
+<p>One plan gate per plan. One review round per scope (per task, then the whole branch). One verification pass per claim. A retro or process suggestion is a proposal to the human, never self-executed work.</p>
+<p>The reason is not cost, although cost is where it shows. A control that re-runs on its own output becomes a loop feeding itself: the later rounds find the defects the earlier rounds' revisions introduced. The cap is what keeps a control a control.</p>
+</div>
+<div id="the-pricing-rule">
+<h3>The pricing rule</h3>
+<p>Process is chosen once, by size, and size buys no permissions. Declare the task before the first write; the record is state (<code>hooks/task.py</code>) and the hooks read it. When in doubt pick the smaller size: upgrading is cheap and the human can always ask for more. A task never grows on its own; if the work turns out bigger than declared, stop and say so, and the human re-scopes.</p>
+</div>
+</section>
+<section id="gates">
+<h2>Gates</h2>
+<p>A gate is a point where work cannot proceed until a named owner produces named evidence. Under that definition there are four. Verification is not one of them; it is the evidence rule (I2) that every gate consumes.</p>
+<table><thead><tr><th>#</th><th>Gate</th><th>Owner</th><th>Entry</th><th>Exit evidence</th><th>Enforced by</th></tr></thead><tbody>
+<tr><td>G1</td><td>Boundary approval</td><td>Human</td><td>size <code>large</code>; a state page with an unapproved boundary</td><td>the page's <code>keel-approval</code> meta matches its boundary (<code>task.py approve</code>)</td><td><code>task-guard.py</code> refuses edits outside <code>docs/</code> until then and refuses the agent writing the approval; the docs check keeps <code>main</code> from moving while a boundary is unapproved or changed</td></tr>
+<tr><td>G2</td><td>Plan gate</td><td>AI: one plan reviewer and one scope auditor, in parallel, once</td><td>a handoff plan exists (the state page's Working section)</td><td>the plan table with every "check scope inside may-touch" cell <code>yes</code>; findings applied</td><td><code>plan-gate-guard.py</code> refuses a third dispatch; <code>plan-size-guard.sh</code> reports a Working section over 300 lines after the write</td></tr>
+<tr><td>G3</td><td>Review</td><td>AI reviewer, one round per scope</td><td>per task: that task's diff; whole branch: all tasks done</td><td>findings applied; no second round without the human</td><td>guidance only</td></tr>
+<tr><td>G4</td><td>Ship</td><td>Human decides; AI supplies the evidence</td><td>tests green on the branch</td><td><code>main</code> moved and pushed only within the task's permissions</td><td><code>task-guard.py</code> refuses moving <code>main</code> without <code>merge</code> and pushing it without <code>push</code>; tests before <code>main</code> moves need a required CI check</td></tr>
+</tbody></table>
+<div id="g1-boundary-approval">
+<h3>G1, boundary approval</h3>
+<p>The human reads the boundary on the feature's state page (outcome, constraints, acceptance checks, and the Changes and Must-not lists) and approves it with <code>task.py approve &lt;feature&gt;</code> in a terminal of their own. The command writes a digest of the boundary's HTML into the page; the guard refuses it from the agent and refuses any agent edit that adds, changes or removes that approval. The rest of the page stays editable: the plan, progress and evidence change as the work teaches. Editing the boundary is allowed too, as a draft: the write limits keep using the approved version, and <code>main</code> does not move until the human approves the new boundary. The digest detects a change; it does not prove who approved, because shell writes are outside the guard.</p>
+</div>
+<div id="g2-plan-gate">
+<h3>G2, plan gate</h3>
+<p>Only when a plan exists, and a plan exists only when a different session will execute the work. The plan is the Working section of the feature's state page, so the prompt names that page. Two agents, one round, in parallel: a plan reviewer (does each task make sense against the boundary and the state page) and a scope auditor (does each check fit inside the files its task touches). Findings are applied and the work starts. The revised plan is not re-gated; the per-task review is the net for what the single gate missed. Dispatch prompts carry <code>[plan-gate]</code> so the guard counts deterministically.</p>
+</div>
+<div id="g3-review">
+<h3>G3, review</h3>
+<p>One round per scope. After each task, a review of that task's diff; after the last task, one review of the whole branch. Reviewing a revision does not open a new round. In practice this is where the implementation defects were found (all in failure paths, none visible in the plan), so it is the gate that earns its cost. No hook enforces it yet; a dispatch-count cap is the obvious next one.</p>
+</div>
+<div id="g4-ship">
+<h3>G4, ship</h3>
+<p>The agent runs the tests on the branch and reports. The human decides, and the request sets the scope: "merge and push" is the <code>merge</code> and <code>push</code> permissions for that task, and the agent does both without asking again. <code>main</code> must always be green because in the practice this came from, every push to <code>main</code> deployed. Conflicts are resolved on the branch; there is no integration branch. The hooks refuse moving <code>main</code> without <code>merge</code> (a commit on it, a merge, a fast-forward, a reset, an update-ref) and pushing it without <code>push</code>. They cannot prove the tests passed: that needs a required check on the candidate commit before <code>main</code> moves, with deployment waiting for it, which is CI's job: <a href="261004-required-checks-state.html">the required checks page</a> has the template and the settings.</p>
+</div>
+</section>
+
+<section id="rules">
+<h2>Rules that apply now</h2>
+<p>Each rule has one home. Where a feature owns the detail, the rule links to its state page.</p>
+
+<h3 id="plans">Plans never carry code</h3>
+<p>A plan is a task table: task, files it may touch, blocked by, check, expected, and whether the
+check's scope fits inside the files. It never contains implementation; if the deliverable is small
+enough that the plan would carry the code, there is no plan. It lives in the Working section of the
+feature's state page. <em>Why:</em> a plan that transcribed the implementation made the work happen
+twice (the worst case was a 4105-line plan for 541 lines of shell). <code>plan-size-guard.sh</code>
+reports a Working section over 300 lines.</p>
+
+<h3 id="gate-definition">A gate has an owner and an exit</h3>
+<p>A gate is a point where work cannot proceed until a named owner produces named evidence; there are
+four (above). Verification is the evidence rule every gate consumes, not a gate. <em>Why:</em>
+listing every loop as a gate made "gate" mean "step", and a step has no owner to enforce it.</p>
+
+<h3 id="task-record">The task record answers three separate questions</h3>
+<p>Size buys process, permissions name actions, resources say where. The record is bound to one
+session and lives outside the repository. Every code task, small included, works in its own
+worktree. Detail: <a href="261004-task-record-state.html">the task record</a>. <em>Why:</em> one
+tier answering all three created permissions nobody granted (a bare commit on <code>main</code>,
+a tier file reused by another session), and the most repeated corrections in practice were actions
+taken without being asked.</p>
+
+<h3 id="command-lines">Every git operation in a command line is judged</h3>
+<p>A command line is read as simple commands (after <code>&amp;&amp;</code>, <code>;</code>, pipes,
+newlines, <code>$(...)</code>, <code>bash -c</code>, <code>eval</code>, <code>cd</code>), and each git
+call with its global options and aliases. <em>Why:</em> a guard that read only the first command let
+<code>git push origin feat &amp;&amp; git push origin main</code> through.</p>
+
+<h3 id="overrides">Overrides are written on the command, apply once, and are logged</h3>
+<p><code>AGENTKEEL_ALLOW_DESTRUCTIVE=1</code> and <code>AGENTKEEL_SHOW_SECRETS=1</code> count only as a
+prefix on the command they apply to, and each use is appended to
+<code>AGENTKEEL_HOME/overrides.jsonl</code>. Shipping has no override; it is a permission.
+<em>Why:</em> an override read from the hook's own environment would be permanent and silent.</p>
+
+<h3 id="install">One instruction file, and claims labelled by kind</h3>
+<p>The installer previews by default, writes its fragment into <code>AGENTS.md</code> between
+markers, never creates a <code>CLAUDE.md</code>, and restores each file's original bytes on
+<code>--uninstall</code>. The README labels every protection as prevents, warns after, guidance only
+or unsupported, with its test. <em>Why:</em> Claude Code loads <code>AGENTS.md</code> only when no
+<code>CLAUDE.md</code> exists, and guidance presented as a guarantee is a false claim.</p>
+
+<h3 id="hosts">Guards read host-neutral events</h3>
+<p>Claude Code and Codex calls become the same events before any guard runs, so one decision serves
+both hosts; a tool that may write but has no adapter is refused. Plugins act only in repositories
+that opt in with <code>agentkeel.json</code>. Detail: <a href="261004-hosts-state.html">hosts</a>.
+<em>Why:</em> a Codex patch with no task passed every guard that read Claude tool names, and a plugin
+that refused every write in every repository would be unusable.</p>
+
+<h3 id="required-checks">Tests before main is a required CI check</h3>
+<p>One always-reporting check, <code>agentkeel-required</code>, runs the app tests (skipped for a
+docs-only change) and the docs check on the candidate commit; branch protection or the agent push
+gate requires it, and the deploy waits for it. Detail:
+<a href="261004-required-checks-state.html">required checks</a>. <em>Why:</em> a hook guards the
+agent, not the branch, and CI that runs after a push to <code>main</code> reports after the deploy
+started.</p>
+
+<h3 id="documentation">Documentation is authored HTML with one current owner per fact</h3>
+<p>Every document is one authored HTML page in the flat <code>docs/</code> folder: this canon for
+repo-wide rules, one state page per feature, references, audits and mockups. Pages describe what is
+true now and are rewritten in place; Git keeps the history, so there is no decision log. Detail:
+<a href="261005-html-docs-state.html">the documentation model</a>. <em>Why:</em> the same detail
+copied into several documents (a spec, a plan, a handover, a status file, a decision entry) drifted
+apart, and an old entry's "Active" label could not tell anyone which rule applies now.</p>
+</section>
+
+</main>
+</body>
+</html>

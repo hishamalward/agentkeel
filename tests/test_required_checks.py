@@ -75,5 +75,25 @@ class Workflow(unittest.TestCase):
         self.assertIn("fetch-depth: 0", text)  # the selector needs history
 
 
+class DocsJob(unittest.TestCase):
+    """The docs check runs on every candidate, docs-only included, and the required check needs it."""
+
+    def test_required_check_needs_a_successful_docs_job(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        with open(WORKFLOW) as fh:
+            wf = yaml.safe_load(fh)
+        jobs = wf["jobs"]
+        self.assertNotIn("if", jobs["docs"])
+        self.assertIn("pages.py check --rev", jobs["docs"]["steps"][-1]["run"])
+        self.assertIn("docs", jobs["agentkeel-required"]["needs"])
+        self.assertIn('test "${{ needs.docs.result }}" = "success"', jobs["agentkeel-required"]["steps"][0]["run"])
+        on = wf.get("on", wf.get(True))
+        self.assertEqual(set(on), {"push", "pull_request"})
+        self.assertFalse(any(isinstance(v, dict) and ("paths" in v or "paths-ignore" in v) for v in on.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

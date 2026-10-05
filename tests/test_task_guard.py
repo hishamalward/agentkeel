@@ -4,7 +4,7 @@ import os
 import subprocess
 import unittest
 
-from helpers import GIT_ENV, SESSION, RepoCase, git
+from helpers import approve_file, state_page, GIT_ENV, SESSION, RepoCase, git
 
 
 class NoTask(RepoCase):
@@ -318,66 +318,67 @@ class CommandClasses(RepoCase):
         self.assertEqual(self.hook(self.bash("npx tsx scripts/eval-run.ts"))[0], 0)
 
 
-class LargeAndSpecApproval(RepoCase):
-    SPEC = "docs/specs/json-flag-spec.md"
+class LargeAndBoundaryApproval(RepoCase):
+    """A large task's limits come from its state page's approved boundary; approval is the human's."""
+    PAGE = "docs/261005-json-flag-state.html"
 
     def setUp(self):
         super().setUp()
         self.declare(size="large", task="json-flag"); self.branch("feat/json-flag")
-        os.makedirs(os.path.join(self.repo, "docs", "specs"))
+        os.makedirs(os.path.join(self.repo, "docs"))
+        self.path = os.path.join(self.repo, self.PAGE)
 
-    def spec(self, text):
-        with open(os.path.join(self.repo, self.SPEC), "w") as fh:
+    def put(self, text):
+        with open(self.path, "w") as fh:
             fh.write(text)
+        return text
 
-    APPROVED = ("---\nstatus: approved\napproved_by: hisham\napproved_on: 2026-10-04\n---\n\n"
-                "## 4. Blast radius\n\n- **Changes** (paths that may change): `cli.py`, `tests/`\n"
-                "- **Must not change**: `cli_legacy.py`\n- **Boundary**: none\n")
+    def approved(self, **kw):
+        self.put(state_page(**kw))
+        return approve_file(self.path, self.home)
 
-    def test_no_spec_blocks_code_but_not_docs(self):
+    def test_no_page_blocks_code_but_not_docs(self):
         code, err = self.hook(self.write("cli.py"))
-        self.assertEqual(code, 2); self.assertIn("does not exist", err)
-        self.assertEqual(self.hook(self.write("docs/plans/json-flag-plan.md"))[0], 0)
+        self.assertEqual(code, 2); self.assertIn("no state page", err)
+        self.assertEqual(self.hook(self.write(self.PAGE, content=state_page()))[0], 0)
 
-    def test_approval_inside_a_code_block_is_not_approval(self):
-        self.spec("---\nstatus: draft\n---\n\n```yaml\nstatus: approved\napproved_by: x\napproved_on: 2026-10-04\n```\n")
+    def test_unapproved_or_malformed_boundary_blocks_code(self):
+        self.put(state_page())
         code, err = self.hook(self.write("cli.py"))
-        self.assertEqual(code, 2); self.assertIn("status 'draft'", err)
-
-    def test_approval_without_approver_or_date_is_not_approval(self):
-        self.spec("---\nstatus: approved\n---\n")
-        self.assertIn("approved_by", self.hook(self.write("cli.py"))[1])
-        self.spec("---\nstatus: approved\napproved_by: h\napproved_on: soon\n---\n")
-        self.assertIn("approved_on", self.hook(self.write("cli.py"))[1])
-
-    def test_inline_comment_on_status_is_read(self):
-        self.spec("---\nstatus: draft            # draft | approved | superseded\n---\n")
-        self.assertIn("status 'draft'", self.hook(self.write("cli.py"))[1])
+        self.assertEqual(code, 2); self.assertIn("not been approved", err)
+        self.put(state_page().replace("</head>", '<meta name="keel-approval" content="sha256:zz by x on soon"></head>'))
+        code, err = self.hook(self.write("cli.py"))
+        self.assertEqual(code, 2); self.assertIn("malformed", err)
+        self.put(state_page(boundary=False))
+        self.assertIn("no boundary section", self.hook(self.write("cli.py"))[1])
 
     def test_agent_cannot_write_the_approval(self):
-        self.spec("---\nstatus: draft\napproved_by:\napproved_on:\n---\n")
-        code, err = self.hook(self.write(self.SPEC, content=self.APPROVED))
+        draft = self.put(state_page())
+        forged = state_page()
+        from agentkeel_core import pages
+        forged = pages.with_approval(os.path.basename(self.path), forged, "me", "2026-10-05")
+        code, err = self.hook(self.write(self.PAGE, content=forged))
         self.assertEqual(code, 2); self.assertIn("human's ruling", err)
+        meta = forged[forged.index("<meta name=\"keel-approval\""):forged.index("</head>")]
         edit = {"tool_name": "Edit", "cwd": self.repo, "session_id": SESSION,
-                "tool_input": {"file_path": os.path.join(self.repo, self.SPEC),
-                               "old_string": "status: draft\napproved_by:\napproved_on:",
-                               "new_string": "status: approved\napproved_by: me\napproved_on: 2026-10-04"}}
+                "tool_input": {"file_path": self.path, "old_string": "</head>", "new_string": meta + "</head>"}}
         self.assertEqual(self.hook(edit)[0], 2)
-        self.assertEqual(self.hook(self.bash(f".claude/hooks/task.py approve json-flag"))[0], 2)
-        self.assertEqual(self.hook(self.bash(f"python3 hooks/task.py approve {self.SPEC}"))[0], 2)
+        self.assertEqual(self.hook(self.bash(".claude/hooks/task.py approve json-flag"))[0], 2)
+        self.assertEqual(self.hook(self.bash(f"python3 hooks/task.py approve {self.PAGE}"))[0], 2)
         self.assertEqual(self.hook(self.bash("python3 -B hooks/task.py approve json-flag"))[0], 2)
+        with open(self.path) as fh:
+            self.assertEqual(draft, fh.read())
 
-    def test_approved_spec_changes_only_to_be_superseded(self):
-        self.spec(self.APPROVED)
-        widened = self.APPROVED.replace("`cli.py`, `tests/`", "`cli.py`, `tests/`, `src/`")
-        code, err = self.hook(self.write(self.SPEC, content=widened))
-        self.assertEqual(code, 2); self.assertIn("approved spec", err)
-        self.assertEqual(self.hook(self.write("src/b.py"))[0], 2)
-        superseded = self.APPROVED.replace("status: approved", "status: superseded")
-        self.assertEqual(self.hook(self.write(self.SPEC, content=superseded))[0], 0)
+    def test_agent_cannot_remove_or_change_an_approval(self):
+        text = self.approved()
+        meta = text[text.index("<meta name=\"keel-approval\""):text.index("</head>")]
+        for new in ("", meta.replace("hisham", "agent")):
+            edit = {"tool_name": "Edit", "cwd": self.repo, "session_id": SESSION,
+                    "tool_input": {"file_path": self.path, "old_string": meta, "new_string": new}}
+            self.assertEqual(self.hook(edit)[0], 2, new)
 
-    def test_approved_spec_bounds_writes_to_its_changes_list(self):
-        self.spec(self.APPROVED)
+    def test_approved_boundary_bounds_writes_to_its_changes_list(self):
+        self.approved()
         self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
         self.assertEqual(self.hook(self.write("tests/test_cli.py"))[0], 0)
         code, err = self.hook(self.write("src/other.py"))
@@ -385,10 +386,22 @@ class LargeAndSpecApproval(RepoCase):
         code, err = self.hook(self.write("cli_legacy.py"))
         self.assertEqual(code, 2); self.assertIn("Must not change", err)
 
+    def test_editing_the_boundary_is_allowed_and_grants_nothing(self):
+        text = self.approved()
+        widened = text.replace("<li><code>tests/</code></li>", "<li><code>tests/</code></li><li><code>src/</code></li>")
+        self.assertEqual(self.hook(self.write(self.PAGE, content=widened))[0], 0)  # drafting stays open
+        self.put(widened)
+        self.assertEqual(self.hook(self.write("src/b.py"))[0], 2)    # the approved copy still rules
+        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
+        import shutil
+        shutil.rmtree(os.path.join(self.home, "approvals"))
+        code, err = self.hook(self.write("cli.py"))                 # approved copy gone: no limits known
+        self.assertEqual(code, 2); self.assertIn("changed since it was approved", err)
+
     def test_commit_outside_docs_waits_for_approval(self):
-        self.assertEqual(self.hook(self.bash(f"git commit -m spec -- {self.SPEC}"))[0], 0)
+        self.assertEqual(self.hook(self.bash(f"git commit -m page -- {self.PAGE}"))[0], 0)
         self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 2)
-        self.spec(self.APPROVED)
+        self.approved()
         self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 0)
 
 
@@ -481,19 +494,20 @@ class StageReviewFindings(RepoCase):
         self.assertEqual(self.code(self.bash("git push origin main")), 0)
 
     def test_write_roots_keep_the_approval_checks(self):
-        specs = os.path.join(self.repo, "docs", "specs"); os.makedirs(specs)
-        spec = os.path.join(specs, "x-spec.md")
-        approved = "---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\nbody\n"
-        with open(spec, "w") as fh:
-            fh.write("---\nstatus: draft\n---\n")
+        docs = os.path.join(self.repo, "docs"); os.makedirs(docs)
+        page = os.path.join(docs, "261005-x-state.html")
+        with open(page, "w") as fh:
+            fh.write(state_page())
+        from agentkeel_core import pages
+        forged = pages.with_approval(os.path.basename(page), state_page(), "h", "2026-10-04")
         for allow in (("review",), ("implement",)):
-            self.declare(allow=allow, write_roots=[specs])
-            self.assertEqual(self.code(self.write(spec, content=approved)), 2, allow)
-        self.assertEqual(self.code(self.write(spec, content="---\nstatus: draft\n---\nmore\n")), 0)
-        with open(spec, "w") as fh:
-            fh.write(approved)
-        self.assertEqual(self.code(self.write(spec, content=approved + "widened\n")), 2)
-        self.assertEqual(self.code(self.write(os.path.join(specs, "notes.md"), content="x")), 0)
+            self.declare(allow=allow, write_roots=[docs])
+            self.assertEqual(self.code(self.write(page, content=forged)), 2, allow)
+        self.assertEqual(self.code(self.write(page, content=state_page(title="Edited"))), 0)
+        approve_file(page, self.home)
+        with open(page) as fh:
+            approved = fh.read()
+        self.assertEqual(self.code(self.write(page, content=approved.replace("on 2026-10-05", "on 2026-10-06"))), 2)
 
     def test_write_root_inside_a_large_task_keeps_the_blast_radius(self):
         self.declare(size="large", task="json-flag", write_roots=[os.path.join(self.repo, "src")])
@@ -540,6 +554,75 @@ if a[:1] == ["api"]:
     print(json.dumps({"check_runs": runs})); sys.exit(0)
 sys.exit(1)
 """
+
+
+class DocsGate(RepoCase):
+    """In a repository with "docs": "html", main moves only to a commit whose docs check passes."""
+
+    def setUp(self):
+        super().setUp()
+        self.declare(allow=("implement", "merge", "push"))
+        os.makedirs(os.path.join(self.repo, "docs"))
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            json.dump({"docs": "html"}, fh)
+        self.page = os.path.join(self.repo, "docs", "261005-x-state.html")
+        self.put(state_page(boundary=False))
+        self.main = self.commit("main")
+        self.branch("feat/x")
+
+    def put(self, text):
+        with open(self.page, "w") as fh:
+            fh.write(text)
+
+    def commit(self, msg):
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", msg)
+        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+    def test_a_working_section_keeps_main_still(self):
+        self.put(state_page(boundary=False, working=True))
+        bad = self.commit("wip")
+        for cmd in (f"git push origin {bad}:main", "git push origin feat/x:main", "git push . feat/x:main",
+                    f"git -C {self.repo} fetch . feat/x:main", f"git update-ref refs/heads/main {bad}"):
+            code, err = self.hook(self.bash(cmd))
+            self.assertEqual(code, 2, cmd); self.assertIn("docs check fails", err); self.assertIn("Working section", err)
+        self.put(state_page(boundary=False))
+        good = self.commit("finish")
+        self.assertEqual(self.hook(self.bash(f"git push origin {good}:main"))[0], 0)
+        self.assertEqual(self.hook(self.bash("git push . feat/x:main"))[0], 0)
+        self.assertEqual(self.hook(self.bash("git push origin feat/x"))[0], 0)  # a feature branch is not main
+
+    def test_local_fast_forward_on_main_is_checked(self):
+        self.put(state_page())  # an unapproved boundary
+        self.commit("boundary")
+        git(self.repo, "checkout", "-q", "main")
+        code, err = self.hook(self.bash("git merge --ff-only feat/x"))
+        self.assertEqual(code, 2); self.assertIn("not been approved", err)
+        self.assertEqual(self.hook(self.bash("git reset --hard feat/x", ), env={})[0], 2)
+
+    def test_dropping_an_approved_page_is_refused(self):
+        git(self.repo, "checkout", "-q", "main")
+        self.put(state_page()); approve_file(self.page, self.home)
+        self.commit("approved"); git(self.repo, "checkout", "-q", "feat/x"); git(self.repo, "merge", "-q", "main")
+        os.remove(self.page)
+        gone = self.commit("drop")
+        code, err = self.hook(self.bash(f"git push origin {gone}:main"))
+        self.assertEqual(code, 2); self.assertIn("removes or renames", err)
+
+    def test_disabling_in_the_candidate_does_not_escape(self):
+        os.remove(os.path.join(self.repo, "agentkeel.json"))
+        self.put(state_page(working=True))
+        bad = self.commit("wip")
+        self.assertEqual(self.hook(self.bash(f"git push origin {bad}:main"))[0], 2)
+
+    def test_not_enabled_means_no_docs_gate(self):
+        git(self.repo, "checkout", "-q", "main")
+        os.remove(os.path.join(self.repo, "agentkeel.json"))
+        self.commit("never opted in")
+        git(self.repo, "checkout", "-q", "-B", "feat/y")
+        self.put(state_page(working=True))
+        bad = self.commit("wip")
+        self.assertEqual(self.hook(self.bash(f"git push origin {bad}:main"))[0], 0)
 
 
 class PushGate(RepoCase):

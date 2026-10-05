@@ -1,6 +1,6 @@
-"""agentkeel core: the task record, the repo policy file, spec approval, and the override log.
+"""agentkeel core: the task record, the repo policy file, approved boundaries, and the override log.
 
-A task record answers three separate questions (D-004):
+A task record answers three separate questions (project canon, #task-record):
 
   size         small | medium | large      how much process the task buys
   permissions  review, implement, merge, push, distribution-build, store-submission, paid-job
@@ -229,47 +229,19 @@ def policy(root):
             "require_check": str(data.get("require_check_before_push") or "")}
 
 
-# ---- spec frontmatter -----------------------------------------------------------------------
+# ---- approved boundaries ---------------------------------------------------------------------
 
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def frontmatter(text):
-    """Key/value pairs of a leading `---` block. Anything else (a code block, a later `---`) is
-    not frontmatter, so a `status: approved` line pasted into the body approves nothing."""
-    if not text.startswith("---"):
-        return None
-    lines = text.split("\n")
-    if lines[0].strip() != "---":
-        return None
-    out = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            return out
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$", line)
-        if m:
-            value = re.sub(r"\s+#.*$", "", m.group(2)).strip().strip("'\"")
-            out[m.group(1).lower()] = value
-    return None  # never closed
+def approved_boundary_path(digest, environ=os.environ):
+    return os.path.join(home(environ), "approvals", re.sub(r"[^0-9a-f]", "", digest) + ".html")
 
 
-def approval(text):
-    """(approved: bool, reason). Approved needs status, approver and date, all in frontmatter."""
-    fm = frontmatter(text or "")
-    if fm is None:
-        return False, "has no frontmatter block at the top"
-    status = (fm.get("status") or "missing").lower()
-    if status != "approved":
-        return False, f"has status '{status}'"
-    if not fm.get("approved_by"):
-        return False, "is marked approved but names no approved_by"
-    if not DATE_RE.match(fm.get("approved_on") or ""):
-        return False, "is marked approved but approved_on is not a YYYY-MM-DD date"
-    return True, "approved"
-
-
-def spec_path(worktree, task):
-    return os.path.join(worktree, "docs", "specs", f"{task}-spec.md")
+def save_approved_boundary(digest, boundary_src, environ=os.environ):
+    """Kept when the human approves, so pre-action limits (a large task's Changes list) use the
+    approved boundary even after the draft on the page is edited."""
+    path = approved_boundary_path(digest, environ)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(boundary_src)
 
 
 def read(path):
@@ -278,25 +250,6 @@ def read(path):
             return fh.read()
     except Exception:
         return None
-
-
-BACKTICK_RE = re.compile(r"`([^`]+)`")
-
-
-def blast_radius(text):
-    """(changes, must_not) path patterns from the spec's Blast radius section."""
-    changes, must_not, mode = [], [], None
-    for line in (text or "").split("\n"):
-        if "**Changes**" in line:
-            mode = changes
-        elif "**Must not change**" in line:
-            mode = must_not
-        elif "**Boundary**" in line or line.startswith("## "):
-            mode = None
-        if mode is not None:
-            tail = line.split(":", 1)[1] if ("**Changes**" in line or "**Must not change**" in line) and ":" in line else line
-            mode.extend(p.strip() for p in BACKTICK_RE.findall(tail) if p.strip())
-    return changes, must_not
 
 
 def matches(rel, patterns):

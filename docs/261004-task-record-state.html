@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The task record</title>
+<link rel="stylesheet" href="keel.css">
+</head>
+<body>
+<main>
+<header class="page">
+  <div class="kicker">Feature state &middot; created 261004</div>
+  <h1>The task record</h1>
+</header>
+<p>Declare before the first write, in one command, from your reading of the human's request:</p>
+<pre><code>.claude/hooks/task.py start &lt;task-id&gt; --size small|medium|large --allow &lt;permissions&gt; \
+    [--write-root DIR]... [--worktree DIR]... [--resource NAME]...</code></pre>
+<p>It writes <code>~/.agentkeel/tasks/&lt;session-id&gt;.json</code> (<code>AGENTKEEL_HOME</code> moves it). The guards read it on every tool call. Fields: <code>task</code>, <code>session_id</code>, <code>size</code>, <code>permissions</code>, <code>worktrees</code>, <code>write_roots</code>, <code>resources</code>, <code>evidence</code>, <code>history</code>.</p>
+<section id="three-questions-answered-separately">
+<h2>Three questions, answered separately</h2>
+<table><thead><tr><th>Question</th><th>Values</th><th>Rule</th></tr></thead><tbody>
+<tr><td>Size</td><td><code>small</code>, <code>medium</code>, <code>large</code></td><td>how much process the task buys; it grants no action</td></tr>
+<tr><td>Permissions</td><td><code>review</code>, <code>implement</code>, <code>merge</code>, <code>push</code>, <code>distribution-build</code>, <code>store-submission</code>, <code>paid-job</code></td><td>each action needs its own; "merge and push" means <code>implement,merge,push</code></td></tr>
+<tr><td>Resources</td><td>worktrees, write roots, named resources</td><td>where the task may write; everything else belongs to someone else</td></tr>
+</tbody></table>
+<table><thead><tr><th>Size</th><th>Process</th><th>The hooks require</th></tr></thead><tbody>
+<tr><td><code>small</code></td><td>its own branch and worktree; no plan document, no subagents; one check; short report</td><td>a declared task; code edits off the protected branch</td></tr>
+<tr><td><code>medium</code></td><td>as small, plus tests and one review round</td><td>the same</td></tr>
+<tr><td><code>large</code></td><td>an approved boundary on the feature's state page; a plan table (its Working section) gated once; per-task and whole-branch review</td><td>no edit outside <code>docs/</code> before the boundary is approved; then only the approved boundary's <code>Changes</code> paths</td></tr>
+</tbody></table>
+<table><thead><tr><th>Permission</th><th>Allows</th></tr></thead><tbody>
+<tr><td><code>review</code></td><td>writing the <code>--write-root</code> folders only (report folders outside any repository)</td></tr>
+<tr><td><code>implement</code></td><td>editing the task's own worktrees, commits with explicit paths, local checks and local builds, local pushes between non-protected branches, files in the task's scratch</td></tr>
+<tr><td><code>merge</code></td><td><code>gh pr merge</code> (together with <code>push</code>); moving a protected branch locally: a commit on it, <code>merge</code>, <code>merge --ff-only</code>, <code>reset</code>, <code>rebase</code>, <code>update-ref</code>, <code>fetch . x:main</code>, <code>branch -f</code></td></tr>
+<tr><td><code>push</code></td><td>every push to a remote, the task's own branch included; deploy commands (<code>railway up</code>, <code>vercel --prod</code>, <code>fly deploy</code>, <code>netlify deploy --prod</code>)</td></tr>
+<tr><td><code>distribution-build</code></td><td><code>eas build</code>, <code>xcodebuild archive</code>, <code>fastlane gym</code> and similar</td></tr>
+<tr><td><code>store-submission</code></td><td><code>eas submit</code>, <code>eas update</code>, <code>npm publish</code>, <code>fastlane deliver/pilot/supply</code></td></tr>
+<tr><td><code>paid-job</code></td><td>the command patterns a repository lists in <code>agentkeel.json</code></td></tr>
+</tbody></table>
+</section>
+<section id="rules">
+<h2>Rules</h2>
+<ul>
+<li><strong>No record, no writes.</strong> A record belongs to one session. A second session, or a record file copied under another name, grants nothing. A subagent's tool calls carry its parent's session on both hosts (in Codex its own shell has its own id, so run task.py from the main agent).</li>
+<li><strong>Size never grants a permission.</strong> Re-declaring with a different size keeps the permissions exactly as given. Widening the permissions is printed on stderr and kept in <code>history</code>; say it in your next update.</li>
+<li><strong>State your reading, then proceed.</strong> The record is your interpretation of the request. Ask only when information is missing, the request is unclear, or an action would go past it.</li>
+<li><strong>When in doubt, smaller.</strong> A task never grows on its own: if it turns out bigger, stop and say so; re-scoping is the human's.</li>
+<li><strong>Scratch</strong>: each record has a scratch folder (<code>$TMPDIR/agentkeel-scratch/&lt;session&gt;</code>, printed by <code>task.py start</code>). Temp paths that name the session (Claude Code's own scratchpad does) are scratch too. Any other temp file belongs to someone else.</li>
+<li><strong>Write roots are report folders outside any repository.</strong> <code>task.py start</code> refuses one inside a repository, and the guard ignores one there: repository files are written only through the task's own worktree, under every rule above. A review that must land in the repository (an audit under <code>docs/</code>) is an <code>implement</code> task in its own worktree.</li>
+<li><strong>Every code task has its own worktree</strong>, even when you are the only agent, and the guard enforces it: the shared checkout never takes code edits, whatever branch it is on, and <code>task.py start</code> there records no worktree. <code>git worktree add ../&lt;repo&gt;-&lt;task&gt; -b feat/&lt;task&gt;</code> (recorded as the task's automatically). The protected branch stays clean for merges.</li>
+<li><strong>Explicit-path commits</strong>: <code>git commit -m &quot;...&quot; -- &lt;paths&gt;</code>. A bare <code>git commit</code> commits the whole index, including what another agent staged. Finishing a merge is the one exception (git refuses a partial commit then).</li>
+<li><strong>A new task in the same session starts fresh.</strong> Only re-declaring the same task id keeps its worktrees, write roots and evidence.</li>
+<li><strong>Evidence</strong>: <code>task.py verify -- &lt;command&gt;</code> runs a check and records its exit code against <code>HEAD</code> and whether the tree was dirty. It is a record, not a gate.</li>
+<li><strong>The human approves a boundary</strong>: <code>task.py approve &lt;feature|page&gt;</code> writes the page's <code>keel-approval</code> meta (a digest of the boundary, the approver from git <code>user.name</code>, the date) and keeps the approved boundary in <code>AGENTKEEL_HOME/approvals/</code>. The guard refuses it when the agent runs it, and refuses an agent edit that adds, changes or removes the approval, or that renames or deletes an approved page. The human runs it in a terminal of their own.</li>
+<li>**<code>task.py end</code>** drops the record and lists what the task owned.</li>
+</ul>
+</section>
+<section id="the-repository-policy-file">
+<h2>The repository policy file</h2>
+<p><code>agentkeel.json</code> at the repository root is optional and is never editable by the agent's file tools:</p>
+<pre><code>{
+  &quot;protected_branches&quot;: [&quot;main&quot;, &quot;release&quot;],
+  &quot;commands&quot;: { &quot;paid-job&quot;: [&quot;^npx tsx scripts/eval-&quot;] }
+}</code></pre>
+<p><code>commands</code> adds regular expressions to a permission's built-in list; they are matched against the command's words, both as typed and with <code>npx</code>/<code>bunx</code> removed.</p>
+</section>
+</main>
+</body>
+</html>

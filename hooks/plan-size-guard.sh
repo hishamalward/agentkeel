@@ -7,7 +7,8 @@
 # transcription then gets reviewed: the work done twice. In practice the worst case was a
 # 4105-line plan for 541 lines of shell.
 #
-# Runs after every write to docs/plans/*plan*.md and reports the actual number back. Exit 2 with
+# The plan lives in the Working section of a feature's state page (docs/YYMMDD-<feature>-state.html).
+# Runs after every write to a state page and reports the Working section's line count back. Exit 2 with
 # the message on stderr is fed to the model; the write itself has already happened.
 set -uo pipefail
 
@@ -15,14 +16,14 @@ LIMIT="${AGENTKEEL_PLAN_LIMIT:-300}"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
 if [ "${1:-}" = "--selftest" ]; then
-  T=$(mktemp -d 2>/dev/null || mktemp -d -t agentkeel); mkdir -p "$T/docs/plans" "$T/docs/specs"
-  yes "task line" | head -n 301 > "$T/docs/plans/x-plan.md"
-  yes "task line" | head -n 299 > "$T/docs/plans/y-plan.md"
-  yes "task line" | head -n 900 > "$T/docs/specs/z-spec.md"
+  T=$(mktemp -d 2>/dev/null || mktemp -d -t agentkeel); mkdir -p "$T/docs"
+  { echo '<section data-keel-transient="working">'; yes "<p>task</p>" | head -n 300; echo '</section>'; } > "$T/docs/261005-x-state.html"
+  { echo '<section data-keel-transient="working">'; yes "<p>task</p>" | head -n 297; echo '</section>'; } > "$T/docs/261005-y-state.html"
+  { yes "<p>current behavior</p>" | head -n 900; } > "$T/docs/261005-z-state.html"
   fail=0
-  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/plans/x-plan.md" | "$SELF" >/dev/null 2>&1; [ $? -eq 2 ] || { echo "selftest FAIL: 301 lines allowed" >&2; fail=1; }
-  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/plans/y-plan.md" | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: 299 lines blocked" >&2; fail=1; }
-  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/specs/z-spec.md" | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: spec treated as plan" >&2; fail=1; }
+  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/261005-x-state.html" | "$SELF" >/dev/null 2>&1; [ $? -eq 2 ] || { echo "selftest FAIL: 301 lines allowed" >&2; fail=1; }
+  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/261005-y-state.html" | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: 299 lines blocked" >&2; fail=1; }
+  printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$T/docs/261005-z-state.html" | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: durable content counted as plan" >&2; fail=1; }
   printf 'not json' | "$SELF" >/dev/null 2>&1; [ $? -eq 0 ] || { echo "selftest FAIL: bad input blocked" >&2; fail=1; }
   rm -rf "$T"
   [ $fail -eq 0 ] && echo "plan-size-guard selftest: PASS"
@@ -54,9 +55,12 @@ except Exception:
 FILE=""; LINES=0
 while IFS= read -r f; do
   case "$f" in
-    */docs/plans/*plan*.md)
+    */docs/*-state.html)
       [ -f "$f" ] || continue
-      n=$(wc -l < "$f" | tr -d ' ')
+      n=$(python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from agentkeel_core import pages
+print(sum(len(s.split("\n")) for s in pages.sections(open(sys.argv[2], encoding="utf-8", errors="replace").read(), "working")))' "$HOOKS_DIR" "$f" 2>/dev/null || echo 0)
       if [ "$n" -gt "$LIMIT" ]; then FILE="$f"; LINES="$n"; break; fi ;;
   esac
 done <<EOF_FILES
@@ -65,7 +69,7 @@ EOF_FILES
 [ -n "$FILE" ] || exit 0
 
 cat >&2 <<MSG
-PLAN SIZE GUARD: $(basename "$FILE") is now $LINES lines; the limit is $LIMIT.
+PLAN SIZE GUARD: the Working section of $(basename "$FILE") is now $LINES lines; the limit is $LIMIT.
 
 A plan this long is carrying code. Plans never carry code: a plan is the task table (task, files
 it may touch, blocked by, the check that proves it, and whether the check's scope fits inside

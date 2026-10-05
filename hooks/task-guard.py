@@ -7,8 +7,9 @@ record (hooks/task.py) and judges every operation in the tool call against it:
   file edits (Write, Edit, NotebookEdit)
     - agentkeel state, hook configuration and agentkeel.json are never edited by the agent
     - a task must be declared for this session
-    - the agent cannot approve a spec or change an approved one; a large task writes nothing
-      outside docs/ before its spec is approved, then only its Changes list (write roots included)
+    - the agent cannot create, change or delete a page's approval (the human's `task.py approve`),
+      nor rename or delete an approved page; a large task writes nothing outside docs/ until its
+      state page's boundary is approved, then only the approved boundary's Changes list
     - the task's --write-root folders (report folders outside any repository) are writable
     - otherwise the target must be inside one of the task's own linked worktrees (never the
       shared checkout), the task must have `implement`, and the branch must not be protected
@@ -20,6 +21,8 @@ record (hooks/task.py) and judges every operation in the tool call against it:
     - a protected branch moves locally (commit on it, merge, ff, reset, update-ref, fetch x:main):
       needs `merge`
     - every push to a remote: needs `push`; `gh pr merge` needs `merge` and `push`
+    - in a repository with "docs": "html", main moves (a push, or a local move whose new commit is
+      known) only to a commit whose docs check passes: no Working section, approved boundaries
     - force push, reset --hard, whole-tree checkout or restore, clean -f, branch -D, stash
       drop/clear/pop: refused unless the command itself carries AGENTKEEL_ALLOW_DESTRUCTIVE=1
     - distribution builds, store submissions, deploy commands and paid jobs: need their own
@@ -37,7 +40,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import checks, gitops, host, patch as patchmod, record, shell  # noqa: E402
+from agentkeel_core import checks, gitops, host, pages, patch as patchmod, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -138,9 +141,9 @@ def judge_edit(ev, rec, environ):
     root = os.path.realpath(root) if root else None
     rel = os.path.relpath(target, root).replace(os.sep, "/") if root else None
     perms = set(rec.get("permissions") or [])
-    # Spec approval and a large task's blast radius hold everywhere, write roots included.
-    if rel and re.match(r"^docs/specs/[^/]+\.md$", rel):
-        judge_spec_edit(ev, rel)
+    # Page approval and a large task's blast radius hold everywhere, write roots included.
+    if rel and re.match(r"^docs/[^/]+\.html$", rel) or ev.source_path and re.search(r"/docs/[^/]+\.html$", ev.source_path):
+        judge_page_edit(ev, rel or target)
     large = bool(rel) and rec.get("size") == "large" and not rel.startswith("docs/")
     if root is None:
         # Write roots are report folders outside any repository. Inside a repository they grant
@@ -195,50 +198,69 @@ def own_scratch(target, rec, environ):
     return str(rec.get("session_id")) in target.split(os.sep)
 
 
-def judge_spec_edit(ev, rel):
-    """The same rule on every host: the agent cannot make a spec approved, and an approved spec
-    changes only to be marked superseded. A patch is judged on the text it produces."""
-    before = record.read(ev.source_path or ev.path) if ev.source_path else record.read(ev.path)
-    was_approved = record.approval(before or "")[0] or bool(ev.source_path and record.approval(record.read(ev.path) or "")[0])
+def judge_page_edit(ev, rel):
+    """The same rule on every host: a page's approval metadata is the human's. The agent edits a
+    page freely, boundary included (a changed boundary keeps main from moving until approved
+    again), but cannot create, change or remove the approval, or rename or delete an approved
+    page. A patch is judged on the text it produces."""
+    before = record.read(ev.source_path or ev.path)
+    held = pages.approval_metas(before)
     deleting = ev.change is not None and ev.change.kind == "delete"
-    text = None if deleting else new_content(ev)
-    if was_approved and (deleting or text is None or (record.frontmatter(text) or {}).get("status") != "superseded"):
+    if held and (deleting or ev.source_path):
         raise Block(
-            f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
-            "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
-            "the human. Stop and tell them what changed.")
-    if not deleting and text is None and ev.change is not None:
+            f"refusing to {'delete' if deleting else 'rename'} {rel}: its boundary is approved, and dropping\n"
+            "that approval is the human's decision. Stop and tell them.")
+    if deleting:
+        return
+    text = new_content(ev)
+    if text is None:
+        if held:
+            raise Block(
+                f"refusing this edit to {rel}: its result cannot be read, and the page carries an approval\n"
+                "that must stay unchanged. Make the edit with Write, Edit or a patch that fits.")
+        return
+    if pages.approval_metas(text) != held:
         raise Block(
-            f"refusing this patch to {rel}: its result cannot be read (the hunks do not fit the file),\n"
-            "and spec approval is judged on the result. Write the whole file instead.")
-    if text is not None and record.approval(text)[0] and not was_approved:
-        raise Block(
-            f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
-            "Ask the human to approve it. They run, in their own terminal:\n"
+            f"refusing to {'change' if held else 'add'} the approval of {rel}: approval is the human's ruling\n"
+            "(gate G1). Ask them to approve the boundary; they run, in their own terminal:\n"
             f"  {TASK_CMD} approve {rel}")
 
 
+def approved_boundary(root, rec):
+    """(page name, the approved boundary's HTML) for a large task, else Block with the reason.
+    When the page's boundary was edited after approval, the approved version (kept by approve in
+    AGENTKEEL_HOME) still sets the limits: a widened draft grants nothing."""
+    import glob
+    task = rec.get("task", "")
+    found = sorted(glob.glob(os.path.join(root, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{task}-state.html")))
+    ask = (f"Approval is the human's: they run\n  {TASK_CMD} approve {task}\n"
+           "Edits under docs/ are allowed meanwhile.")
+    if len(found) != 1:
+        raise Block(
+            f"size large needs an approved boundary before any edit outside docs/. There is "
+            f"{'no' if not found else 'more than one'} state page for '{task}'\n"
+            f"(docs/YYMMDD-{task}-state.html). Start it with: {TASK_CMD} new state {task}\n" + ask)
+    name, text = os.path.basename(found[0]), record.read(found[0]) or ""
+    state, why = pages.boundary_state(name, text)
+    if state == "approved":
+        return name, pages.sections(text, "boundary")[0]
+    got = pages.approval(text) if state == "changed" else None
+    if got:
+        kept = record.read(record.approved_boundary_path(got[0]))
+        if kept is not None and pages.digest(name, kept) == got[0]:
+            return name, kept
+    raise Block(f"size large needs an approved boundary before any edit outside docs/.\n"
+                f"docs/{name}: {why or 'it has no boundary section'}.\n" + ask)
+
+
 def judge_large_path(rel, root, rec):
-    spec = record.spec_path(root, rec.get("task", ""))
-    text = record.read(spec)
-    if text is None:
-        raise Block(
-            f"size large needs an approved spec before any edit outside docs/.\n"
-            f"{os.path.relpath(spec, root)} does not exist. Write it from templates/spec.md, then\n"
-            "ask the human to approve it. Edits under docs/ are allowed meanwhile.")
-    ok, why = record.approval(text)
-    if not ok:
-        raise Block(
-            f"size large needs an approved spec before any edit outside docs/.\n"
-            f"{os.path.relpath(spec, root)} {why}. Approval is the human's: they run\n"
-            f"  {TASK_CMD} approve {rec.get('task')}\n"
-            "Edits under docs/ are allowed meanwhile.")
-    changes, must_not = record.blast_radius(text)
+    name, boundary = approved_boundary(root, rec)
+    changes, must_not = pages.blast_radius(boundary)
     if record.matches(rel, must_not):
-        raise Block(f"{rel} is listed under 'Must not change' in the approved spec.")
+        raise Block(f"{rel} is listed under 'Must not change' in the approved boundary of {name}.")
     if changes and not record.matches(rel, changes):
         raise Block(
-            f"{rel} is outside the approved spec's Changes list ({', '.join(changes)}).\n"
+            f"{rel} is outside the Changes list of the approved boundary of {name} ({', '.join(changes)}).\n"
             "Stop and tell the human: the blast radius grew, and re-scoping is theirs.")
 
 
@@ -338,16 +360,21 @@ def judge_git(sc, rec, environ, session, line):
                     "A bare `git commit` (or -a) commits whatever is staged, including another agent's\n"
                     "work. Name the paths: git commit -m '...' -- <path> [<path>...]")
             if rec.get("size") == "large" and root and not all(p.startswith("docs/") for p in op.paths):
-                spec = record.read(record.spec_path(root, rec.get("task", "")))
-                if not record.approval(spec or "")[0]:
-                    raise Block("size large: no commit outside docs/ before the spec is approved.")
+                approved_boundary(root, rec)
         elif op.kind == "move":
             need(rec, "merge", f"moving the protected branch '{op.targets[0] if op.targets else '?'}' ({op.name})")
+            if op.source and root:
+                sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{op.source}^{{commit}}")
+                docs_gate(root, sha, op.targets[0] if op.targets else "main", None, environ)
         elif op.kind == "push":
             hits = [t for t in op.targets if t in protected or t == "*"]
             if op.local:
                 if hits:
                     need(rec, "merge", f"moving '{hits[0]}' with a local push")
+                    for dst in hits:
+                        if dst != "*" and op.sources.get(dst) and root:
+                            sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{op.sources[dst]}^{{commit}}")
+                            docs_gate(root, sha, dst, None, environ)
                 else:
                     need(rec, "implement", "a local push between branches")
             else:
@@ -373,6 +400,40 @@ def judge_git(sc, rec, environ, session, line):
                                 "commit sent. Push the tested commit by its full SHA: git push origin <full-sha>:main")
                         sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
                         require_green(root, op.remote, sha, pol["require_check"], dst, environ)
+                        docs_gate(root, sha, dst, op.remote, environ)
+                elif hits and root:
+                    for dst in hits:
+                        if dst == "*":
+                            continue
+                        src = op.sources.get(dst) or "HEAD"
+                        sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
+                        docs_gate(root, sha, dst, op.remote, environ)
+
+
+def docs_gate(root, sha, dst, remote, environ):
+    """In a repository with "docs": "html", main moves only to a commit whose docs check passes,
+    judged against what main holds now (the remote's copy when pushing). The same check runs in
+    CI (agentkeel-required); this one stops the agent before its own push or local move."""
+    if not sha:
+        if pages.enabled(pages.FsTree(root)):
+            raise Block(f"cannot tell which commit would land on '{dst}', so its docs check cannot run.\n"
+                        "Name the commit: git push origin <full-sha>:main")
+        return
+    try:
+        cand = pages.GitTree(root, sha)
+    except ValueError:
+        return
+    base = None
+    for ref in ([f"refs/remotes/{remote}/{dst}"] if remote and remote != "." else []) + [f"refs/heads/{dst}"]:
+        b = gitops.run_git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        if b:
+            base = pages.GitTree(root, b)
+            break
+    problems = pages.check(cand, base)
+    if problems:
+        shown = "\n".join(f"  - {p}" for p in problems[:8]) + (f"\n  ... and {len(problems) - 8} more" if len(problems) > 8 else "")
+        raise Block(f"refusing to move '{dst}' to {sha[:12]}: its docs check fails.\n{shown}\n"
+                    f"Run `{TASK_CMD} check --rev {sha[:12]}` to see it; fix the pages, commit, and ship that commit.")
 
 
 FULL_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")

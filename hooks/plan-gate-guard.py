@@ -12,7 +12,8 @@ AGENTKEEL_HOME/plan-gates.json (default ~/.agentkeel), keyed by repository so ev
 one repository shares the count, under a file lock so two parallel dispatches cannot both read
 the old count. The allowance is 2 per plan (one round of two agents).
 
-A dispatch counts as a plan gate when its prompt names a docs/plans/*.md file AND either carries
+A dispatch counts as a plan gate when its prompt names a feature's state page (the plan lives in
+its Working section: docs/YYMMDD-<feature>-state.html) AND either carries
 the marker `[plan-gate]` (deterministic, preferred) or reads like a review of that document
 (heuristic: "gate a", "scope audit", "review the plan", "plan ... verdict"). Task reviews and the
 whole-branch review name a diff or a review package, never just a plan, and are excluded.
@@ -38,7 +39,7 @@ NAME_MARKER_RE = re.compile(r"^plan[_-]gate", re.IGNORECASE)
 
 LIMIT = 2  # one round = one plan reviewer + one scope auditor
 MARKER = "[plan-gate]"
-PLAN_RE = re.compile(r"docs/plans/([A-Za-z0-9._-]+\.md)")
+PLAN_RE = re.compile(r"docs/(\d{6}-[a-z0-9-]+-state\.html)")
 GATE_WORDS = re.compile(
     r"\bgate\s*[ab]\b|\bscope audit\b|\bplan review\b|\breview the plan\b"
     r"|\bre-review\b.{0,40}\bplan\b|\bplan\b.{0,40}\bverdict\b|\baudit\b.{0,30}\bplan\b",
@@ -140,10 +141,10 @@ def selftest():
             ok = out.returncode == expect
             print(("PASS" if ok else "FAIL"), repr(prompt[:50]), "->", out.returncode)
             return ok
-        gate = "[plan-gate] Review the plan docs/plans/json-flag-plan.md"
+        gate = "[plan-gate] Review the plan docs/261005-json-flag-state.html"
         results = [run(gate, 0), run(gate, 0), run(gate, 2),
-                   run("Implement task 3 of docs/plans/json-flag-plan.md", 0),
-                   run("Review the plan docs/plans/json-flag-plan.md against review-package-3.md", 0)]
+                   run("Implement task 3 of docs/261005-json-flag-state.html", 0),
+                   run("Review the plan docs/261005-json-flag-state.html against review-package-3.md", 0)]
     print("plan-gate-guard selftest:", "PASS" if all(results) else "FAIL")
     return 0 if all(results) else 1
 

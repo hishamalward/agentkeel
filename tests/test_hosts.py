@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest import mock
 
-from helpers import ROOT, SESSION, RepoCase, run_hook
+from helpers import ROOT, SESSION, RepoCase, approve_file, run_hook, state_page
 
 FIX = os.path.join(ROOT, "tests", "fixtures")
 
@@ -110,19 +110,21 @@ class SameDecision(RepoCase):
         code, _ = self.hook(codex_patch(self.repo, "*** Delete File: .claude/settings.json"))
         self.assertEqual(code, 2)
 
-    def test_patch_cannot_approve_or_change_an_approved_spec(self):
+    def test_patch_cannot_approve_or_drop_an_approved_page(self):
         self.declare(size="large", task="j"); self.branch("feat/j")
-        os.makedirs(os.path.join(self.repo, "docs", "specs"))
-        spec = os.path.join(self.repo, "docs", "specs", "j-spec.md")
-        with open(spec, "w") as fh:
-            fh.write("---\nstatus: draft\n---\n")
-        approve = "*** Update File: docs/specs/j-spec.md\n@@\n-status: draft\n+status: approved\n+approved_by: me\n+approved_on: 2026-10-04"
+        os.makedirs(os.path.join(self.repo, "docs"))
+        rel = "docs/261005-j-state.html"
+        page = os.path.join(self.repo, rel)
+        with open(page, "w") as fh:
+            fh.write(state_page(changes=("src/",)))
+        meta = '<meta name="keel-approval" content="sha256:' + "a" * 64 + ' by me on 2026-10-04">'
+        approve = f"*** Update File: {rel}\n@@\n-<html><head><title>Feature</title>\n+<html><head><title>Feature</title>{meta}"
         self.assertEqual(self.hook(codex_patch(self.repo, approve))[0], 2)
-        self.assertEqual(self.hook(codex_patch(self.repo, "*** Update File: docs/specs/j-spec.md\n@@\n+notes"))[0], 0)
-        with open(spec, "w") as fh:
-            fh.write("---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\n")
-        self.assertEqual(self.hook(codex_patch(self.repo, "*** Update File: docs/specs/j-spec.md\n@@\n+more"))[0], 2)
-        self.assertEqual(self.hook(codex_patch(self.repo, "*** Delete File: docs/specs/j-spec.md"))[0], 2)
+        self.assertEqual(self.hook(codex_patch(self.repo, "*** Add File: src/x.py\n+x"))[0], 2)  # not approved yet
+        approve_file(page, self.home)
+        self.assertEqual(self.hook(codex_patch(self.repo, f"*** Update File: {rel}\n@@\n-<section id=\"behavior\"><p>Current behavior.</p></section>\n+<section id=\"behavior\"><p>New.</p></section>"))[0], 0)
+        self.assertEqual(self.hook(codex_patch(self.repo, f"*** Delete File: {rel}"))[0], 2)
+        self.assertEqual(self.hook(codex_patch(self.repo, f"*** Update File: {rel}\n*** Move to: docs/261005-k-state.html\n@@\n-<p>Current behavior.</p>\n+<p>x</p>"))[0], 2)
         self.assertEqual(self.hook(codex_patch(self.repo, "*** Add File: src/x.py\n+x"))[0], 0)  # approved now
 
     def test_unknown_tool_refused_with_a_reason(self):
@@ -230,14 +232,14 @@ class SessionOwnership(RepoCase):
 
 
 class PlanSizeOnCodex(unittest.TestCase):
-    def test_patch_to_a_long_plan_reported(self):
+    def test_patch_to_a_long_working_section_reported(self):
         import tempfile
         with tempfile.TemporaryDirectory() as t:
             t = os.path.realpath(t)
-            os.makedirs(os.path.join(t, "docs", "plans"))
-            with open(os.path.join(t, "docs", "plans", "x-plan.md"), "w") as fh:
-                fh.write("row\n" * 301)
-            p = codex_patch(t, "*** Update File: docs/plans/x-plan.md\n@@\n+row")
+            os.makedirs(os.path.join(t, "docs"))
+            with open(os.path.join(t, "docs", "261005-x-state.html"), "w") as fh:
+                fh.write('<section data-keel-transient="working">\n' + "<p>row</p>\n" * 301 + "</section>\n")
+            p = codex_patch(t, "*** Update File: docs/261005-x-state.html\n@@\n+<p>row</p>")
             self.assertEqual(run_hook("plan-size-guard.sh", p)[0], 2)
             p = codex_patch(t, "*** Update File: notes.md\n@@\n+row")
             self.assertEqual(run_hook("plan-size-guard.sh", p)[0], 0)
@@ -279,17 +281,15 @@ class PluginOptIn(RepoCase):
 class StageTwoReviewFindings(RepoCase):
     """Regression tests for the Stage 2 review (2026-10-04), one per finding."""
 
-    APPROVED = ("---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\n\n"
-                "## 4. Blast radius\n\n- **Changes**: `src/a.py`\n")
-
     def setUp(self):
         super().setUp()
         self.declare(size="large", task="x"); self.branch("feat/x")
-        os.makedirs(os.path.join(self.repo, "docs", "specs"))
-        self.spec = os.path.join(self.repo, "docs", "specs", "x-spec.md")
+        os.makedirs(os.path.join(self.repo, "docs"))
+        self.rel = "docs/261005-x-state.html"
+        self.page = os.path.join(self.repo, self.rel)
 
-    def put_spec(self, text):
-        with open(self.spec, "w") as fh:
+    def put_page(self, text):
+        with open(self.page, "w") as fh:
             fh.write(text)
 
     def patch(self, body):
@@ -298,28 +298,33 @@ class StageTwoReviewFindings(RepoCase):
     def edit(self, old, new):
         p = fixture("claude", "pretooluse-edit")
         p.update(cwd=self.repo, session_id=SESSION)
-        p["tool_input"] = {"file_path": self.spec, "old_string": old, "new_string": new, "replace_all": False}
+        p["tool_input"] = {"file_path": self.page, "old_string": old, "new_string": new, "replace_all": False}
         return self.hook(p)[0]
 
-    def test_superseded_line_in_the_body_does_not_unlock_an_approved_spec(self):
-        self.put_spec(self.APPROVED)
-        body = ("*** Update File: docs/specs/x-spec.md\n@@\n-- **Changes**: `src/a.py`\n"
-                "+- **Changes**: `src/**`\n+status: superseded")
-        self.assertEqual(self.patch(body), 2)
-        self.assertEqual(self.edit("`src/a.py`", "`src/**`\nstatus: superseded"), 2)
+    def test_widening_an_approved_boundary_grants_nothing_on_both_hosts(self):
+        self.put_page(state_page(changes=("src/a.py",)))
+        approve_file(self.page, self.home)
+        body = (f"*** Update File: {self.rel}\n@@\n-<ul data-keel-changes><li><code>src/a.py</code></li></ul>\n"
+                "+<ul data-keel-changes><li><code>src/</code></li></ul>")
+        self.assertEqual(self.patch(body), 0)                       # drafting is open
+        self.assertEqual(self.edit("<code>src/a.py</code>", "<code>src/</code>"), 0)
+        with open(self.page) as fh:
+            self.put_page(fh.read().replace("<code>src/a.py</code>", "<code>src/</code>"))
+        self.assertEqual(self.patch("*** Add File: src/b.py\n+x"), 2)  # the approved copy rules
 
     def test_quoted_or_piecewise_approval_refused_on_both_hosts(self):
-        self.put_spec("---\nstatus: draft\napproved_by: h\napproved_on: 2026-10-04\n---\n")
-        self.assertEqual(self.patch('*** Update File: docs/specs/x-spec.md\n@@\n-status: draft\n+status: "approved"'), 2)
-        self.assertEqual(self.edit("status: draft", 'status: "approved"'), 2)
-        self.put_spec("---\nstatus: approved\n---\n")
-        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n status: approved\n+approved_by: agent\n+approved_on: 2026-10-04"), 2)
-        self.assertEqual(self.edit("status: approved", "status: approved\napproved_by: agent\napproved_on: 2026-10-04"), 2)
+        self.put_page(state_page())
+        meta = '<meta name="keel-approval" content="sha256:' + "b" * 64 + ' by agent on 2026-10-04">'
+        for half in (meta[:30], meta):
+            self.assertEqual(self.patch(f"*** Update File: {self.rel}\n@@\n-</head><body>\n+{half}</head><body>"), 2, half)
+            self.assertEqual(self.edit("</head>", half + "</head>"), 2, half)
+        self.assertEqual(self.edit("</head>", "<meta name='KEEL-APPROVAL' content='x'></head>"), 2)
 
-    def test_patch_that_does_not_fit_a_spec_is_refused(self):
-        self.put_spec("---\nstatus: draft\n---\n")
-        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n-no such line\n+x"), 2)
-        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n status: draft\n+owner: me"), 0)
+    def test_patch_that_does_not_fit_an_approved_page_is_refused(self):
+        self.put_page(state_page())
+        approve_file(self.page, self.home)
+        self.assertEqual(self.patch(f"*** Update File: {self.rel}\n@@\n-no such line\n+x"), 2)
+        self.assertEqual(self.patch(f"*** Update File: {self.rel}\n@@\n-<section id=\"behavior\"><p>Current behavior.</p></section>\n+<section id=\"behavior\"><p>Changed.</p></section>"), 0)
 
     def test_patch_under_edit_or_write_names_and_hidden_headers(self):
         shared = os.path.join(self.primary, "evil.py")

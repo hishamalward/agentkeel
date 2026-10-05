@@ -84,16 +84,67 @@ class TaskCommand(RepoCase):
         self.assertEqual(self.task("end").returncode, 0)
         self.assertEqual(self.task("show").returncode, 1)
 
-    def test_human_approve_sets_frontmatter(self):
-        os.makedirs(os.path.join(self.repo, "docs", "specs"))
-        p = os.path.join(self.repo, "docs", "specs", "x-spec.md")
+    def test_human_approve_writes_the_boundary_approval(self):
+        from helpers import state_page
+        from agentkeel_core import pages, record
+        os.makedirs(os.path.join(self.repo, "docs"))
+        p = os.path.join(self.repo, "docs", "261005-x-state.html")
         with open(p, "w") as fh:
-            fh.write("---\nslug: x\nstatus: draft   # draft | approved\napproved_by:\napproved_on:\n---\n\nbody\n")
+            fh.write(state_page())
         out = self.task("approve", "x", session=None)
         self.assertEqual(out.returncode, 0, out.stderr)
-        from agentkeel_core import record
+        self.assertNotIn("D-NNN", out.stdout)
         with open(p) as fh:
-            self.assertTrue(record.approval(fh.read())[0])
+            text = fh.read()
+        self.assertEqual(pages.boundary_state(os.path.basename(p), text)[0], "approved")
+        kept = record.approved_boundary_path(pages.approval(text)[0], {"AGENTKEEL_HOME": self.home})
+        self.assertTrue(os.path.exists(kept))
+        with open(p, "w") as fh:
+            fh.write(state_page(boundary=False))
+        self.assertEqual(self.task("approve", "x", session=None).returncode, 2)  # nothing to approve
+
+    def test_new_page_needs_a_task_its_worktree_and_implement(self):
+        self.assertEqual(self.task("new", "state", "import").returncode, 2)            # no task
+        self.task("start", "import", "--size", "small", "--allow", "review", "--write-root", self.tmp + "/out")
+        self.assertEqual(self.task("new", "state", "import").returncode, 2)            # no implement
+        self.task("start", "import", "--size", "large", "--allow", "implement")
+        self.assertEqual(self.task("new", "state", "import", cwd=self.primary).returncode, 2)  # shared checkout
+        out = self.task("new", "state", "import")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        from agentkeel_core import pages
+        docs = os.path.join(self.repo, "docs")
+        names = sorted(os.listdir(docs))
+        self.assertEqual(len(names), 2); self.assertIn("keel.css", names)
+        page = os.path.join(docs, next(n for n in names if n.endswith("-import-state.html")))
+        with open(page) as fh:
+            text = fh.read()
+        self.assertEqual(pages.boundary_state(os.path.basename(page), text)[0], "unapproved")  # large: boundary
+        self.assertTrue(pages.sections(text, "working"))
+        self.assertEqual(self.task("new", "state", "import").returncode, 2)            # one per feature
+        self.assertEqual(self.task("new", "project").returncode, 0)
+        self.assertEqual(self.task("new", "project").returncode, 2)                    # one canon
+        self.assertEqual(self.task("new", "audit", "import", "--qualifier", "memory").returncode, 0)
+
+    def test_finish_context_check_and_index(self):
+        self.task("start", "import", "--size", "medium", "--allow", "implement")
+        self.task("new", "state", "import")
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            fh.write('{"docs": "html"}')
+        docs = os.path.join(self.repo, "docs")
+        page = os.path.join(docs, next(n for n in os.listdir(docs) if n.endswith("-state.html")))
+        out = self.task("check")
+        self.assertEqual(out.returncode, 1); self.assertIn("Working section", out.stdout)
+        ctx = self.task("context", page)
+        self.assertEqual(ctx.returncode, 0); self.assertIn("[working section begins]", ctx.stdout)
+        self.assertIn("## State now", ctx.stdout)
+        self.assertEqual(self.task("finish", page).returncode, 0)
+        out = self.task("check")
+        self.assertEqual(out.returncode, 0, out.stdout)
+        out = self.task("index")
+        self.assertEqual(out.returncode, 0); self.assertIn("add docs/index.html to .gitignore", out.stdout)
+        with open(os.path.join(docs, "index.html")) as fh:
+            self.assertIn(os.path.basename(page), fh.read())
+        self.assertEqual(self.task("check").returncode, 0)  # an untracked index is not a problem locally
 
     def test_record_drives_the_guard(self):
         self.branch("feat/x")

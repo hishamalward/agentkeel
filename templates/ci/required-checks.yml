@@ -1,7 +1,8 @@
-# agentkeel required checks. Copy to .github/workflows/agentkeel-checks.yml and
-# templates/ci/select_checks.py to .github/agentkeel/select_checks.py, then follow
-# docs/required-checks.md: the protected branch requires the `agentkeel-required` check, and the
-# deploy waits for it. Set the repository variable AGENTKEEL_TEST_COMMAND (default: npm test)
+# agentkeel required checks. Copy to .github/workflows/agentkeel-checks.yml,
+# templates/ci/select_checks.py to .github/agentkeel/select_checks.py and
+# hooks/agentkeel_core/pages.py to .github/agentkeel/pages.py, then follow agentkeel's required
+# checks page: the protected branch (or the agent push gate) requires the `agentkeel-required`
+# check, and the deploy waits for it. Set the repository variable AGENTKEEL_TEST_COMMAND (default: npm test)
 # and, if your app needs it, AGENTKEEL_SETUP_COMMAND (default: npm ci).
 name: agentkeel-checks
 
@@ -39,14 +40,31 @@ jobs:
       - run: ${{ vars.AGENTKEEL_SETUP_COMMAND || 'npm ci' }}
       - run: ${{ vars.AGENTKEEL_TEST_COMMAND || 'npm test' }}
 
+  # The docs check on the candidate, docs-only changes included, against what it replaces on the
+  # default branch: the commit before a push to it, the base of a pull request, or the default
+  # branch itself for a push to another branch. It passes untouched where agentkeel.json does not
+  # set "docs": "html". No path filter: Railway ignores a skipped workflow.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: >-
+          python3 .github/agentkeel/pages.py check --rev ${{ github.sha }}
+          --base "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
+          || (github.ref_name == github.event.repository.default_branch && github.event.before)
+          || format('origin/{0}', github.event.repository.default_branch) }}"
+
   # The one check the protected branch requires. It always reports, so a docs-only change
-  # (app tests skipped) is green and a failed or cancelled test job is red.
+  # (app tests skipped) is green, and a failed or cancelled test or docs job is red.
   agentkeel-required:
-    needs: [select, app-tests]
+    needs: [select, app-tests, docs]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "select: ${{ needs.select.result }}, app-tests: ${{ needs.app-tests.result }}"
+          echo "select: ${{ needs.select.result }}, app-tests: ${{ needs.app-tests.result }}, docs: ${{ needs.docs.result }}"
           test "${{ needs.select.result }}" = "success"
+          test "${{ needs.docs.result }}" = "success"
           case "${{ needs.app-tests.result }}" in success|skipped) ;; *) exit 1 ;; esac

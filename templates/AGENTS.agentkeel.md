@@ -14,7 +14,7 @@ Read size and permissions from the human's request, state your reading in your f
 and proceed. Ask only when information is missing, the request is unclear, or an action would
 go past it. They are separate questions; changing one never changes the other.
 - Size (how much process): small = its own branch and worktree, no plan or subagents, one check;
-  medium = tests and one review round; large = an approved spec, a plan table gated once, reviews.
+  medium = tests and one review round; large = an approved boundary, a plan table gated once, reviews.
 - Permissions (what actions): review (writes only --write-root report folders, outside the repo), implement (edit, commit
   with explicit paths, local checks and builds), merge (move a protected branch), push (any push),
   distribution-build, store-submission, paid-job. "Merge and push" grants both; it never grants
@@ -26,11 +26,17 @@ The main agent declares the task; subagents work under it (in Codex a subagent's
 cannot see the record, so run task.py from the main agent).
 
 **Gates** (work stops until a named owner produces named evidence):
-- G1 Spec approval, human: the human runs `task.py approve <task-id>` in their own terminal.
-  The agent cannot approve a spec or change an approved one, by edit or by command.
+- G1 Boundary approval, human: the human runs `task.py approve <feature>` in their own terminal.
+  The agent cannot add, change or remove an approval, by edit or by command.
 - G2 Plan gate, AI, once: one plan reviewer plus one scope auditor, prompts marked `[plan-gate]`.
 - G3 Review, AI, one round per scope: per task, then the whole branch.
 - G4 Ship, human decides: tests green on the branch, required checks before main moves.
+
+**Docs** (where agentkeel.json has "docs": "html"): one authored HTML page per artifact in flat
+docs/, in the present tense: the project canon (repo-wide rules), one state page per feature,
+references, audits, mockups. `task.py new` starts one, `task.py context <page>` reads one. Plan and
+progress go in the page's Working section, removed (`task.py finish`) before main moves; what is
+unfinished goes in Remaining scope. No decision log, no Markdown twin, no copied facts: link.
 
 **What the guards refuse** (exit 2 with the reason): a write with no task for this session; a
 write outside the task's worktrees and write roots; code edits on a protected branch; a commit

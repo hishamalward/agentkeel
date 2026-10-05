@@ -3,7 +3,8 @@
 [![validate](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml/badge.svg)](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml)
 
 A framework for shipping production code with AI coding agents: work priced by size, actions
-granted by permission, spec-first, four gates with named owners, blast radius bounded by hooks.
+granted by permission, an approved boundary before large work, four gates with named owners,
+blast radius bounded by hooks, and documentation with one current owner per fact.
 
 AI coding agents write code faster than anyone reviews it. The failures that follow are rarely
 in the code. They are the missing gates: a one-file fix that quietly became a refactor, a plan
@@ -15,8 +16,8 @@ agentkeel is the practice from shipping a real product solo with agents writing 
 extracted and made enforceable. Three invariants sit above every rule: every write is bounded
 before it happens, every claim carries its evidence, every loop has a cap and only a human
 re-opens it. Each task is declared once, as a record the hooks read: its size (how much process),
-its permissions (which actions), and its resources (which worktrees and folders). A spec says who
-verifies each success criterion. Four gates each name an owner. Four hooks and one command guard
+its permissions (which actions), and its resources (which worktrees and folders). A feature's
+state page says what is true now and, for large work, holds the boundary the human approved. Four gates each name an owner. Four hooks and one command guard
 the write path from inside the harness, outside the model's memory.
 
 What it does today, stated by kind of protection, is in the [capability table](#what-it-protects-and-what-it-does-not).
@@ -26,10 +27,10 @@ the same refusal text for the same task and the same act ([verified live](#verif
 ## The invariants
 
 Every rule in this repo serves one of these, and a rule that serves none is deleted. The full
-statement is in [`docs/invariants.md`](docs/invariants.md).
+statement is in the [project canon](docs/260823-project-reference.html#invariants).
 
-1. **Every write is bounded before it happens.** The spec names what may change and what must
-   not; the task record says what the task may do and where; the hooks refuse what falls outside.
+1. **Every write is bounded before it happens.** A large task's approved boundary names what may
+   change and what must not; the task record says what the task may do and where; the hooks refuse what falls outside.
    Scope discipline is this invariant applied to intent: do the literal ask, mention the adjacent
    problem in one line, do not fix it.
 2. **Every claim carries its evidence.** No completion claim without fresh output pasted. Verify
@@ -52,7 +53,7 @@ One command, run by the agent before its first write, from its reading of the hu
 
 | Question | Answers | What the hooks do with it |
 |---|---|---|
-| **Size**: how much process? | `small`: own branch and worktree, no plan or subagents, one check. `medium`: tests, one review round. `large`: approved spec, plan table gated once, per-task and branch review | `large`: no edit outside `docs/` until the spec is approved, then only its `Changes` paths |
+| **Size**: how much process? | `small`: own branch and worktree, no plan or subagents, one check. `medium`: tests, one review round. `large`: approved boundary, plan table gated once, per-task and branch review | `large`: no edit outside `docs/` until the boundary is approved, then only its `Changes` paths |
 | **Permissions**: which actions? | `review` (write only the `--write-root` report folders, which lie outside any repository), `implement` (edit, commit, local checks and builds), `merge` (move a protected branch locally), `push` (any push to a remote, and deploy commands); a PR merge needs both `merge` and `push`, `distribution-build`, `store-submission`, `paid-job` | each action is refused without its permission; "merge and push" grants both and never a distribution build |
 | **Resources**: where? | the worktree it was declared in, any worktree it creates with `git worktree add`, and `--write-root` folders | writes outside them are refused; another agent's worktree is never writable |
 
@@ -62,35 +63,37 @@ in `~/.agentkeel/tasks/` (`AGENTKEEL_HOME`), and never editable by the agent's f
 second session cannot reuse it. Changing the size never changes the permissions; widening the
 permissions is said out loud on stderr and kept in the record's history. The agent states its
 reading of the request in its first update and proceeds; it asks only when something is missing,
-unclear, or past the request. Details: [`docs/task-record.md`](docs/task-record.md).
+unclear, or past the request. Details: [the task record](docs/261004-task-record-state.html).
 
 The record is the agent's declaration, not the human's consent: the agent writes it. What it buys
 is that every action is checked against one stated scope, and a mismatch is refused before it
 happens. Where consent itself must be enforced, use the host's own permission prompts.
 
-## Spec first, and plans that never carry code
+## An approved boundary, and plans that never carry code
 
-A `large` task starts with [`templates/spec.md`](templates/spec.md). The parts that matter:
+A `large` task starts its feature's state page with `task.py new state <feature>`. The page
+describes the feature in the present tense and carries a boundary section, the part the human
+approves:
 
-- **Blast radius**: `Changes` (paths), `Must not change` (paths), and one named boundary with the
-  nearest adjacent system.
-- **Success criteria split by owner**: *AI-verifiable* criteria are a command and its expected
-  output; *human-verifiable* criteria are a fact a person can check in under a minute.
-- **Frontmatter** the hooks read: `status: draft | approved | superseded`, `approved_by`,
-  `approved_on`, all inside the leading `---` block (a `status: approved` line pasted into the
-  body approves nothing). Until then the task guard refuses edits outside `docs/`; after it, edits
-  outside the `Changes` list. The agent cannot write the approval or change an approved spec: the
-  human runs `task.py approve <task-id>` in a terminal of their own.
-- **Rule change clause**: any rule the spec introduces names the rule it replaces, or says in one
-  line why nothing existing covers it.
+- **Outcome, constraints and acceptance checks**, the last split by owner: *AI-verifiable* checks
+  are a command and its expected output; *human-verifiable* checks are a fact a person can check in
+  under a minute.
+- **Files**: a `Changes` list and a `Must not change` list of paths.
+- **Approval**: the human runs `task.py approve <feature>` in a terminal of their own. It writes a
+  digest of the boundary into the page. Until then the task guard refuses edits outside `docs/`;
+  after it, edits outside the approved `Changes` list. The agent cannot write or remove the
+  approval. It can keep editing the page, the boundary included: the write limits stay those of
+  the approved version, and `main` does not move until the new boundary is approved.
 
-A plan, when a different session will execute the work, is a table
-([`templates/plan.md`](templates/plan.md)): task, files it may touch, blocked by, the check that
-proves it, and whether the check's scope fits inside the files the task touches. That last column
-exists because it was the dominant plan defect in practice: a verification scoped wider than the
-work it checks (a whole-file count behind a two-region edit; `npm run dev | head` as proof a server
-started). Plans carry no code. If the deliverable is small enough that the plan would carry the
-code, there is no plan.
+A plan, when a different session will execute the work, is a table in the page's Working
+section: task, files it may touch, blocked by, the check that proves it, and whether the check's
+scope fits inside the files the task touches. That last column exists because it was the dominant
+plan defect in practice: a verification scoped wider than the work it checks (a whole-file count
+behind a two-region edit; `npm run dev | head` as proof a server started). Plans carry no code.
+If the deliverable is small enough that the plan would carry the code, there is no plan. The
+Working section is removed before `main` moves; what is still unfinished lives in the page's
+Remaining scope.
+
 ## The four gates
 
 A gate is a point where work cannot proceed until a named owner produces named evidence.
@@ -98,19 +101,19 @@ Verification is not a gate; it is the evidence rule every gate consumes.
 
 | # | Gate | Owner | Entry | Exit evidence | Enforced by |
 |---|---|---|---|---|---|
-| G1 | Spec approval | Human | size `large`; spec `status: draft` | `status: approved`, `approved_by`, `approved_on` in frontmatter; a `D-NNN` entry | `task-guard.py` refuses non-doc edits before it, and refuses the agent writing the approval |
-| G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists | the plan table with every scope column `yes`; findings applied | `plan-gate-guard.py` refuses a third dispatch (heuristic; see the table below); `plan-size-guard.sh` reports a plan over 300 lines after the write |
+| G1 | Boundary approval | Human | size `large`; a state page with an unapproved boundary | the page's `keel-approval` digest matches its boundary | `task-guard.py` refuses non-doc edits before it, and refuses the agent writing the approval; the docs check keeps `main` still while a boundary is unapproved |
+| G2 | Plan gate | AI: one plan reviewer and one scope auditor, in parallel, once | a handoff plan exists (the Working section) | the plan table with every scope column `yes`; findings applied | `plan-gate-guard.py` refuses a third dispatch (heuristic; see the table below); `plan-size-guard.sh` reports a Working section over 300 lines after the write |
 | G3 | Review | AI reviewer, one round per scope | per task: the task's diff; whole branch: all tasks done | findings applied; no second round without the human | guidance only |
-| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moves only with the merge permission, is pushed only with the push permission | `task-guard.py`; tests before `main` moves: the required-checks template ([`docs/required-checks.md`](docs/required-checks.md)), which is CI's job, not a hook's |
+| G4 | Ship | Human decides; AI supplies the evidence | tests green on the branch | `main` moves only with the merge permission, is pushed only with the push permission | `task-guard.py`; tests before `main` moves: the required-checks template ([required checks](docs/261004-required-checks-state.html)), which is CI's job, not a hook's |
 
-Two gates are human-owned (G1, G4), two are AI-owned (G2, G3). [`docs/gates.md`](docs/gates.md)
+Two gates are human-owned (G1, G4), two are AI-owned (G2, G3). The [project canon](docs/260823-project-reference.html#gates)
 has a paragraph per gate.
 
 ## Guardrails and hooks
 
 Four hooks and one command, no dependencies, Python 3.10+ and bash 3.2. Each hook runs in the
 harness before or after a tool call, reads the call as JSON on stdin (shapes captured in
-[`docs/hook-payloads.md`](docs/hook-payloads.md)), and allows (exit 0) or blocks with a reason the
+[the captured hook payloads](docs/260823-hook-payloads-reference.html)), and allows (exit 0) or blocks with a reason the
 model sees (exit 2). A hook that cannot parse its input allows: a broken guard must never stop
 work on its own. The shared reader in `hooks/agentkeel_core/` splits a command line into every
 simple command (after `&&`, `;`, `|`, newlines, line continuations, `$(...)`, `bash -c` and
@@ -123,15 +126,15 @@ same events first: a file edit (Claude Code's `Write`/`Edit`/`NotebookEdit`, eve
 Codex `apply_patch`, both ends of a move), a shell command (`Bash` on both), or a subagent
 dispatch (`Agent`; Codex's `spawn_agent`). A tool that may write but has no adapter is refused
 with a reason, never silently allowed. The shapes are pinned by real captured payloads in
-`tests/fixtures/`; facts per host are in [`docs/hosts.md`](docs/hosts.md).
+`tests/fixtures/`; facts per host are on the [hosts page](docs/261004-hosts-state.html).
 
 | Hook | Event | Refuses |
 |---|---|---|
-| `task.py` | (the command) | declares, shows, records a check (`verify -- <cmd>`), ends a task; `approve` is the human's |
+| `task.py` | (the command) | declares, shows, records a check (`verify -- <cmd>`), ends a task; starts, reads, finishes and checks docs pages (`new`, `context`, `finish`, `check`, `index`); `approve` is the human's |
 | `task-guard.py` | PreToolUse, every tool (`*`) on both hosts | everything in the first block of the table below; reads, planning and messaging tools pass |
 | `secret-guard.py` | PreToolUse `Bash` | printing `.env*` (not `.env.example`), key files, credentials; bare `env`/`printenv`; `echo $ANY_KEY_OR_TOKEN`; `git show`/`diff` of `.env` |
 | `plan-gate-guard.py` | PreToolUse `Agent` (Codex: `spawn_agent`) | a third gate dispatch for the same plan, counted per repository under a file lock; on Codex, whose dispatch message is encrypted, a `task_name` starting `plan_gate` counted per task |
-| `plan-size-guard.sh` | PostToolUse `Write\|Edit` (Codex: `apply_patch`) | reports a `docs/plans/*plan*.md` over 300 lines (the write has happened) |
+| `plan-size-guard.sh` | PostToolUse `Write\|Edit` (Codex: `apply_patch`) | reports a state page's Working section over 300 lines (the write has happened) |
 | `session-start.py` | SessionStart, plugin only | prints the task command with this install's real path |
 
 Two overrides exist, both written on the command itself so they apply once and show in the
@@ -155,10 +158,11 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | Force push, remote branch delete, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` (the stash is shared by every worktree) | prevents, with a logged one-command override | Destructive |
 | `eas build`, `eas submit`, `eas update`, `npm publish`, deploy commands, repo-defined paid jobs only with their permission (also through `npx`, `pnpm exec`, `npm exec`; a `--dry-run` is not the action) | prevents, for the listed command shapes | CommandClasses |
 | Hook config, `agentkeel.json` and agentkeel state not editable by the agent's file tools | prevents | ProtectedConfig |
-| A large task edits nothing outside `docs/` before approval, then only its `Changes` list; the agent cannot approve a spec or change an approved one (except to mark it superseded) | prevents, for the agent's file tools and `task.py` | LargeAndSpecApproval, StageReviewFindings |
+| A large task edits nothing outside `docs/` before its boundary is approved, then only the approved `Changes` list (a widened draft grants nothing); the agent cannot add, change or remove an approval, or rename or delete an approved page | prevents, for the agent's file tools and `task.py` | LargeAndBoundaryApproval, StageReviewFindings |
+| `main` moves only to a commit whose docs check passes (no Working section, every boundary approved, names, links and anchors valid, no decision log) | prevents, for agent pushes and local moves whose commit is known; CI's `agentkeel-required` runs the same check for everyone | `test_pages.py`, `test_task_guard.py` (DocsGate) |
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
 | A third plan-gate dispatch | prevents when the prompt carries `[plan-gate]`; heuristic otherwise | `test_plan_gate_guard.py` |
-| A plan over 300 lines | warns after the write | `test_plan_size_guard.py` |
+| A Working section over 300 lines | warns after the write | `test_plan_size_guard.py` |
 | An agent ships to `main` only a commit whose required check passed (`require_check_before_push` in `agentkeel.json`) | prevents, for agent pushes that name the tested commit's full SHA and run alone in their call; refuses other push forms, `gh pr merge`, and when GitHub cannot be asked | `test_task_guard.py` (PushGate); live on a throwaway GitHub repository |
 | One review round per scope (G3) | guidance only | |
 | Shell writes that are not git (`sed -i`, `>`, `rm`), commands inside scripts or npm scripts, other tools and hosts | unsupported | |
@@ -167,21 +171,25 @@ calls were checked", never "nothing else touched the tree". Each row is labelled
 | MCP tools | unsupported: they pass; an MCP server that writes files is outside agentkeel | |
 | Cursor and other hosts | guidance only: they read `AGENTS.md`, no adapter | |
 
-## The three registers
+## Documentation: one current owner per fact
 
-Three files with three different verbs. No router, no index; if the docs need a router there are
-too many docs.
+A repository opts in with `"docs": "html"` in `agentkeel.json`. Every document is then one
+authored HTML page in a flat `docs/` folder, opened directly from disk, and describes what is true
+now. Git keeps the history, so there is no decision log and nothing to keep in sync with a twin.
 
-| Register | Verb | Path | Rule |
-|---|---|---|---|
-| Spec | intend | `docs/specs/<slug>-spec.md` | approved before build; never edited after approval except to mark it superseded |
-| Decisions | decide | `DECISIONS.md` | append-only entries; a status index at the top is the one thing rewritten in place |
-| Handover | resume | `docs/handovers/<slug>.md` | no derivable state: nothing that `git` or a status script can answer; goal, ledger, what will bite, what is next |
+| Page | Owns |
+|---|---|
+| `YYMMDD-project-reference.html` | the project canon: repo-wide rules that apply now, each with its reason |
+| `YYMMDD-<feature>-state.html` | one feature: behavior, constraints, remaining scope, limitations, verification, and for large work its approved boundary |
+| `...-reference.html`, `...-audit.html`, `...-mockup.html` | a shared rule or runbook; findings at a stated revision; a design exploration |
 
-The `DECISIONS.md` convention, with one real entry, is in this repo's own
-[`DECISIONS.md`](DECISIONS.md): `D-NNN`, date, status, decision, why, and what it replaces (a rule,
-a `D-NNN`, or "nothing existing covers this"). When the log grows past about fifty entries, split
-the status index into its own present-tense register; not before.
+Pages link one shared `keel.css` and may add their own styles. `task.py context <page>` prints a
+page as plain structured text for an agent to read; the agent edits the HTML itself.
+`task.py check` is the docs check `main` moves on, run by the guard before an agent ships and by
+CI for everyone. The model, its contract and its limits are on
+[the documentation page](docs/261005-html-docs-state.html); this repository's own docs use it, with
+its [project canon](docs/260823-project-reference.html).
+
 ## Quickstart (5 minutes)
 
 Two ways in. A **project install** puts the hooks in the repository, for everyone who opens it:
@@ -247,15 +255,14 @@ user's prompt and declared a task first, which is the instruction layer working.
 One difference found: inside a Codex subagent, `CODEX_THREAD_ID` is the subagent's own id, so
 `task.py show` and `task.py verify` run by a Codex subagent find no task, while its tool calls are
 still judged against the parent's record. Declare the task and record evidence from the main
-agent. The v0.1 worked example (tier model) is kept in
-[`docs/learning/worked-example-v0.1.md`](docs/learning/worked-example-v0.1.md).
+agent.
 
 ## Relationship to other work
 
 - [agent-slots](https://github.com/hishamalward/agent-slots): runtime isolation for several agents
   on one machine. agentkeel is the process side; agent-slots is the resource side.
 - [toilscan](https://github.com/hishamalward/toilscan): the write-safety pattern in
-  `docs/guardrails.md` is its `apply` path, generalized.
+  the [guardrails reference](docs/260823-guardrails-reference.html) is its `apply` path, generalized.
 - mcpclerk (in progress): the same instinct at the MCP tool layer, where the write path is a tool
   call rather than a file: allowlist, approval, quotas, an audit log that verifies.
 ## Not yet
@@ -274,9 +281,8 @@ python3 -m unittest discover -s tests -v
 
 CI runs the same suite on macOS and Linux, on Python 3.10 and 3.13, plus every hook's `--selftest`.
 
-For whoever owns this next: [docs/learning/how-it-works.html](docs/learning/how-it-works.html) is the
-v0.1 tour, and [docs/spec.md](docs/spec.md) the v0.1 contract; [`DECISIONS.md`](DECISIONS.md) D-004 to
-D-010 record what v0.2 and v0.3 changed and why.
+For whoever owns this next: start at the [project canon](docs/260823-project-reference.html); the
+v0.1 tour, the v0.1 contract and the old decision log are in Git history.
 
 ## License
 
