@@ -170,6 +170,7 @@ class Context(unittest.TestCase):
                      "| K | V |", "| `x` | y (y.html) |", "[working section begins]", "[section ends]"):
             self.assertIn(want, out)
         self.assertNotIn("SECRET", out)
+        self.assertIn("Release: Not released.", pages.context("<dl><dt>Release</dt><dd>Not released.</dd></dl>"))
         self.assertNotIn("color:red", out)
 
 

@@ -44,6 +44,8 @@ section { margin: 0 0 1.5rem; }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.2rem;
 }
 section[data-keel-boundary] { border-left: 4px solid var(--accent); }
+.card > h2:first-child, .state-now > h2:first-child, section[data-keel-boundary] > h2:first-child,
+section[data-keel-transient] > h2:first-child { margin-top: 0; }
 section[data-keel-transient] { border-left: 4px solid var(--warn); }
 .state-now dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 0; }
 .state-now dt { color: var(--muted); }

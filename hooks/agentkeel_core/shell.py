@@ -19,6 +19,7 @@ REDIRECT_CHARS = set("<>&")
 ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z0-9_.-]+)\1")
 SUBST_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+SUBST = "__agentkeel_subst__"  # what a $(...) or `...` leaves in its word: a value not known yet
 KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "!", "{", "}",
             "time", "case", "esac", "in"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
@@ -177,9 +178,16 @@ def commands(command, cwd, _depth=0, _env=None):
     command = strip_heredocs(str(command).replace("\\\n", " "))
     result = []
     # command substitutions run too: read them as commands of their own
-    for m in SUBST_RE.finditer(command):
+    # The substitution's text stays one opaque word (SUBST) inside the word around it, so
+    # `git push origin $(git rev-parse HEAD):main` is still a push to main. Nested ones resolve
+    # from the inside out.
+    while True:
+        m = SUBST_RE.search(command)
+        if not m:
+            break
         inner = m.group(1) if m.group(1) is not None else m.group(2)
         result.extend(commands(inner, cwd, _depth + 1, _env))
+        command = command[:m.start()] + SUBST + command[m.end():]
     command = command.replace("`", "\n")
     here = cwd
     current = []

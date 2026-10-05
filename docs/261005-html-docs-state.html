@@ -18,7 +18,7 @@
   <dl>
     <dt>Implementation</dt><dd>Built on the branch <code>feat/stage-2b-html-docs</code> (Stage 2b); not merged.</dd>
     <dt>Release</dt><dd>Not released. agentkeel's own docs use this model on the branch.</dd>
-    <dt>External checks</dt><dd>See Verification. No hosted run of the new docs job yet.</dd>
+    <dt>External checks</dt><dd>Live Claude Code and Codex runs on 2026-10-05 (see Verification). No hosted run of the CI docs job yet.</dd>
   </dl>
 </section>
 
@@ -117,7 +117,14 @@
 
 <section id="verification">
   <h2>Verification</h2>
-  <p>Filled in at the end of the stage with the test run and the host checks.</p>
+  <ul>
+    <li><strong>Unit suite</strong>: 207 tests pass, hook self-tests included (<code>python3 -m unittest discover -s tests</code>), on the Stage 2b branch. <code>test_pages.py</code> covers names, links, anchors, Working sections, boundary states and digests, base comparison, retired logs and context; <code>DocsGate</code>, <code>LargeAndBoundaryApproval</code> and the host parity tests cover the guard.</li>
+    <li><strong>Claude Code, live</strong> (<code>claude -p</code>, throwaway repo, project install, 2026-10-05): an Edit adding a <code>keel-approval</code> meta was refused with the G1 reason; a push to <code>main</code> of a commit with a Working section was refused; <code>task.py finish</code> removed the section; a push of the literal SHA of the finished commit moved <code>main</code>; <code>task.py context</code> read the page.</li>
+    <li><strong>Found live and fixed</strong>: <code>git push origin $(git rev-parse HEAD):main</code> was read as a push to a branch named <code>$</code>, so neither the docs check nor the push gate ran. A command substitution now stays one opaque word, an unknown destination counts as any branch, and the live rerun refused all three forms. The regression test fails against the Stage 2 code.</li>
+    <li><strong>Codex, live</strong> (<code>codex exec</code> 0.160.0, same page, <code>--dangerously-bypass-hook-trust</code> for this run only; the normal-trust path was proven in Stage 2): an <code>apply_patch</code> adding an approval was refused; a push of a commit with a Working section was refused with the docs-check reason; <code>context</code> read the Working section another session wrote. Codex's workspace sandbox refuses writes inside <code>.git</code>, so that commit was made outside Codex.</li>
+    <li><strong>Pages</strong>: this page and the project canon checked at 1280 px and 390 px wide with no horizontal overflow.</li>
+    <li>Not run: the CI <code>docs</code> job on GitHub.</li>
+  </ul>
 </section>
 
 <section data-keel-transient="working" id="working">
@@ -125,16 +132,13 @@
   <table>
     <thead><tr><th>Task</th><th>Files</th><th>Check</th><th>State</th></tr></thead>
     <tbody>
-      <tr><td>Page model, validator, context</td><td><code>hooks/agentkeel_core/pages.py</code>, <code>starters.py</code></td><td>unit tests</td><td>done</td></tr>
-      <tr><td>Commands: new, context, finish, check, index, approve</td><td><code>hooks/task.py</code></td><td>unit tests</td><td>done</td></tr>
-      <tr><td>Guard: page approval, large-task limits, docs gate</td><td><code>hooks/task-guard.py</code>, <code>gitops.py</code></td><td>unit tests</td><td>done</td></tr>
-      <tr><td>Plan hooks read the Working section</td><td><code>hooks/plan-*.py|sh</code></td><td>unit tests</td><td>done</td></tr>
-      <tr><td>CI docs job</td><td><code>templates/ci/required-checks.yml</code></td><td>template test, actionlint-free syntax check</td><td>next</td></tr>
-      <tr><td>agentkeel's own docs on the model</td><td><code>docs/</code>, README, AGENTS fragment</td><td>docs check passes except this section</td><td>in progress</td></tr>
-      <tr><td>Hosts in throwaway repos</td><td>none</td><td>Claude and Codex refusals, resume</td><td>later</td></tr>
+      <tr><td>Page model, commands, guard, plan hooks, CI job</td><td><code>hooks/</code>, <code>templates/ci/</code></td><td>unit suite</td><td>done</td></tr>
+      <tr><td>agentkeel's own docs on the model</td><td><code>docs/</code>, README, AGENTS fragment</td><td>docs check passes except this section</td><td>done</td></tr>
+      <tr><td>Hosts in throwaway repos</td><td>none</td><td>live refusals on both hosts</td><td>done</td></tr>
+      <tr><td>Founder review, then merge</td><td>none</td><td><code>task.py finish</code> on this page, docs check passes</td><td>waiting</td></tr>
     </tbody>
   </table>
-  <p>Next action: CI job, then the fragment and README, then host checks. Remove this section before merge.</p>
+  <p>Next action: wait for review. Before the merge, remove this section.</p>
 </section>
 
 </main>

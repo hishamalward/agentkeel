@@ -592,6 +592,15 @@ class DocsGate(RepoCase):
         self.assertEqual(self.hook(self.bash("git push . feat/x:main"))[0], 0)
         self.assertEqual(self.hook(self.bash("git push origin feat/x"))[0], 0)  # a feature branch is not main
 
+    def test_a_computed_source_or_destination_is_still_judged(self):
+        # found live: `$(git rev-parse HEAD):main` was read as a push to a branch named `$`
+        self.put(state_page(boundary=False, working=True))
+        self.commit("wip")
+        for cmd in ("git push origin $(git rev-parse HEAD):main", "git push origin `git rev-parse HEAD`:main",
+                    "git push origin HEAD:$(echo main)", "B=main; git push origin HEAD:$B"):
+            code, err = self.hook(self.bash(cmd))
+            self.assertEqual(code, 2, cmd); self.assertNotIn("internal error", err)
+
     def test_local_fast_forward_on_main_is_checked(self):
         self.put(state_page())  # an unapproved boundary
         self.commit("boundary")
@@ -705,6 +714,12 @@ class PushGate(RepoCase):
         self.assertEqual(self.push()[0], 0)
         self.runs("success", "failure")
         self.assertEqual(self.push()[0], 2)
+
+    def test_a_computed_source_cannot_skip_the_gate(self):
+        self.runs("failure")
+        for cmd in ("git push origin $(git rev-parse HEAD):main", "git push origin HEAD:$(echo main)",
+                    "git push origin `git rev-parse HEAD`:main"):
+            self.assertEqual(self.push(cmd)[0], 2, cmd)
 
     def test_feature_branch_push_needs_no_check(self):
         self.runs("failure")

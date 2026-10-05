@@ -28,7 +28,7 @@
 <tr><td>Trust</td><td>project settings load when the folder is trusted</td><td>a new or changed non-managed hook is skipped until trusted (<code>/hooks</code>); <code>codex exec --dangerously-bypass-hook-trust</code> skips the check for one run</td></tr>
 <tr><td>SessionStart context</td><td>stdout is added to the session</td><td>stdout is added as a developer instruction, which the model ranks above the user's prompt (verified)</td></tr>
 <tr><td>Plugin hook trust</td><td></td><td>stored as <code>hooks.state.&quot;&lt;plugin&gt;@&lt;marketplace&gt;:hooks/hooks.json:&lt;event&gt;:&lt;i&gt;:&lt;j&gt;&quot;</code>; <code>codex plugin remove</code> leaves these entries and an empty cache folder</td></tr>
-<tr><td>Shell runner</td><td>the <code>Bash</code> tool's process</td><td>a background app-server daemon, often in a sandbox that cannot inspect processes or write outside the workspace</td></tr>
+<tr><td>Shell runner</td><td>the <code>Bash</code> tool's process</td><td>a background app-server daemon, often in a sandbox that cannot inspect processes or write outside the workspace; the workspace sandbox also refuses writes inside <code>.git</code>, so a commit needs a sandbox that allows it</td></tr>
 </tbody></table>
 <section id="which-tools-reach-the-guard">
 <h2>Which tools reach the guard</h2>

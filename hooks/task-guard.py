@@ -402,6 +402,10 @@ def judge_git(sc, rec, environ, session, line):
                         require_green(root, op.remote, sha, pol["require_check"], dst, environ)
                         docs_gate(root, sha, dst, op.remote, environ)
                 elif hits and root:
+                    if "*" in hits and pages.enabled(pages.FsTree(root)):
+                        raise Block("refusing a push whose destination is not named (--all, a wildcard, a variable or\n"
+                                    "a $(...)): it may reach main, and the docs check needs the commit that lands.\n"
+                                    "Name both ends: git push origin <full-sha>:main")
                     for dst in hits:
                         if dst == "*":
                             continue

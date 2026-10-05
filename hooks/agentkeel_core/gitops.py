@@ -252,7 +252,8 @@ def push_ops(call, branch):
         dst = _strip_ref(dst)
         if delete:
             deleted.append(dst)
-        targets.append("*" if "*" in dst else dst)
+        # a destination built from a variable or a command substitution is not known: any branch
+        targets.append("*" if "*" in dst or "$" in dst or "__agentkeel_subst__" in dst else dst)
         sources.setdefault(dst, src or "")
     if not refspecs and not everything:
         targets.append(branch or "HEAD")

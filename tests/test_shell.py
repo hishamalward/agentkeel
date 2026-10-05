@@ -28,6 +28,7 @@ class Shell(unittest.TestCase):
 
     def test_nested_shells_and_substitutions(self):
         self.assertIn(["git", "push", "origin", "main"], argvs("bash -c 'git push origin main'"))
+        self.assertIn(["git", "push", "origin", shell.SUBST + ":main"], argvs("git push origin $(git rev-parse HEAD):main"))
         inner = shell.commands("A=1 bash -c 'B=2 sh -c \"tool x\"'; eval A=3 tool y", "/")
         self.assertEqual([(c.argv, c.env) for c in inner], [(["tool", "x"], {"A": "1", "B": "2"}), (["tool", "y"], {"A": "3"})])
         self.assertIn(["git", "push", "origin", "main"], argvs("echo $(git push origin main)"))

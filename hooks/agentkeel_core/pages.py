@@ -270,7 +270,9 @@ class _Text(HTMLParser):
             if tag == "code":
                 self.cell += "`"
             return
-        if tag in self.BLOCK or tag in ("li", "tr", "pre", "br", "hr") or re.match(r"h[1-6]$", tag):
+        if tag == "dd" and self.buf.strip():
+            self.buf = self.buf.rstrip() + ": "  # a definition stays on its term's line
+        elif tag in self.BLOCK or tag in ("li", "tr", "pre", "br", "hr") or re.match(r"h[1-6]$", tag):
             self.flush()
         if tag == "section":
             kind = "boundary" if BOUNDARY in a else "working" if WORKING in a else ""
@@ -344,6 +346,8 @@ class _Text(HTMLParser):
             self.flush()
             if self.sections and self.sections.pop():
                 self.lines.append("[section ends]")
+        if tag == "dt":
+            return
         if tag in self.BLOCK or tag == "li" or re.match(r"h[1-6]$", tag):
             self.flush()
 
