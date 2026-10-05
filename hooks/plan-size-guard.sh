@@ -31,9 +31,13 @@ fi
 
 INPUT=$(cat)
 HOOKS_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ "${1:-}" = "--plugin" ]; then  # plugin hooks act only in repositories that opted in
-  TOP=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-  [ -f "$TOP/agentkeel.json" ] || exit 0
+if [ "${1:-}" = "--plugin" ]; then  # plugin hooks act only where the act lands in an opted-in repo
+  printf '%s' "$INPUT" | python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+from agentkeel_core import record
+try: p = json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(1 if record.plugin_inactive(["--plugin"], p) else 0)' "$HOOKS_DIR" 2>/dev/null || exit 0
 fi
 # Every file the call wrote: file_path for Claude Code's Write/Edit, each path in a Codex
 # apply_patch envelope (read by the shared core, so both hosts are judged the same way).

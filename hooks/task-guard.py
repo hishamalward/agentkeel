@@ -37,7 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, host, record, shell  # noqa: E402
+from agentkeel_core import gitops, host, patch as patchmod, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -111,6 +111,10 @@ def new_content(ev):
     """The whole new text of the edited file when it can be known, else None."""
     if ev.full_text is not None:
         return ev.full_text
+    if ev.change is not None:
+        if ev.change.kind == "delete":
+            return None
+        return patchmod.apply(record.read(ev.source_path or ev.path), ev.change)
     if ev.edit:
         old = record.read(ev.path)
         if old is None:
@@ -191,30 +195,23 @@ def own_scratch(target, rec, environ):
     return str(rec.get("session_id")) in target.split(os.sep)
 
 
-APPROVED_LINE = re.compile(r"^\s*status\s*:\s*approved\b", re.IGNORECASE)
-SUPERSEDED_LINE = re.compile(r"^\s*status\s*:\s*superseded\b", re.IGNORECASE)
-
-
 def judge_spec_edit(ev, rel):
-    before = record.read(ev.path)
-    was_approved = record.approval(before or "")[0]
-    text = new_content(ev)
-    if text is None and ev.change is not None:
-        # a patch to an existing file: only its added lines are known
-        added = ev.change.added
-        becomes_superseded = any(SUPERSEDED_LINE.match(l) for l in added)
-        becomes_approved = any(APPROVED_LINE.match(l) for l in added)
-    elif text is not None:
-        becomes_superseded = (record.frontmatter(text) or {}).get("status") == "superseded"
-        becomes_approved = record.approval(text)[0]
-    else:
-        becomes_superseded, becomes_approved = False, False
-    if was_approved and (ev.change is not None and ev.change.kind in ("delete", "move-to") or not becomes_superseded):
+    """The same rule on every host: the agent cannot make a spec approved, and an approved spec
+    changes only to be marked superseded. A patch is judged on the text it produces."""
+    before = record.read(ev.source_path or ev.path) if ev.source_path else record.read(ev.path)
+    was_approved = record.approval(before or "")[0] or bool(ev.source_path and record.approval(record.read(ev.path) or "")[0])
+    deleting = ev.change is not None and ev.change.kind == "delete"
+    text = None if deleting else new_content(ev)
+    if was_approved and (deleting or text is None or (record.frontmatter(text) or {}).get("status") != "superseded"):
         raise Block(
             f"refusing to edit {rel}: it is an approved spec, and an approved spec changes only\n"
             "to be marked superseded. A changed scope is a new spec or a new decision, ruled by\n"
             "the human. Stop and tell them what changed.")
-    if becomes_approved and not was_approved:
+    if not deleting and text is None and ev.change is not None:
+        raise Block(
+            f"refusing this patch to {rel}: its result cannot be read (the hunks do not fit the file),\n"
+            "and spec approval is judged on the result. Write the whole file instead.")
+    if text is not None and record.approval(text)[0] and not was_approved:
         raise Block(
             f"refusing to mark {rel} approved: spec approval is the human's ruling (gate G1).\n"
             "Ask the human to approve it. They run, in their own terminal:\n"

@@ -201,9 +201,12 @@ installer says so and leaves it alone. `--uninstall` reverses all of it, back to
 bytes of every file it changed.
 
 A **plugin** carries the same hooks in your agent instead: `.claude-plugin/` and `.codex-plugin/`
-share one `hooks/hooks.json`. Plugin hooks run in every repository, so they act only in a
-repository that opts in with an `agentkeel.json` at its root, and a session-start hook tells the
-agent the task command's real path. Use one way per repository, not both.
+share one `hooks/hooks.json`. Plugin hooks run in every repository, so they act only where an act
+lands in a repository that opted in with an `agentkeel.json` at its root (the target decides, not
+the folder the session started in), and a session-start hook tells the agent the task command's
+real path. An opt-in is remembered in `~/.agentkeel/opted-in.json`, so deleting the file from a
+shell does not switch the guards off; to opt out, delete the file and remove its entry there. Use
+one way per repository, not both.
 
 Installed is not active. Codex runs a new project hook only after you trust it (`/hooks` in
 Codex); `--doctor` shows what is missing. Then ask for a one-line edit before declaring anything;
@@ -229,6 +232,7 @@ Code shell, so both hosts' session variables were set; `task.py` picked Codex's.
 | `cat .env` | refused by the secret guard | same |
 | a subagent creates a file in the task's worktree | allowed | allowed |
 | a subagent writes in the shared checkout (separate Codex run) | (Stage 1 run: refused) | refused: `... is the repository's shared checkout` |
+| a third `plan_gate*` subagent dispatch (separate Codex run) | (Stage 1 run: refused by marker) | refused before launch: `PLAN GATE GUARD: refusing a further gate dispatch for task:gates` |
 
 Also live: the Claude plugin (`claude --plugin-dir`) refused an undeclared write in a repository
 with `agentkeel.json` and named its real `task.py` path at session start, and did nothing in a

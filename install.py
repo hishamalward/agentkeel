@@ -55,11 +55,29 @@ def is_ours(path):
         return False
 
 
+def _known_commands():
+    """Every hook command agentkeel has ever written: the current templates and the v0.1/v0.2
+    form. A user's own entry that merely names a file of the same name is never one of them."""
+    known = {f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{n}' for n in HOOK_FILES + OBSOLETE}
+    for name in ("claude-hooks.json", "codex-hooks.json"):
+        with open(os.path.join(HERE, "templates", name), encoding="utf-8") as fh:
+            for groups in json.load(fh)["hooks"].values():
+                for g in groups:
+                    known.update(h["command"] for h in g["hooks"])
+    return known
+
+
+KNOWN = None
+
+
 def ours(command):
-    return any(f"/.claude/hooks/{n}" in command for n in HOOK_FILES + OBSOLETE)
+    global KNOWN
+    if KNOWN is None:
+        KNOWN = _known_commands()
+    return command.strip() in KNOWN
 
 
-def merged_settings(existing, template, remove):
+def merged_settings(existing, template, remove, left_alone=()):
     hooks = existing.setdefault("hooks", {})
     # drop every agentkeel entry first; then (unless removing) add the current ones back
     for event in list(hooks):
@@ -76,6 +94,10 @@ def merged_settings(existing, template, remove):
         for event, groups in template["hooks"].items():
             target = hooks.setdefault(event, [])
             for g in groups:
+                g = {**g, "hooks": [h for h in g["hooks"]
+                                    if not any(f"/.claude/hooks/{n}" in h["command"] for n in left_alone)]}
+                if not g["hooks"]:
+                    continue  # its script is the user's own file, left alone above
                 same = next((t for t in target if t.get("matcher") == g.get("matcher")), None)
                 if same is None:
                     target.append(json.loads(json.dumps(g)))
@@ -109,10 +131,13 @@ def plan(repo, remove, hosts=("claude", "codex")):
     actions = []  # (description, function)
     skipped = []
     hooks_dir = os.path.join(repo, ".claude", "hooks")
+    left_alone = []
     for name in HOOK_FILES:
         dst = os.path.join(hooks_dir, name)
         if os.path.exists(dst) and not is_ours(dst):
-            skipped.append(f"{os.path.relpath(dst, repo)} exists and is not agentkeel's; left alone")
+            skipped.append(f"{os.path.relpath(dst, repo)} exists and is not agentkeel's; left alone, and\n"
+                           "    no agentkeel hook entry points at it")
+            left_alone.append(name)
             continue
         if remove:
             if os.path.exists(dst):
@@ -148,7 +173,8 @@ def plan(repo, remove, hosts=("claude", "codex")):
 
     for h in hosts:
         rel, template_name = HOST_CONFIG[h]
-        actions += config_actions(repo, rel, template_name, remove, drop_when_empty=(h == "codex"))
+        actions += config_actions(repo, rel, template_name, remove, drop_when_empty=(h == "codex"),
+                                  left_alone=left_alone)
     toml = os.path.join(repo, ".codex", "config.toml")
     if "codex" in hosts and os.path.exists(toml):
         text = open(toml, encoding="utf-8").read()
@@ -221,7 +247,7 @@ def restore_or_write(path, new, remove):
     atomic_write(path, json.dumps(new, indent=2) + "\n")
 
 
-def config_actions(repo, rel, template_name, remove, drop_when_empty):
+def config_actions(repo, rel, template_name, remove, drop_when_empty, left_alone=()):
     path = os.path.join(repo, rel)
     try:
         with open(path, encoding="utf-8") as fh:
@@ -234,7 +260,7 @@ def config_actions(repo, rel, template_name, remove, drop_when_empty):
         return []
     with open(os.path.join(HERE, "templates", template_name), encoding="utf-8") as fh:
         template = json.load(fh)
-    new = merged_settings(json.loads(json.dumps(existing or {})), template, remove)
+    new = merged_settings(json.loads(json.dumps(existing or {})), template, remove, left_alone)
     if new == existing:
         return []
     if remove and (not new) and (drop_when_empty or os.path.exists(backup_path(path) + ".absent")):
@@ -300,8 +326,8 @@ def doctor(repo, hosts, live):
             with open(os.path.expanduser("~/.codex/config.toml"), encoding="utf-8") as fh:
                 text = fh.read()  # read for two markers only; nothing from it is printed
             trusted_project = re.search(r'\[projects\."' + re.escape(repo) + r'"\][^\[]*trust_level\s*=\s*"trusted"', text)
-            hook_key = os.path.join(repo, ".codex", "hooks.json") + ":"
-            trusted_hooks = text.count(hook_key)
+            forms = {repo, repo.replace("/private/tmp/", "/tmp/", 1), repo.replace("/private/var/", "/var/", 1)}
+            trusted_hooks = sum(text.count(os.path.join(f, ".codex", "hooks.json") + ":") for f in forms)
             row("codex", "project trusted", bool(trusted_project), "" if trusted_project else "open codex in the repo and trust it")
             row("codex", "hooks trusted", trusted_hooks >= 4,
                 f"{trusted_hooks} trust entries for .codex/hooks.json (hash not re-verified); run /hooks in codex if low")

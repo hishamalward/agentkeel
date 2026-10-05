@@ -210,3 +210,90 @@ class PluginOptIn(RepoCase):
         with open(os.path.join(ROOT, "hooks", "hooks.json")) as fh:
             cmds = [h["command"] for gs in json.load(fh)["hooks"].values() for g in gs for h in g["hooks"]]
         self.assertTrue(all("${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}" in c and c.endswith("--plugin") for c in cmds))
+
+
+class StageTwoReviewFindings(RepoCase):
+    """Regression tests for the Stage 2 review (2026-10-04), one per finding."""
+
+    APPROVED = ("---\nstatus: approved\napproved_by: h\napproved_on: 2026-10-04\n---\n\n"
+                "## 4. Blast radius\n\n- **Changes**: `src/a.py`\n")
+
+    def setUp(self):
+        super().setUp()
+        self.declare(size="large", task="x"); self.branch("feat/x")
+        os.makedirs(os.path.join(self.repo, "docs", "specs"))
+        self.spec = os.path.join(self.repo, "docs", "specs", "x-spec.md")
+
+    def put_spec(self, text):
+        with open(self.spec, "w") as fh:
+            fh.write(text)
+
+    def patch(self, body):
+        return self.hook(codex_patch(self.repo, body))[0]
+
+    def edit(self, old, new):
+        p = fixture("claude", "pretooluse-edit")
+        p.update(cwd=self.repo, session_id=SESSION)
+        p["tool_input"] = {"file_path": self.spec, "old_string": old, "new_string": new, "replace_all": False}
+        return self.hook(p)[0]
+
+    def test_superseded_line_in_the_body_does_not_unlock_an_approved_spec(self):
+        self.put_spec(self.APPROVED)
+        body = ("*** Update File: docs/specs/x-spec.md\n@@\n-- **Changes**: `src/a.py`\n"
+                "+- **Changes**: `src/**`\n+status: superseded")
+        self.assertEqual(self.patch(body), 2)
+        self.assertEqual(self.edit("`src/a.py`", "`src/**`\nstatus: superseded"), 2)
+
+    def test_quoted_or_piecewise_approval_refused_on_both_hosts(self):
+        self.put_spec("---\nstatus: draft\napproved_by: h\napproved_on: 2026-10-04\n---\n")
+        self.assertEqual(self.patch('*** Update File: docs/specs/x-spec.md\n@@\n-status: draft\n+status: "approved"'), 2)
+        self.assertEqual(self.edit("status: draft", 'status: "approved"'), 2)
+        self.put_spec("---\nstatus: approved\n---\n")
+        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n status: approved\n+approved_by: agent\n+approved_on: 2026-10-04"), 2)
+        self.assertEqual(self.edit("status: approved", "status: approved\napproved_by: agent\napproved_on: 2026-10-04"), 2)
+
+    def test_patch_that_does_not_fit_a_spec_is_refused(self):
+        self.put_spec("---\nstatus: draft\n---\n")
+        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n-no such line\n+x"), 2)
+        self.assertEqual(self.patch("*** Update File: docs/specs/x-spec.md\n@@\n status: draft\n+owner: me"), 0)
+
+    def test_patch_under_edit_or_write_names_and_hidden_headers(self):
+        shared = os.path.join(self.primary, "evil.py")
+        for tool in ("Edit", "Write"):
+            p = {"tool_name": tool, "cwd": self.repo, "session_id": SESSION,
+                 "tool_input": {"command": f"*** Begin Patch\n*** Add File: {shared}\n+x\n*** End Patch"}}
+            self.assertEqual(self.hook(p)[0], 2, tool)
+        self.assertEqual(self.patch(f"*** Add File: docs/ok.md\n+x\n  *** Add File: {shared}\n+y"), 2)
+        two = codex_patch(self.repo, "*** Add File: docs/ok.md\n+x")
+        two["tool_input"]["command"] += f"\n*** Begin Patch\n*** Add File: {shared}\n+y\n*** End Patch"
+        self.assertEqual(self.hook(two)[0], 2)
+        sh = codex_bash(self.repo, f"apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: {shared}\n+y\n*** End Patch\nEOF")
+        self.assertEqual(self.hook(sh)[0], 2)
+
+
+class PluginScope(RepoCase):
+    def run_plugin(self, name, payload):
+        import subprocess, sys
+        from helpers import HOOKS
+        out = subprocess.run([sys.executable, os.path.join(HOOKS, name), "--plugin"], input=json.dumps(payload),
+                             capture_output=True, text=True, env={**os.environ, **self.env})
+        return out.returncode
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            fh.write("{}\n")
+        self.outside = os.path.join(self.tmp, "outside"); os.makedirs(self.outside)
+
+    def test_opt_in_follows_the_target_not_the_session_folder(self):
+        self.declare(); self.branch("feat/x")
+        for cmd in (f"cd {self.repo} && git push origin main", f"git -C {self.repo} push origin main"):
+            self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.outside, cmd)), 2, cmd)
+        no_task = claude_write(self.outside, os.path.join(self.repo, "src", "a.py"), session="no-task-session")
+        self.assertEqual(self.run_plugin("task-guard.py", no_task), 2)
+
+    def test_deleting_agentkeel_json_does_not_switch_the_guards_off(self):
+        self.declare(); self.branch("feat/x")
+        self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)
+        os.remove(os.path.join(self.repo, "agentkeel.json"))
+        self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)

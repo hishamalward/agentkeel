@@ -172,3 +172,28 @@ class Install(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UserHookWithAgentkeelName(unittest.TestCase):
+    def test_user_entry_and_file_survive_install_and_uninstall(self):
+        with tempfile.TemporaryDirectory() as t:
+            repo = os.path.realpath(os.path.join(t, "repo"))
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            os.makedirs(os.path.join(repo, ".claude", "hooks"))
+            with open(os.path.join(repo, ".claude", "hooks", "plan-gate-guard.py"), "w") as fh:
+                fh.write("# mine\n")
+            original = json.dumps({"hooks": {"PreToolUse": [{"matcher": "Agent", "hooks": [{"type": "command",
+                "command": 'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-gate-guard.py" --strict'}]}]}})
+            with open(os.path.join(repo, ".claude", "settings.json"), "w") as fh:
+                fh.write(original)
+            env = {**os.environ, "AGENTKEEL_HOME": os.path.join(t, "home")}
+            run = lambda *a: subprocess.run([sys.executable, INSTALL, repo, "--host", "claude", *a],
+                                            capture_output=True, text=True, env=env)
+            run("--apply")
+            with open(os.path.join(repo, ".claude", "settings.json")) as fh:
+                cmds = [h["command"] for gs in json.load(fh)["hooks"].values() for g in gs for h in g["hooks"]]
+            self.assertIn('python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-gate-guard.py" --strict', cmds)
+            self.assertFalse(any(c.endswith('/.claude/hooks/plan-gate-guard.py') for c in cmds))
+            run("--uninstall", "--apply")
+            with open(os.path.join(repo, ".claude", "settings.json")) as fh:
+                self.assertEqual(fh.read(), original)

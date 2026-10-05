@@ -144,8 +144,11 @@ path" as a cross-host rule (it stays the rule on Claude Code).
 **Status**: Active.
 **Decision**: One `hooks/hooks.json` serves a Claude Code plugin (`.claude-plugin/`) and a Codex
 plugin (`.codex-plugin/`). Plugin hook commands pass `--plugin`, and a guard started that way acts
-only where the repository has an `agentkeel.json` at its root; a session-start hook then prints the
-task command with the plugin's real path. The project installer configures both hosts
+only where an act lands (the session folder, an edited file's repository, a `cd` or `git -C`
+target) in a repository that has an `agentkeel.json` at its root or opted in before (remembered in
+`AGENTKEEL_HOME/opted-in.json`, so a shell `rm` of the file does not switch it off); a
+session-start hook then prints the task command with the plugin's real path. Codex patches to a
+spec are judged on the text they produce, the same check a Claude edit gets. The project installer configures both hosts
 (`--host` to limit), warns when `.codex/config.toml` already defines hooks of the same name, has a
 `--doctor` that reports what is installed and trusted (`--live` proves a refusal per host), and on
 `--uninstall` restores each config file's original bytes when its content is unchanged.

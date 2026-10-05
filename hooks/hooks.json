@@ -22,7 +22,7 @@
         ]
       },
       {
-        "matcher": "^Agent$",
+        "matcher": "^(Agent|.*spawn_agent)$",
         "hooks": [
           { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/plan-gate-guard.py\" --plugin", "timeout": 30 }
         ]

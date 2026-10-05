@@ -151,14 +151,58 @@ def log_override(name, command, session_id, environ=os.environ):
         pass
 
 
-def plugin_inactive(argv, payload):
-    """Plugin hooks run in every repository; a guard started with --plugin acts only where the
-    repository opted in with an agentkeel.json at its root. A project install needs no file."""
+def _touched_dirs(payload):
+    """Every directory an act lands in: the session folder, each edited file's folder, and the
+    folder of every shell command and git -C target in the line."""
+    from . import gitops, host, shell
+    cwd = payload.get("cwd") or os.getcwd()
+    dirs = [cwd]
+    for ev in host.events(payload, cwd):
+        if ev.kind == "edit":
+            d = os.path.dirname(ev.path)
+            while d and not os.path.isdir(d) and os.path.dirname(d) != d:
+                d = os.path.dirname(d)
+            dirs.append(d)
+        elif ev.kind == "command":
+            for sc in shell.commands(ev.command, cwd):
+                dirs.append(sc.cwd)
+                if sc.argv and os.path.basename(sc.argv[0]) == "git":
+                    call = gitops.parse(sc.argv, sc.cwd)
+                    if call:
+                        dirs.append(call.cwd)
+    return dirs
+
+
+def plugin_inactive(argv, payload, environ=os.environ):
+    """Plugin hooks run in every repository; a guard started with --plugin acts only where an act
+    lands in a repository that opted in with an agentkeel.json at its root. The opt-in is
+    remembered in AGENTKEEL_HOME/opted-in.json, so deleting the file from a shell does not switch
+    the guards off; the human removes the entry there to opt out. A project install needs none."""
     if "--plugin" not in argv:
         return False
     from . import gitops
-    top = gitops.toplevel(payload.get("cwd") or os.getcwd())
-    return not (top and os.path.exists(os.path.join(top, "agentkeel.json")))
+    reg_path = os.path.join(home(environ), "opted-in.json")
+    try:
+        with open(reg_path) as fh:
+            registry = json.load(fh)
+    except Exception:
+        registry = {}
+    seen = set()
+    for d in _touched_dirs(payload):
+        top = gitops.toplevel(d) if d and os.path.isdir(d) else None
+        if not top or top in seen:
+            continue
+        seen.add(top)
+        common = gitops.common_dir(top) or os.path.realpath(top)
+        if os.path.exists(os.path.join(top, "agentkeel.json")):
+            if common not in registry:
+                with locked(reg_path):
+                    registry[common] = int(time.time())
+                    atomic_write_json(reg_path, registry)
+            return False
+        if common in registry:
+            return False
+    return True
 
 
 def policy(root):

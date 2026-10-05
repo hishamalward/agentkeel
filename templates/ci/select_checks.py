@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """agentkeel: decide which checks a candidate commit needs, from the paths it changes.
 
-  python3 select_checks.py --base <rev> --head <rev>   prints `app=true` or `app=false`
+  python3 select_checks.py --base <rev> --head <rev> [--since <rev>]   prints app=true|false
+
+--since is the commit the branch pointed at before this push (GitHub's `before`). On a push to
+the default branch it makes every pushed commit count, not only the last one.
 
 A change that touches only documentation does not run the app tests; anything else does. The
 documentation patterns default to Markdown, docs/ and design-exploration/, and can be replaced
@@ -18,7 +21,12 @@ import sys
 DEFAULT_DOCS = ["*.md", "docs/*", "design-exploration/*", "LICENSE", ".github/ISSUE_TEMPLATE/*"]
 
 
-def changed(base, head):
+def changed(base, head, since=None):
+    if since and set(since) != {"0"}:
+        ok = subprocess.run(["git", "merge-base", "--is-ancestor", since, head], capture_output=True)
+        if ok.returncode == 0:
+            out = subprocess.run(["git", "diff", "--name-only", since, head], capture_output=True, text=True)
+            return out.stdout.split() if out.returncode == 0 else None
     mb = subprocess.run(["git", "merge-base", base, head], capture_output=True, text=True)
     if mb.returncode != 0:
         return None
@@ -39,9 +47,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--since", default="")
     a = ap.parse_args(argv)
     docs = [g for g in os.environ.get("AGENTKEEL_DOCS_GLOBS", "").split(":") if g] or DEFAULT_DOCS
-    paths = changed(a.base, a.head)
+    paths = changed(a.base, a.head, a.since)
     print(f"app={'true' if needs_app(paths, docs) else 'false'}")
     sys.stderr.write(f"changed: {', '.join(paths) if paths is not None else '(unknown)'}\n")
     return 0

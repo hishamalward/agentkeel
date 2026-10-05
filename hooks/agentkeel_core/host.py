@@ -34,11 +34,29 @@ class Event:
     name: str = ""
     full_text: object = None          # the whole new content when known (Write, patch add)
     edit: dict = field(default_factory=dict)        # Edit: old_string/new_string/replace_all
-    change: object = None             # patch.FileChange for an apply_patch update
+    change: object = None             # patch.FileChange for an apply_patch update or move
+    source_path: str = ""             # for a move: the file the content comes from
 
 
 def _abs(cwd, p):
     return os.path.realpath(os.path.join(cwd, os.path.expanduser(str(p))))
+
+
+def patch_events(tool, text, cwd):
+    """Edit events for every file a patch text touches; None when the text holds no patch."""
+    env = patchmod.envelope(text)
+    if env is None:
+        return None
+    out, last_update = [], None
+    for ch in patchmod.parse(env):
+        path = _abs(cwd, ch.path)
+        if ch.kind == "move-to" and last_update is not None:
+            out.append(Event("edit", tool, path, change=last_update[1], source_path=last_update[0]))
+            continue
+        out.append(Event("edit", tool, path, full_text=ch.new_content(), change=ch))
+        if ch.kind == "update":
+            last_update = (path, ch)
+    return out or [Event("gap", tool)]
 
 
 def events(payload, cwd):
@@ -46,6 +64,13 @@ def events(payload, cwd):
     ti = payload.get("tool_input")
     if not isinstance(ti, dict):
         ti = {}
+    # A patch may arrive under any file-tool name (Codex matches apply_patch as Edit and Write).
+    carried = next((str(ti[k]) for k in ("command", "input", "patch") if isinstance(ti.get(k), str)
+                    and patchmod.BEGIN in ti[k]), None)
+    if tool in ("apply_patch", "Edit", "Write") and carried is not None:
+        return patch_events(tool, carried, cwd)
+    if tool == "apply_patch":
+        return [Event("gap", tool)]
     if tool == "Write":
         return [Event("edit", tool, _abs(cwd, ti["file_path"]), full_text=str(ti.get("content", "")))] \
             if ti.get("file_path") else []
@@ -56,19 +81,14 @@ def events(payload, cwd):
     if tool in ("NotebookEdit", "MultiEdit"):
         raw = ti.get("notebook_path") or ti.get("file_path")
         return [Event("edit", tool, _abs(cwd, raw))] if raw else []
-    if tool == "apply_patch" or (tool in ("Edit", "Write") and "*** Begin Patch" in str(ti.get("command", ""))):
-        text = patchmod.envelope(str(ti.get("command") or ti.get("input") or ti.get("patch") or ""))
-        if text is None:
-            return [Event("gap", tool)]
-        out = []
-        for ch in patchmod.parse(text):
-            out.append(Event("edit", tool, _abs(cwd, ch.path), full_text=ch.new_content(), change=ch))
-        return out or [Event("gap", tool)]
     if tool in ("Bash", "shell", "exec_command", "local_shell"):
         cmd = ti.get("command")
         if isinstance(cmd, list):
             cmd = " ".join(str(c) for c in cmd)
-        return [Event("command", tool, command=str(cmd or ""))]
+        cmd = str(cmd or "")
+        # Codex intercepts `apply_patch <<EOF ... EOF` inside a shell command: judge its files too
+        shell_patch = patch_events(tool, cmd, cwd) if re.search(r"\bapply_patch\b", cmd) else None
+        return [Event("command", tool, command=cmd)] + (shell_patch or [])
     if tool in ("Agent", "Task") or tool.endswith("spawn_agent"):
         prompt = ti.get("prompt") if tool in ("Agent", "Task") else ""
         return [Event("dispatch", tool, prompt=str(prompt or ""),

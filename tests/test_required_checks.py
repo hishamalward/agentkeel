@@ -52,6 +52,15 @@ class SelectChecks(unittest.TestCase):
         self.commit("src/app.ts", "z")
         self.assertEqual(self.select(), "app=true")
 
+    def test_push_to_main_judges_every_pushed_commit(self):
+        git(self.repo, "checkout", "-q", "main")
+        before = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.commit("src/app.ts", "z"); self.commit("docs/note.md", "d")
+        out = subprocess.run([sys.executable, SELECT, "--base", "main", "--head", "HEAD", "--since", before],
+                             cwd=self.repo, capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        self.assertEqual(out.stdout.strip(), "app=true")
+        self.assertEqual(self.select(), "app=false")  # without --since only the tip is judged
+
     def test_docs_globs_are_configurable(self):
         self.commit("site/page.html", "x")
         self.assertEqual(self.select(env={"AGENTKEEL_DOCS_GLOBS": "site/*"}), "app=false")
