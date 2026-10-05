@@ -18,12 +18,10 @@ GitHub Free has no branch protection on private repositories. There, use the pus
 
 ## The shipping path
 
-```mermaid
-flowchart LR
-  A["Push the branch<br/>git push origin feat/task"] --> B["Wait for the check<br/>agentkeel-required passes"]
-  B --> C["Move main<br/>git push origin full-sha:main<br/>in its own call"]
-  C --> D["Deploy<br/>only when the check is green"]
-```
+1. **Push the branch**: `git push origin feat/<task>` (needs `push`).
+2. **Wait for the check**: `agentkeel-required` passes on that commit (`gh pr checks`).
+3. **Move main**: `git push origin <full-tested-sha>:main`, in its own call.
+4. **Deploy**: it starts only when the check on that commit is green.
 
 The commit must already contain `main`, so the push is a fast-forward and `main` gets exactly the tested commit. If `main` moved, rebase and test again. GitHub then marks the branch's pull request as merged. With branch protection, `gh pr merge` (needs `merge` and `push`) also works, because GitHub requires the check on the result; under the push gate it is refused.
 

@@ -6,13 +6,10 @@ What each hook refuses, what it cannot see, and the test that proves each protec
 
 Four hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A hook reads the tool call as JSON on stdin ([captured payloads](hook-payloads.md)), then allows it (exit 0) or blocks it with a reason the model reads (exit 2).
 
-```mermaid
-flowchart LR
-  A["Tool call<br/>JSON from the host"] --> B["Events<br/>host.py: file edits,<br/>shell commands, dispatches"]
-  B --> C["Judge<br/>task record and<br/>agentkeel.json"]
-  C -->|inside the task| D["Allow<br/>exit 0"]
-  C -->|outside it| E["Refuse<br/>exit 2 with the reason"]
-```
+1. **Tool call**: the host sends the call to the hook as JSON.
+2. **Events**: `host.py` turns it into file edits, shell commands or dispatches.
+3. **Judge**: each guard checks the events against the task record and `agentkeel.json`.
+4. **Allow or refuse**: exit 0 inside the task; exit 2, with the reason, outside it.
 
 | Hook | Runs on | Refuses |
 |---|---|---|

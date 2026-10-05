@@ -34,12 +34,10 @@ Process is chosen once, by size, and size buys no permissions. When in doubt, pi
 
 A gate is a point where work stops until a named owner produces named evidence. There are four. Verification is not a gate: it is the evidence rule (I2) that every gate uses.
 
-```mermaid
-flowchart LR
-  G1["G1 Boundary approval<br/>human, large tasks"] --> G2["G2 Plan gate<br/>two AI reviewers, once"]
-  G2 --> G3["G3 Review<br/>AI, one round per scope"]
-  G3 --> G4["G4 Ship<br/>human decides, tests green"]
-```
+1. **G1 Boundary approval** (human, large tasks): the human approves the task's boundary.
+2. **G2 Plan gate** (AI, once): two reviewers check a handoff plan.
+3. **G3 Review** (AI, one round per scope): each task's diff, then the whole branch.
+4. **G4 Ship** (human decides): tests are green on the commit that lands.
 
 | Gate | Starts when | Ends with | Enforced by |
 |---|---|---|---|
