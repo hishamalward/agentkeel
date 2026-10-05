@@ -405,6 +405,13 @@ class FsTree:
             dirs[:] = [x for x in dirs if x not in (".git", "node_modules", "__pycache__")]
             for f in files:
                 self.paths.add(os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/"))
+        # a file git ignores never reaches a commit, so the working-folder check skips it too
+        try:
+            out = subprocess.run(["git", "-C", root, "check-ignore", "--stdin"], input="\n".join(sorted(self.paths)),
+                                 capture_output=True, text=True, timeout=30)
+            self.paths -= set(out.stdout.splitlines())
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     def read(self, path):
         try:

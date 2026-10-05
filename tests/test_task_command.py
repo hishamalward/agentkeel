@@ -171,6 +171,23 @@ class TaskCommand(RepoCase):
         self.assertEqual(index.count("<h2>"), 2, index)                               # history-import, deploy
         self.assertNotIn("<h2>history-import-memory</h2>", index)
 
+    def test_the_working_folder_check_skips_ignored_files(self):
+        # found after the Stage 2b merge: Finder's docs/.DS_Store failed the local check
+        self.task("start", "import", "--size", "medium", "--allow", "implement")
+        self.task("new", "state", "import")
+        docs = os.path.join(self.repo, "docs")
+        self.task("finish", os.path.join(docs, next(n for n in os.listdir(docs) if n.endswith("-state.html"))))
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            fh.write('{"docs": "html"}')
+        with open(os.path.join(docs, ".DS_Store"), "w") as fh:
+            fh.write("x")
+        out = self.task("check")
+        self.assertEqual(out.returncode, 1); self.assertIn(".DS_Store", out.stdout)  # not ignored: a stray file
+        with open(os.path.join(self.repo, ".gitignore"), "w") as fh:
+            fh.write(".DS_Store\n")
+        out = self.task("check")
+        self.assertEqual(out.returncode, 0, out.stdout)
+
     def test_record_drives_the_guard(self):
         self.branch("feat/x")
         payload = {"tool_name": "Write", "cwd": self.repo, "session_id": SESSION,
