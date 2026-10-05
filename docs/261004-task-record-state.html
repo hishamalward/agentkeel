@@ -58,7 +58,7 @@
 <li><strong>A new task in the same session starts fresh.</strong> Only re-declaring the same task id keeps its worktrees, write roots and evidence.</li>
 <li><strong>Evidence</strong>: <code>task.py verify -- &lt;command&gt;</code> runs a check and records its exit code against <code>HEAD</code> and whether the tree was dirty. It is a record, not a gate.</li>
 <li><strong>The human approves a boundary</strong>: <code>task.py approve &lt;feature|page&gt;</code> writes the page's <code>keel-approval</code> meta (a digest of the boundary, the approver from git <code>user.name</code>, the date) and keeps the approved boundary in <code>AGENTKEEL_HOME/approvals/</code>. The guard refuses it when the agent runs it, and refuses an agent edit that adds, changes or removes the approval, or that renames or deletes an approved page. The human runs it in a terminal of their own.</li>
-<li>**<code>task.py end</code>** drops the record and lists what the task owned.</li>
+<li><strong><code>task.py end</code></strong> drops the record and lists what the task owned. It does not remove the task's worktrees or slots: cleanup that knows which task owns what is not built yet.</li>
 </ul>
 </section>
 <section id="the-repository-policy-file">
