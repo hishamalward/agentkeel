@@ -149,7 +149,7 @@ target) in a repository that has an `agentkeel.json` at its root or opted in bef
 `AGENTKEEL_HOME/opted-in.json`, so a shell `rm` of the file does not switch it off); a
 session-start hook then prints the task command with the plugin's real path. Codex patches to a
 spec are judged on the text they produce, the same check a Claude edit gets. The project installer configures both hosts
-(`--host` to limit), warns when `.codex/config.toml` already defines hooks of the same name, has a
+(`--host` to limit), routes every tool to the task guard so an unreadable writer is refused, warns when `.codex/config.toml` already defines hooks of the same name, has a
 `--doctor` that reports what is installed and trusted (`--live` proves a refusal per host), and on
 `--uninstall` restores each config file's original bytes when its content is unchanged.
 **Why**: Plugin hooks run in every repository the user opens; refusing every write everywhere
