@@ -47,5 +47,63 @@ class RepoContract(unittest.TestCase):
             self.assertEqual(out.returncode, 0, out.stderr)
 
 
+class ProductDocs(unittest.TestCase):
+    """AgentKeel's own docs are Markdown that GitHub renders (README.md and docs/*.md). The HTML
+    records AgentKeel creates in an adopting repository are checked by pages.py instead."""
+
+    @staticmethod
+    def slugs(path):
+        """The heading anchors GitHub gives a Markdown file, duplicates numbered as GitHub does."""
+        import re
+        seen, out = {}, set()
+        with open(path, encoding="utf-8") as fh:
+            text = re.sub(r"(?ms)^```.*?^```", "", fh.read())
+        for m in re.finditer(r"(?m)^#{1,6} +(.+?) *#*$", text):
+            s = re.sub(r"[^\w\- ]", "", m.group(1).replace("`", "").strip().lower()).replace(" ", "-")
+            n = seen.get(s, 0)
+            seen[s] = n + 1
+            out.add(s if n == 0 else f"{s}-{n}")
+        return out
+
+    def targets(self, path):
+        import re
+        with open(path, encoding="utf-8") as fh:
+            text = re.sub(r"(?ms)^```.*?^```", "", fh.read())
+        text = re.sub(r"`[^`\n]*`", "", text)
+        found = re.findall(r"\]\(([^)\s]+)\)", text)
+        found += re.findall(r'(?:src|srcset|href)="([^"]+)"', text)
+        return [t for t in found if not re.match(r"^[a-z][a-z0-9+.-]*:", t)]
+
+    def test_every_relative_link_and_anchor_resolves(self):
+        files = [os.path.join(ROOT, "README.md")] + sorted(
+            os.path.join(ROOT, "docs", f) for f in os.listdir(os.path.join(ROOT, "docs")) if f.endswith(".md"))
+        bad = []
+        for src in files:
+            for t in self.targets(src):
+                path, _, frag = t.partition("#")
+                target = os.path.normpath(os.path.join(os.path.dirname(src), path)) if path else src
+                where = f"{os.path.relpath(src, ROOT)} -> {t}"
+                if not os.path.exists(target):
+                    bad.append(where + " (no such file)")
+                elif frag and target.endswith(".md") and frag not in self.slugs(target):
+                    bad.append(where + " (no such heading)")
+        self.assertEqual(bad, [])
+
+    def test_no_html_page_left_in_the_product_docs(self):
+        html = [f for f in os.listdir(os.path.join(ROOT, "docs")) if f.endswith(".html")]
+        self.assertEqual(html, [], "AgentKeel's own docs are Markdown; HTML is for adopter records")
+
+    def test_the_link_check_catches_a_broken_anchor(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, "a.md"), os.path.join(d, "b.md")
+            with open(b, "w") as fh:
+                fh.write("# Title\n\n## The `docs` check\n\n## Limits\n\n## Limits\n")
+            self.assertEqual(self.slugs(b), {"title", "the-docs-check", "limits", "limits-1"})
+            with open(a, "w") as fh:
+                fh.write("[ok](b.md#the-docs-check) [bad](b.md#nope) [gone](c.md) `[skip](x.md)`\n")
+            self.assertEqual(self.targets(a), ["b.md#the-docs-check", "b.md#nope", "c.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" role="img" aria-labelledby="t">
   <title id="t">AgentKeel: guardrails beneath your AI coding agents</title>
-  <style>.hull{fill:#e8e6e1}.keel{fill:#8aa8ff}.work{fill:#5b70ad}.water{stroke:#8aa8ff}</style>
+  <style>
+    .hull{fill:#e8e6e1}.keel{fill:#8aa8ff}.work{fill:#5b70ad}.water{stroke:#8aa8ff}
+    .word{font-family:ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-weight:700;letter-spacing:-2px;fill:#e8e6e1}.word tspan{fill:#8aa8ff}
+    .tag{font-family:ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;fill:#a2a8b3}
+    .narrow{display:none}
+    @media (max-width: 640px) { .wide{display:none} .narrow{display:inline} }
+  </style>
   <rect width="1280" height="320" rx="24" fill="#15171b"/>
-  <g transform="translate(72 30) scale(4)">
-  <path class="water" d="M0.5 35.5h63" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <g class="wide" transform="translate(79.8 -6.5)">
+    <g transform="translate(72 30) scale(4)">
+    <path class="water" d="M0.5 35.5h63" stroke-width="2.2" stroke-linecap="round" fill="none"/>
   <rect class="work" x="14" y="21.5" width="10.5" height="7.5" rx="1.6"/>
   <rect class="work" x="26" y="21.5" width="10.5" height="7.5" rx="1.6"/>
   <rect class="work" x="20" y="12.5" width="10.5" height="7.5" rx="1.6"/>
@@ -11,7 +18,22 @@
   <path class="keel" d="M31 40h9.5l-5.5 11.5h-5.6z"/>
   <path class="keel" d="M21.5 53.3c0-1.7 5.2-2.8 11.4-2.8 5.9 0 11.1 1.2 11.1 2.7 0 1.5-5.1 2.6-11.1 2.6-6.2 0-11.4-.9-11.4-2.5z"/>
   <path class="keel" d="M10 40.2h4.6l-1.2 7.6h-3.2z"/>
+    </g>
+    <text class="word" x="380" y="168" font-size="96">Agent<tspan>Keel</tspan></text>
+    <text class="tag" x="384" y="226" font-size="36">Guardrails beneath your AI coding agents</text>
   </g>
-  <text x="380" y="168" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-2" fill="#e8e6e1">Agent<tspan fill="#8aa8ff">Keel</tspan></text>
-  <text x="384" y="226" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="34" fill="#a2a8b3">Guardrails beneath your AI coding agents</text>
+  <g class="narrow" transform="translate(0 8.2)">
+    <g transform="translate(250 6) scale(2.7)">
+    <path class="water" d="M0.5 35.5h63" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <rect class="work" x="14" y="21.5" width="10.5" height="7.5" rx="1.6"/>
+  <rect class="work" x="26" y="21.5" width="10.5" height="7.5" rx="1.6"/>
+  <rect class="work" x="20" y="12.5" width="10.5" height="7.5" rx="1.6"/>
+  <path class="hull" d="M4 30h59c-3.6 6.6-10 10.3-19 10.5H12.5C8 40.4 5 37 4 30z"/>
+  <path class="keel" d="M31 40h9.5l-5.5 11.5h-5.6z"/>
+  <path class="keel" d="M21.5 53.3c0-1.7 5.2-2.8 11.4-2.8 5.9 0 11.1 1.2 11.1 2.7 0 1.5-5.1 2.6-11.1 2.6-6.2 0-11.4-.9-11.4-2.5z"/>
+  <path class="keel" d="M10 40.2h4.6l-1.2 7.6h-3.2z"/>
+    </g>
+    <text class="word" x="440" y="142" font-size="124">Agent<tspan>Keel</tspan></text>
+    <text class="tag" x="640" y="262" font-size="58" text-anchor="middle">Guardrails beneath your AI coding agents</text>
+  </g>
 </svg>

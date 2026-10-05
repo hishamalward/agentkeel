@@ -1,0 +1,23 @@
+{
+  "name": "agentkeel",
+  "owner": {
+    "name": "Hisham Al-Ward",
+    "url": "https://github.com/hishamalward"
+  },
+  "description": "Guardrails beneath your AI coding agents.",
+  "plugins": [
+    {
+      "name": "agentkeel",
+      "displayName": "AgentKeel",
+      "source": "./",
+      "description": "Bounded writes for coding agents: a task record that hooks read before every edit, commit, push and build. Acts only in repositories with an agentkeel.json.",
+      "version": "0.3.0",
+      "author": { "name": "Hisham Al-Ward" },
+      "homepage": "https://github.com/hishamalward/agentkeel",
+      "repository": "https://github.com/hishamalward/agentkeel",
+      "license": "MIT",
+      "category": "productivity",
+      "tags": ["guardrails", "hooks", "git", "agents"]
+    }
+  ]
+}

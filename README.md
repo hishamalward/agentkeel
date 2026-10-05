@@ -33,7 +33,7 @@ rules that matter into hooks, outside the model's memory.
   in the present tense. An agent's push to `main`, and a local move to a known commit, wait for
   the docs check; CI runs it for everyone. A commit made on `main`, a rebase or a
   non-fast-forward merge is checked later, at the push and in CI
-  ([limits](docs/261005-html-docs-state.html#limitations)).
+  ([limits](docs/html-records.md#current-limitations-and-open-decisions)).
 - **Loops have caps.** One plan gate per plan, one review round per scope.
 
 ## Quickstart
@@ -124,7 +124,7 @@ ready to push.
   one stated scope. For consent itself, use your host's permission prompts.
 - An approval digest detects a change to an approved boundary. It does not prove who approved.
 - Hooks guard the agent, not the branch. Tests before `main` moves need a required CI check:
-  see [required checks](docs/261004-required-checks-state.html).
+  see [required checks](docs/required-checks.md).
 - Other hosts (Cursor, Copilot) read `AGENTS.md` only. For them, AgentKeel is guidance.
 
 ## Read next
@@ -134,13 +134,13 @@ link to a page shows its source.
 
 | Page | Read it to |
 |---|---|
-| [Project canon](docs/260823-project-reference.html) | learn the rules that apply now: the invariants, the four gates, and why each rule exists |
-| [Guardrails](docs/260823-guardrails-reference.html) | see each hook, what it refuses, what it cannot see, the overrides, and the test for each protection |
-| [The task record](docs/261004-task-record-state.html) | declare a task: sizes, permissions, worktrees, scratch, `agentkeel.json` |
-| [HTML documentation](docs/261005-html-docs-state.html) | write docs pages, get a boundary approved, and pass the docs check |
-| [Required checks](docs/261004-required-checks-state.html) | keep `main` green with a CI check and a deploy that waits for it |
-| [Hosts](docs/261004-hosts-state.html) | see the Claude Code and Codex facts and the live results |
-| [Hook payloads](docs/260823-hook-payloads-reference.html) | read the captured JSON that the hooks parse |
+| [Project canon](docs/canon.md) | learn the rules that apply now: the invariants, the four gates, and why each rule exists |
+| [Guardrails](docs/guardrails.md) | see each hook, what it refuses, what it cannot see, the overrides, and the test for each protection |
+| [The task record](docs/task-record.md) | declare a task: sizes, permissions, worktrees, scratch, `agentkeel.json` |
+| [HTML documentation](docs/html-records.md) | write docs pages, get a boundary approved, and pass the docs check |
+| [Required checks](docs/required-checks.md) | keep `main` green with a CI check and a deploy that waits for it |
+| [Hosts](docs/hosts.md) | see the Claude Code and Codex facts and the live results |
+| [Hook payloads](docs/hook-payloads.md) | read the captured JSON that the hooks parse |
 
 Related work: [agent-slots](https://github.com/hishamalward/agent-slots) isolates the database,
 ports and queues of several agents on one machine. AgentKeel is the process side; agent-slots is
