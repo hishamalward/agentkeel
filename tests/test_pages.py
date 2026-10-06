@@ -227,5 +227,207 @@ class CommandLine(unittest.TestCase):
         self.assertIn("derived", self.run_check("--rev", self.commit("index"))[1])
 
 
+STATE_NOW = ('<!doctype html><html><head><title>Import</title></head><body>\n'
+             '<section class="state-now" id="state-now"><h2>State now</h2><dl>\n'
+             '<dt>Implementation</dt><dd>{impl}</dd>\n<dt>Release</dt><dd>{release}</dd>\n</dl></section>\n'
+             '<section id="behavior"><h2>Behavior</h2><dl><dt>Not</dt><dd>state now</dd></dl></section>\n'
+             '</body></html>\n')
+
+
+def state_now_page(impl="Not started.", release="Not released."):
+    return STATE_NOW.format(impl=impl, release=release)
+
+
+class StateNow(unittest.TestCase):
+    def test_from_the_starters_dl(self):
+        from agentkeel_core import starters
+        self.assertEqual([k for k, _ in pages.state_now(starters.page("state", "T", "2026-10-06"))],
+                         ["Implementation", "Release", "External checks"])
+        self.assertEqual(pages.state_now(state_now_page("On main.")),
+                         [("Implementation", "On main."), ("Release", "Not released.")])
+
+    def test_from_a_two_column_table(self):
+        page = ("<title>t</title><section id='now'><h2>State now</h2><table><tr><th></th><th></th></tr>"
+                "<tr><td>Implementation</td><td>On <code>main</code>\n since x</td></tr>"
+                "<tr><th>Release</th><td>None</td></tr></table></section>"
+                "<section><h2>Other</h2><table><tr><td>Not</td><td>this</td></tr></table></section>")
+        self.assertEqual(pages.state_now(page), [("Implementation", "On main since x"), ("Release", "None")])
+        bare = "<h2>State now</h2><table><tr><td>A</td><td>b</td></tr></table><h2>Next</h2><table><tr><td>C</td><td>d</td></tr></table>"
+        self.assertEqual(pages.state_now(bare), [("A", "b")])
+
+
+class Claims(unittest.TestCase):
+    """`merged <full-sha> into <ref>` in State now, judged by read-only git."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.realpath(self._tmp.name)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+        self.put("agentkeel.json", json.dumps({"docs": "html"}))
+        self.sha("init")
+        git(self.repo, "checkout", "-q", "-b", "feat/x")
+        self.merged = self.sha("feature work")
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "merge", "-q", "--ff-only", "feat/x")
+        git(self.repo, "checkout", "-q", "-b", "side")
+        self.unmerged = self.sha("side work")
+        git(self.repo, "checkout", "-q", "main")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def put(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+
+    def sha(self, msg):
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", msg)
+        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+    def page(self, impl):
+        self.put("docs/" + NAME, state_now_page(impl))
+
+    def results(self, tree=None):
+        warnings = []
+        problems = pages.check(tree or pages.FsTree(self.repo), None, warnings)
+        return [r[3] for r in pages.claim_results(tree or pages.FsTree(self.repo))], problems, warnings
+
+    def run_check(self, *args):
+        out = subprocess.run([sys.executable, PAGES, "check", "--root", self.repo, *args],
+                             capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        return out.returncode, out.stdout
+
+    def test_a_merged_commit_stays_proven_as_its_branch_moves_and_goes(self):
+        self.page(f"merged {self.merged} into main.")
+        self.assertEqual(self.results()[:2], (["proven"], []))
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "later work on the branch")
+        git(self.repo, "branch", "-q", "-f", "feat/x", "HEAD")
+        git(self.repo, "reset", "-q", "--hard", "HEAD~1")
+        self.assertEqual(self.results()[:2], (["proven"], []))
+        git(self.repo, "branch", "-q", "-D", "feat/x")
+        self.assertEqual(self.results()[:2], (["proven"], []))
+        # proven by main itself, not only by the candidate: a candidate without the commit
+        git(self.repo, "checkout", "-q", "--orphan", "lone")
+        self.page(f"merged {self.merged} into main.")
+        lone = self.sha("lone")
+        self.assertEqual(self.results(pages.GitTree(self.repo, lone))[:2], (["proven"], []))
+
+    def test_the_candidate_proves_a_claim_main_does_not_hold_yet(self):
+        git(self.repo, "checkout", "-q", "side")
+        self.page(f"merged {self.unmerged} into main")
+        cand = self.sha("page lands with the side work")
+        self.assertEqual(self.results(pages.GitTree(self.repo, cand))[:2], (["proven"], []))
+
+    def test_a_branch_name_or_short_id_is_unknown_and_never_fails(self):
+        self.page(f"merged feat/x into main; merged {self.merged[:7]} into main; merged {'f' * 40} into main;"
+                  f" merged {self.merged} into nowhere")
+        found, problems, warnings = self.results()
+        self.assertEqual(found, ["unknown"] * 3 + ["proven"])  # the candidate holds it, whatever the ref
+        self.assertEqual(problems, [])
+        self.assertEqual(len(warnings), 3, warnings)
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out); self.assertEqual(out.count("WARN"), 3, out)
+        self.page(f"merged {self.unmerged} into nowhere")
+        self.assertEqual(self.results()[0], ["unknown"])      # an unresolvable ref is no contradiction
+
+    def test_a_real_contradiction_fails_the_check(self):
+        self.page(f"merged {self.unmerged} into main")
+        found, problems, _ = self.results()
+        self.assertEqual(found, ["contradiction"])
+        self.assertTrue(any("contradicts" in p for p in problems), problems)
+        cand = self.sha("the page")
+        code, out = self.run_check("--rev", cand)
+        self.assertEqual(code, 1, out); self.assertIn("contradicts", out)
+
+    def test_an_authored_outside_fact_is_untouched(self):
+        text = state_now_page("App Store review pending since 2026-10-01; build merged by the release team")
+        self.put("docs/" + NAME, text)
+        self.assertEqual(pages.claims(text), [])
+        self.assertEqual(self.results(), ([], [], []))
+        with open(os.path.join(self.repo, "docs", NAME)) as fh:
+            self.assertEqual(fh.read(), text)
+
+
+class IndexFromACleanCopy(unittest.TestCase):
+    """An adopting repository copies pages.py alone to .github/agentkeel/ and runs `index` there."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.realpath(self._tmp.name)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+        os.makedirs(os.path.join(self.repo, ".github", "agentkeel"))
+        import shutil
+        shutil.copy(PAGES, os.path.join(self.repo, ".github", "agentkeel", "pages.py"))
+        self.put("agentkeel.json", json.dumps({"docs": "html", "docs_legacy": ["docs/specs/*", "docs/archive/*"]}))
+        self.put("docs/261005-import-state.html", state_now_page("Not started."))
+        self.put("docs/261005-import-memory-audit.html", "<title>Memory audit</title>")
+        self.put("docs/261101-project-reference.html", "<title>Project canon</title>")
+        self.put("docs/260101-alpha-reference.html", "<title>Alpha</title>")
+        self.legacy = {"docs/specs/a-spec.md": "Spec A", "docs/specs/b notes.md": "b notes.md",
+                       "docs/archive/old.html": "Old plan", "docs/archive/deep/x.md": "Deep",
+                       "docs/archive/pic.png": "pic.png"}
+        self.put("docs/specs/a-spec.md", "intro\n\n## Spec A\n\n# Later\n")
+        self.put("docs/specs/b notes.md", "no heading\n")
+        self.put("docs/archive/old.html", "<html><head><title>Old plan</title></head></html>")
+        self.put("docs/archive/deep/x.md", "# Deep\n")
+        self.put("docs/archive/pic.png", "x")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def put(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+
+    def index(self, *args):
+        # -I: no script folder or user site on sys.path, so only the copied file itself can run
+        out = subprocess.run([sys.executable, "-I", ".github/agentkeel/pages.py", "index", "--root", ".", *args],
+                             cwd=self.repo, capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        with open(os.path.join(self.repo, "docs", "index.html")) as fh:
+            return out.stdout, fh.read()
+
+    def test_the_copy_alone_lists_pages_state_now_and_legacy(self):
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".github", "agentkeel", "agentkeel_core")))
+        text, page = self.index()
+        lines = text.splitlines()
+        families = [l for l in lines if l and not l.startswith(" ") and not l.startswith(("agentkeel", "legacy"))]
+        self.assertEqual(families, ["project", "alpha", "import"])
+        self.assertIn("  state     Import  (261005-import-state.html)", lines)
+        self.assertIn("      Implementation: Not started.", lines)
+        self.assertIn("  audit     Memory audit  (261005-import-memory-audit.html)", lines)
+        self.assertIn("  docs/archive/  2 file(s)", lines)
+        self.assertIn("  docs/archive/deep/  1 file(s)", lines)
+        self.assertIn("  docs/specs/  2 file(s)", lines)
+        self.assertNotIn("Spec A", text)                       # titles only with --full
+        self.assertIn("<dt>Implementation</dt><dd>Not started.</dd>", page)
+
+    def test_a_changed_state_now_shows_in_the_next_run(self):
+        self.index()
+        self.put("docs/261005-import-state.html", state_now_page("On main since today."))
+        text, page = self.index()
+        self.assertIn("Implementation: On main since today.", text)
+        self.assertNotIn("Not started.", text + page)
+
+    def test_every_legacy_file_is_reachable_from_the_index(self):
+        _, page = self.index()
+        import urllib.parse
+        targets = {os.path.normpath(os.path.join("docs", urllib.parse.unquote(link))) for link in pages.scan(page).links
+                   if link != "keel.css"}
+        self.assertTrue(set(self.legacy) <= targets, set(self.legacy) - targets)
+        for path, title in self.legacy.items():
+            self.assertIn(f">{title}</a>", page)
+
+    def test_full_lists_every_legacy_file_with_its_title(self):
+        text, _ = self.index("--full")
+        for path, title in self.legacy.items():
+            self.assertIn(f"    {path}  {title}", text.splitlines())
+
+
 if __name__ == "__main__":
     unittest.main()

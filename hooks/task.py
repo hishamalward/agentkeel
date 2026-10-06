@@ -15,6 +15,9 @@
   task.py start <task-id> --size small|medium|large --allow <permissions>
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
+  task.py status [--json]          derived facts, read-only, with or without a session: this task's
+                                   worktrees, tasks in their own clones, other worktrees, and each
+                                   state page's State now with its claims
   task.py verify -- <command...>   run a check; the hooks record its result against HEAD and the tree
   task.py end                      drop the record (the task is finished or abandoned)
   task.py approve <task-id|page>   HUMAN ONLY: approve the boundary of a docs/ page
@@ -26,7 +29,8 @@ Documentation (repositories with "docs": "html" in agentkeel.json; see docs/ in 
   task.py context <page>           the page as plain structured text, for reading
   task.py finish <page>            remove the page's Working section before main moves
   task.py check [--rev R] [--base B]   the docs check main moves on (the working folder by default)
-  task.py index                    write the derived docs/index.html (never committed)
+  task.py index [--full]           write the derived docs/index.html (never committed) and print
+                                   it as text; --full lists every legacy file
 
 Permissions (comma separated, any combination): review, implement, merge, push,
 distribution-build, store-submission, paid-job, remote-write (changes on a guarded MCP service,
@@ -326,22 +330,6 @@ def family_date(docs, family):
     return None
 
 
-def families(names):
-    """{page name: family}. A name's slug is family[-qualifier]; the family is the longest state
-    page slug with the same date that the slug starts with, else the shortest such page slug."""
-    found = {n: pages.NAME_RE.match(n) for n in names}
-    found = {n: m for n, m in found.items() if m}
-    states = {(m.group(1), m.group(2)) for m in found.values() if m.group(3) == "state"}
-    slugs = {(m.group(1), m.group(2)) for m in found.values()}
-    out = {}
-    for n, m in found.items():
-        date, slug = m.group(1), m.group(2)
-        heads = lambda pool: [s for d, s in pool if d == date and (slug == s or slug.startswith(s + "-"))]
-        st = heads(states)
-        out[n] = max(st, key=len) if st else min(heads(slugs), key=len)
-    return out
-
-
 def context(args, environ):
     text = record.read(realpath(args.page, os.getcwd()))
     if text is None:
@@ -372,13 +360,6 @@ def check(args, environ):
     top = gitops.toplevel(os.getcwd()) or os.getcwd()
     return pages.main(["check", "--root", top] + (["--rev", args.rev] if args.rev else [])
                       + (["--base", args.base] if args.base else []))
-
-
-INDEX_HEAD = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docs index</title><link rel="stylesheet" href="keel.css"></head><body><main>
-<header class="page"><div class="kicker">Derived by task.py index &middot; not committed</div><h1>Docs index</h1></header>
-"""
 
 
 def record_interpreter(environ):
@@ -526,37 +507,135 @@ def init(args, environ):
 
 
 def index(args, environ):
-    import html as h
     top = os.path.realpath(gitops.toplevel(os.getcwd()) or os.getcwd())
+    return pages.main(["index", "--root", top] + (["--full"] if args.full else []))
+
+
+def _worktree_list(top):
+    """[(path, branch)] from git worktree list --porcelain; the first is the shared checkout."""
+    out = gitops.run_git(top, "worktree", "list", "--porcelain") or ""
+    trees, path, branch = [], None, ""
+    for line in out.splitlines() + [""]:
+        if line.startswith("worktree "):
+            path, branch = os.path.realpath(line[len("worktree "):]), ""
+        elif line.startswith("branch "):
+            branch = line[len("branch "):].replace("refs/heads/", "", 1)
+        elif line == "detached":
+            branch = "(detached)"
+        elif not line and path:
+            trees.append((path, branch))
+            path = None
+    return trees
+
+
+def _task_owners(environ):
+    """{worktree path: task id} from every task record on this machine."""
+    owners = {}
+    folder = os.path.join(record.home(environ), "tasks")
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        try:
+            with open(os.path.join(folder, name)) as fh:
+                rec = json.load(fh)
+            for w in rec.get("worktrees") or []:
+                owners.setdefault(os.path.realpath(w), rec.get("task") or "?")
+        except Exception:
+            continue
+    return owners
+
+
+def _worktree_facts(path, protected):
+    """Branch, tip, commits not in the protected branch, merged, and changed or untracked files.
+    Read without running anything the repository's config names (repostate); a worktree that cannot
+    be read says so and is never called clean."""
+    from agentkeel_core import repostate
+    try:
+        repo = repostate.locate(path)
+        head = repostate._read(os.path.join(repo.gitdir, "HEAD")).strip()
+        st = repostate.inspect(path)
+        facts = {"path": path, "branch": head[len("ref: refs/heads/"):] if head.startswith("ref: refs/heads/")
+                 else "(detached)", "tip": st["head"], "changed": len(st["changed"])}
+        name = next((b for b in protected if repostate.resolve(repo, "refs/heads/" + b)), None)
+        base = repostate.resolve(repo, "refs/heads/" + name) if name else None
+        facts["protected"] = name
+        if st["head"] and base:
+            with repostate.Shadow(repo) as sh:
+                ahead = int(sh.git("rev-list", "--count", st["head"], "^" + base))
+            facts.update(ahead=ahead, merged=ahead == 0)
+        return facts
+    except (repostate.InspectError, ValueError) as e:
+        return {"path": path, "error": f"cannot be read ({e}); not known to be clean"}
+
+
+def status(args, environ):
+    """Derived facts only: it reads, and deletes or changes nothing."""
+    top = gitops.toplevel(os.getcwd())
+    if not top:
+        return fail("not inside a git repository")
+    top = os.path.realpath(top)
+    pol = record.policy(top)
+    protected = sorted(pol["protected"], key=lambda b: (b != "main", b))
+    rec = record.load(record.session_from_env(environ), environ)
+    mine = [w for w in (rec.get("worktrees") or []) if os.path.isdir(w)] if rec else []
+    out = {"repository": top, "task": None, "worktrees": [], "opened": [], "others": [], "pages": []}
+    if rec:
+        out["task"] = {"id": rec.get("task"), "size": rec.get("size"), "permissions": rec.get("permissions") or []}
+        out["worktrees"] = [_worktree_facts(w, protected) for w in mine]
+    common = gitops.common_dir(top)
+    for r in isolation.all_opened(environ):
+        if r.get("repo_common_dir") == common or r.get("repo") == top:
+            problems = isolation.release_problems(r)
+            out["opened"].append({"task": r["task"], "clone": r["clone"], "branch": r.get("branch"),
+                                  "ready": not problems, "problems": problems})
+    owners = _task_owners(environ)
+    trees = _worktree_list(top)
+    for i, (path, branch) in enumerate(trees):
+        if path in mine:
+            continue
+        out["others"].append({"path": path, "branch": branch, "shared": i == 0,
+                              "task": owners.get(path)})
     docs = os.path.join(top, "docs")
-    if not os.path.isdir(docs):
-        return fail("no docs/ folder here")
-    groups = {}
-    for name, fam in sorted(families(os.listdir(docs)).items()):
+    for name in sorted(os.listdir(docs)) if os.path.isdir(docs) else []:
         m = pages.NAME_RE.match(name)
+        if not (m and m.group(3) == "state"):
+            continue
         text = record.read(os.path.join(docs, name)) or ""
-        title = pages.scan(text).title.strip() or name
-        state = pages.boundary_state(name, text)[0]
-        working = bool(pages.sections(text, "working"))
-        groups.setdefault(fam, []).append((m.group(3), name, title, state, working))
-    rows = []
-    order = {"state": 0, "reference": 1, "audit": 2, "mockup": 3}
-    for fam in sorted(groups, key=lambda f: (f != "project", f)):
-        rows.append(f"<h2>{h.escape(fam)}</h2><ul>")
-        for kind, name, title, state, working in sorted(groups[fam], key=lambda r: (order[r[0]], r[1])):
-            tags = f'<span class="tag">{kind}</span>'
-            if state != "none":
-                tags += f' <span class="tag {"ok" if state == "approved" else "warn"}">boundary {state}</span>'
-            if working:
-                tags += ' <span class="tag warn">working</span>'
-            rows.append(f'<li><a href="{h.escape(name)}">{h.escape(title)}</a> {tags}</li>')
-        rows.append("</ul>")
-    out = os.path.join(docs, "index.html")
-    with open(out, "w", encoding="utf-8") as fh:
-        fh.write(INDEX_HEAD + "\n".join(rows) + "\n</main></body></html>\n")
-    ignored = gitops.run_git(top, "check-ignore", "-q", out) is not None
-    print(f"agentkeel: wrote {os.path.relpath(out, top)}"
-          + ("" if ignored else "\n  note: add docs/index.html to .gitignore; the index is derived and never committed"))
+        out["pages"].append({"page": "docs/" + name, "state_now": [list(p) for p in pages.state_now(text)],
+                             "claims": [{"label": label, "claim": claim, "result": r[0], "why": r[1]}
+                                        for label, claim, commit, ref in pages.claims(text)
+                                        for r in [pages.judge(top, commit, ref, "HEAD")]]})
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    print(f"agentkeel status: {top}")
+    t = out["task"]
+    print(f"this session's task: {t['id']} ({t['size']}; {', '.join(t['permissions'])})" if t
+          else "this session's task: none")
+    for w in out["worktrees"]:
+        if "error" in w:
+            print(f"  {w['path']}  {w['error']}")
+            continue
+        where = (f"{w['ahead']} commit(s) not in {w['protected']}, " + ("merged" if w["merged"] else "not merged")
+                 if "ahead" in w else "no protected branch to compare with")
+        print(f"  {w['path']}  branch {w['branch']}  tip {(w['tip'] or 'none')[:12]}  {where}, "
+              f"{w['changed']} changed or untracked file(s)")
+    print("tasks in their own clones:" if out["opened"] else "tasks in their own clones: none")
+    for o in out["opened"]:
+        print(f"  {o['task']}  {o['clone']}  branch {o['branch']}  "
+              + ("ready to release" if o["ready"] else "not ready to release:"))
+        for p in o["problems"]:
+            print(f"    - {p}")
+    print("other worktrees:" if out["others"] else "other worktrees: none")
+    for o in out["others"]:
+        print(f"  {o['path']}  branch {o['branch'] or '?'}  "
+              + (f"foreign: task {o['task']}" if o["task"] else "no task record")
+              + ("  (shared checkout)" if o["shared"] else "") + ("  (here)" if o["path"] == top else ""))
+    print("state pages:" if out["pages"] else "state pages: none")
+    for pg in out["pages"]:
+        print(f"  {pg['page']}")
+        for k, v in pg["state_now"]:
+            print(f"    {k}: {v}")
+        for c in pg["claims"]:
+            print(f"    claim '{c['claim']}': {c['result']} ({c['why']})")
     return 0
 
 
@@ -603,14 +682,15 @@ def main(argv=None, environ=os.environ):
     c = sub.add_parser("check")
     c.add_argument("--rev")
     c.add_argument("--base")
-    sub.add_parser("index")
+    sub.add_parser("index").add_argument("--full", action="store_true")
+    sub.add_parser("status").add_argument("--json", action="store_true")
     if argv is None:
         argv = sys.argv[1:]
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
     handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
-                "context": context, "finish": finish, "check": check, "index": index}
+                "context": context, "finish": finish, "check": check, "index": index, "status": status}
     if args.action not in handlers:
         p.print_help()
         return 2

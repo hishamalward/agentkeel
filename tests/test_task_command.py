@@ -197,6 +197,103 @@ class TaskCommand(RepoCase):
         self.assertEqual(run_hook("task-guard.py", payload, env=self.env)[0], 0)
 
 
+class Status(RepoCase):
+    """task.py status: derived facts, read-only, with or without a session."""
+    task = TaskCommand.task
+
+    def snapshot(self):
+        """What status must not change: every worktree's porcelain status, refs and the records."""
+        out = []
+        for d in (self.primary, self.repo):
+            out.append(subprocess.run(["git", "-C", d, "status", "--porcelain", "--untracked-files=all"],
+                                      capture_output=True, text=True).stdout)
+        out.append(subprocess.run(["git", "-C", self.primary, "for-each-ref"], capture_output=True, text=True).stdout)
+        for folder, _, files in sorted(os.walk(self.home)):
+            out += sorted(os.path.join(folder, f) for f in files)
+        return out
+
+    def test_with_no_session(self):
+        out = self.task("status", session=None)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("this session's task: none", out.stdout)
+        self.assertIn(f"  {self.primary}  branch base  no task record  (shared checkout)", out.stdout)
+        self.assertIn(f"  {self.repo}  branch main  no task record", out.stdout)
+
+    def test_a_session_with_a_dirty_worktree(self):
+        self.branch("feat/x")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "work")
+        with open(os.path.join(self.repo, "new.py"), "w") as fh:
+            fh.write("x = 1\n")
+        self.declare(task="x")
+        before = self.snapshot()
+        out = self.task("status")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("this session's task: x (small; implement)", out.stdout)
+        self.assertRegex(out.stdout, rf"{self.repo}  branch feat/x  tip [0-9a-f]{{12}}  1 commit\(s\) not in main, "
+                                     r"not merged, 1 changed or untracked file\(s\)")
+        self.assertEqual(self.snapshot(), before)               # it changes nothing
+        facts = json.loads(self.task("status", "--json").stdout)["worktrees"][0]
+        self.assertEqual((facts["ahead"], facts["merged"], facts["changed"]), (1, False, 1))
+        os.remove(os.path.join(self.repo, "new.py"))
+        git(self.primary, "branch", "-q", "-f", "main", "feat/x")   # main catches up: merged, clean
+        facts = json.loads(self.task("status", "--json").stdout)["worktrees"][0]
+        self.assertEqual((facts["ahead"], facts["merged"], facts["changed"]), (0, True, 0))
+
+    def test_an_unreadable_worktree_is_never_called_clean(self):
+        self.declare(task="x")
+        with open(os.path.join(self.repo, ".git")) as fh:
+            gitfile = fh.read()
+        with open(os.path.join(self.repo, ".git"), "w") as fh:
+            fh.write("not a gitdir line\n")
+        try:
+            out = self.task("status", cwd=self.primary)
+        finally:
+            with open(os.path.join(self.repo, ".git"), "w") as fh:
+                fh.write(gitfile)
+        self.assertIn("cannot be read", out.stdout)
+        self.assertIn("not known to be clean", out.stdout)
+
+    def test_a_foreign_worktree_names_its_task(self):
+        other = os.path.join(self.tmp, "other")
+        git(self.primary, "worktree", "add", "-q", other, "-b", "feat/other")
+        self.declare(task="mine")
+        self.declare(task="theirs", session="session-b", worktrees=[other])
+        out = self.task("status")
+        self.assertIn(f"  {other}  branch feat/other  foreign: task theirs", out.stdout)
+        self.assertNotIn("orphan", out.stdout)
+        self.assertNotIn(f"  {self.repo}  branch main  ", out.stdout.split("other worktrees")[1])  # its own, above
+
+    def test_an_opened_clone_and_whether_it_is_ready_to_release(self):
+        self.env["AGENTKEEL_SCRATCH"] = os.path.join(self.tmp, "scratch")
+        out = self.task("open", "t", "--host", "codex", "--size", "small", "--allow", "implement", "--print",
+                        session=None, cwd=self.primary)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        clone = os.path.join(self.tmp, "primary-t")
+        out = self.task("status", session=None)
+        self.assertIn(f"  t  {clone}  branch feat/t  ready to release", out.stdout)
+        with open(os.path.join(clone, "loose.txt"), "w") as fh:
+            fh.write("x")
+        before = self.snapshot()
+        out = self.task("status", session=None)
+        self.assertIn(f"  t  {clone}  branch feat/t  not ready to release:", out.stdout)
+        self.assertIn("    - the clone has 1 changed or untracked file(s)", out.stdout)
+        self.assertTrue(os.path.exists(os.path.join(clone, "loose.txt")))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_state_pages_with_state_now_and_claims(self):
+        sha = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        os.makedirs(os.path.join(self.repo, "docs"))
+        with open(os.path.join(self.repo, "docs", "261005-import-state.html"), "w") as fh:
+            fh.write("<title>Import</title><section class='state-now' id='state-now'><dl>"
+                     f"<dt>Implementation</dt><dd>merged {sha} into main; merged feat/x into main</dd>"
+                     "<dt>External checks</dt><dd>App Store review pending</dd></dl></section>")
+        out = self.task("status", session=None)
+        self.assertIn("  docs/261005-import-state.html", out.stdout)
+        self.assertIn("    External checks: App Store review pending", out.stdout)
+        self.assertIn(f"    claim 'merged {sha} into main': proven", out.stdout)
+        self.assertIn("    claim 'merged feat/x into main': unknown", out.stdout)
+
+
 class Init(RepoCase):
     task = TaskCommand.task
     """task.py init: opt in without overwriting policy; installation, opt-in and trust apart."""
