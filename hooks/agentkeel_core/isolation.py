@@ -158,7 +158,7 @@ def codex_args(rec):
             "-c", f'permissions.{name}.extends=":workspace"',
             "-c", f"permissions.{name}.filesystem={table}",
             "-c", f"shell_environment_policy.set.TMPDIR={_toml_str(rec['scratch'])}",
-            "-P", name]
+            "-c", f"default_permissions={_toml_str(name)}"]  # `codex exec` has no -P
 
 
 def launch_argv(rec, environ=os.environ):

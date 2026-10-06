@@ -84,7 +84,8 @@ class Open(RepoCase):
         from agentkeel_core import isolation
         args = isolation.codex_args(self.opened())
         self.assertEqual(args[:2], ["-C", self.clone])
-        self.assertEqual(args[-2:], ["-P", "agentkeel-json-flag"])
+        self.assertEqual(args[-2:], ["-c", 'default_permissions="agentkeel-json-flag"'])
+        self.assertNotIn("-P", args)  # codex exec rejects -P
         table = next(a for a in args if a.startswith("permissions.agentkeel-json-flag.filesystem="))
         self.assertIn('":workspace_roots"={"."="write",".git"="write",".claude"="read"}', table)
         self.assertIn('":tmpdir"="read"', table)
