@@ -162,6 +162,9 @@ def open_cmd(args, environ):
     print(f"  clone:   {rec['clone']} (branch {rec['branch']}, from {rec['base']} at {rec['base_sha'][:12]})")
     print(f"  scratch: {rec['scratch']}")
     print(f"  record:  {isolation.opened_path(rec['task'], environ)}")
+    if sys.platform != "darwin":
+        print("  note:    the session boundary is proven on macOS only. On this platform the read-only rules\n"
+              "           for paths that do not exist yet (.git/commondir) are not proven; see docs/enforcement-design.md.")
     print("  start the session with:")
     print("    cd " + shlex.quote(rec["clone"]) + " && " + " ".join(shlex.quote(a) for a in argv))
     if args.print_only:

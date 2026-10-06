@@ -2,10 +2,10 @@
 
 This page says what each layer can enforce today, on each host, and how AgentKeel closes its two
 largest gaps: shell and script writes outside a task's boundary, and MCP calls that change, publish,
-deploy or spend. It is built in 0.7.1 (`task.py open`, `import`, `release`, the hook launcher, the
+deploy or spend. It is built in 0.8.0 (`task.py open`, `import`, `release`, the hook launcher, the
 evidence hooks and the four MCP adapters), and the live acceptance passed on both hosts. The
-feasibility results come from throwaway repositories on macOS with Claude Code 2.1.290 and Codex
-0.160.0 (2026-10-06); each one names what it proves and what it leaves open.
+feasibility results come from throwaway repositories on macOS with Claude Code 2.1.292 and Codex
+0.160.1 (2026-10-06); each one names what it proves and what it leaves open.
 
 ## Who enforces what, today
 
@@ -126,13 +126,14 @@ safe.
 
 | Writable | Why |
 |---|---|
-| the task's clone, including its `.git` | the work and its commits |
+| the task's clone, including most of its `.git` | the work and its commits |
 | the task's scratch folder, which is also its `TMPDIR` | test and build output, temporary files |
 | declared caches (for example `~/.npm`) | listed in `agentkeel.json` under `"writable"`; nothing by default |
 
 | Not writable | Why |
 |---|---|
 | the shared checkout and its `.git` (objects, refs, config, hooks) | other agents' work and the merge target |
+| in the clone: `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude`, `.gitmodules` | the hosts run their own git in the clone, outside the sandbox (below) |
 | other tasks' clones and scratch folders | isolation between tasks |
 | `AGENTKEEL_HOME` (task records, approvals, opt-in registry, session settings) | a record, approval or boundary the agent could write proves nothing |
 | host settings (`.claude/`, `.codex/`, `~/.codex/config.toml`) | the boundary must not edit itself |
@@ -146,15 +147,17 @@ scratch folder, writes the task record, and starts the host in the clone with th
 boundary. Nothing changes in user or project settings on either host.
 
 - **Claude Code**: `claude --settings <AGENTKEEL_HOME>/sessions/<task>.json`, holding
-  `sandbox.enabled`, `failIfUnavailable: true`, `allowUnsandboxedCommands: false` and
-  `filesystem.allowWrite` for the scratch folder. The working folder (the clone) is writable by
-  default.
+  `sandbox.enabled`, `failIfUnavailable: true`, `allowUnsandboxedCommands: false`,
+  `filesystem.allowWrite` for the scratch folder and `filesystem.denyWrite` for the five guarded
+  paths in the clone. The working folder (the clone) is writable by default.
 - **Codex**: command-line overrides only, measured with no entry in `config.toml`:
   `-c permissions.<task>.extends=":workspace"`, `-c permissions.<task>.filesystem={...}` as one
-  inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the scratch folder set to
-  `write`, `":tmpdir"` and `":slash_tmp"` set to `read`), `-c shell_environment_policy.set.TMPDIR=
-  "<scratch>"`, `-P <task>` and `-C <clone>`. Dotted keys fail for paths that contain a dot, so the
-  table form is required.
+  inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the five guarded paths
+  set to `read`, the scratch folder set to `write`, `":tmpdir"` and `":slash_tmp"` set to `read`),
+  `-c shell_environment_policy.set.TMPDIR="<scratch>"`, `-P <task>` and `-C <clone>`. Dotted keys
+  fail for paths that contain a dot, so the table form is required. A glob in this table accepts
+  only `deny`, and a deny glob under the workspace root stops every folder rename and removal in
+  it (measured), so the guarded paths are exact paths.
 
 Measured on both hosts, two sessions for two tasks at the same time: each wrote its own scratch
 folder and was refused at the other's.
@@ -170,6 +173,36 @@ Measured on both hosts, from inside one task's clone: a write to the clone and t
   Claude Code; the clone's `.codex/` and `~/.codex/config.toml` on Codex)
 - on Codex, a test script and a `python3` placed first on `PATH` inside the clone, both aimed at
   another task's clone (still to repeat on Claude Code)
+
+### The hosts run their own git in the clone
+
+Both hosts run git in the working folder outside the sandbox, with that folder's own config:
+Codex for its git information at each turn, Claude Code at the start of an interactive session
+(both measured on 2026-10-06 with harmless markers). Git runs programs that its config names, and
+the session writes most of its clone's `.git`. So the config a host's git reads must be fixed
+before the session starts and stay out of the session's reach:
+
+- `open` writes `diff.ignoreSubmodules=all` into the clone's config, and `submodule.<name>.ignore=all`
+  for every submodule the repository names, so the host's git never runs inside a nested repository
+  that the index lists. It makes `.gitmodules` exist in the work tree (empty and excluded when the
+  repository has none), because git reads submodule settings from the work tree file first.
+- The sandbox keeps `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude` and
+  `.gitmodules` read-only to the session, on both hosts. The host itself already refuses to rename
+  or replace the `.git` folder.
+
+Measured with `codex sandbox` (the same sandbox a session gets, no model) through the candidate's
+own `open` and profile: 27 ways a session could have put a program into what the host's git reads,
+by editing, renaming, linking, redirecting or nesting, each ended with "Operation not permitted" or
+with git ignoring the nested repository, and the host-side `git status` ran nothing. Commits,
+branches, merges, stash, rebase, cherry-pick, fetch and reset work as before, and commits stay
+signed. The regression tests (`HostGitRunsNothing`) fail on 0.7.1. What the session cannot do any
+more: change its clone's git config (`git push -u` and `git branch -D` print a warning), add a hook,
+or edit `.gitmodules` and `.git/info/exclude`. A repository whose `.gitmodules` differs between
+branches cannot switch between them inside an isolated task.
+
+Open: the rules are proven on macOS. On Linux, Codex expands path rules against existing files, and
+a rule for a path that does not exist yet (`.git/commondir`) is not proven there; `open` says so and
+the isolated-task boundary on Linux stays unverified.
 
 ### Temporary folders
 
@@ -291,18 +324,23 @@ An adapter binds one server's tools to the task's permissions and to its allowed
 tool name and the arguments, never the tool's description or annotations.
 
 - **Classes**: read (passes), remote-write (creates, updates, archives, deletes, resolves, changes
-  settings), paid (bills per call), deploy, publish. Each adapter lists its operations by exact name
+  settings), paid (bills per call), publish (makes something live for end users at once or sends to
+  them), store (changes or submits products in the app stores). Each adapter lists its operations by exact name
   (`hooks/agentkeel_core/mcp_catalog.py`, taken from each server's own catalog). A name it does not
   list is refused, however it is spelled: `get_` or `list` in a name does not make it a read.
 - **Permissions keep their meaning.** Remote writes need a new permission, `remote-write`, scoped to
-  a service and a target. Paid calls need `paid-job`. Deploy and publish each need their own grant:
-  `distribution-build` is not permission to deploy, and `store-submission` is not permission to
-  publish anywhere else. A review task can change nothing.
+  a service and a target. Paid calls need `paid-job`. Publishing needs `publish`, and the store
+  operations need `store-submission`; `remote-write` alone never publishes or submits, and
+  `store-submission` is not permission to publish anywhere else. A review task can change nothing.
+  The adapter sorts by the operation's name: a generic update that can also turn something on
+  through a field (PostHog's `update-feature-flag` with `active`) stays a remote write.
 - **Targets**: `agentkeel.json` names the allowed targets per server (for example one RevenueCat
   project, one PostHog project). A remote write to any other target is refused, even with
   `remote-write`. A paid call that names a target (a Sentry organization) is held to the same list:
   `paid-job` is permission to spend, not permission for every organization. A paid call with no
-  target at all (DataForSEO) needs only `paid-job`.
+  target at all (DataForSEO) needs only `paid-job`. PostHog's tools act on the server's active
+  project and do not name it (only the project tools carry an id), so with specific projects listed
+  a PostHog write is refused with that reason; reads pass, and `"*"` allows every project.
 - **Generic tools**: PostHog's `exec` is classified by its command verb and the listed tool that
   `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
   segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment
@@ -345,29 +383,32 @@ and per-session settings on both hosts. Every feasibility probe is now a test in
 - **No `PostToolUseFailure` entry.** Codex documents no such event, and both hosts read one hooks
   file. On Claude Code a failure sends no `PostToolUse`, so the run stays pending, which counts as
   unrecorded, never passed.
-- **No `deploy` or `publish` permission yet.** None of the four adapters has a deploy or publish
-  action; the permission arrives with the first adapter that needs it.
+- **`publish` exists; `deploy` does not.** RevenueCat's paywall publish and experiment start, and
+  PostHog's publish, launch, ship, enable, roll-out and batch-run tools, need `publish`; RevenueCat's
+  store operations need `store-submission`. No adapter has a deploy action yet.
 - **Project installs.** Their hook scripts live in `.claude/hooks/` inside the repository, and Codex
   trusts a hook's command, not its script, so the Codex task profile keeps `.claude` read-only.
 
-Live acceptance, both hosts, sessions started from `task.py open` with the branch's hooks:
+Live acceptance of 0.8.0 (2026-10-06), both hosts, sessions started from `task.py open` with the
+branch's hooks and synthetic recording servers:
 
 | Check | Claude Code | Codex |
 |---|---|---|
-| Shell write, file-tool write and a signed commit in the task's clone | pass | pass |
-| Shell write to the shared checkout, another task's clone, `AGENTKEEL_HOME` | refused by the sandbox | refused by the sandbox |
-| File-tool write to the shared checkout | refused by the guard | refused by the guard |
-| `task.py import` from the agent | refused by the guard | refused by the guard |
-| Session start binds the session to the opened task | pass | pass |
 | `verify` result | passed | unrecorded (no exit status) |
-| MCP: allowed read and allowed write reach the server | pass | pass, inside `exec` |
-| MCP: other target, unknown action, paid without `paid-job`, refused write in a parallel pair | refused, 0 calls at the server | refused, 0 calls at the server, built name included |
-| `import` then `release` by the human | release refused before import, allowed after | the same |
+| Signed commit in the clone | pass | pass |
+| Paid call on the listed organization; allowed write; paid call with no target | reach the server | reach the server |
+| Paid call on another organization; unknown name | refused, 0 calls | refused, 0 calls |
+| Publish and store calls under `remote-write` alone | refused, 0 calls | refused, 0 calls |
+| Publish and store calls under `publish` and `store-submission` | reach the server | reach the server |
+| Publish call on another project; a plain write under `publish` alone | refused, 0 calls | refused, 0 calls |
+| The session edits its clone's config, adds a `commondir`, writes `.gitmodules` | refused by the sandbox | refused by the sandbox |
+| A planted program run by anything outside the sandbox | none | none |
+| The human's profile reaches the session | yes | yes |
+| The stop report runs at the end of the turn | yes (its state file) | yes (its state file) |
 
-The live runs above used 0.7.0. The 0.7.1 corrections (inspection without the repository's config,
-release that fails closed, the import lock, the exact-name catalog and targets for paid calls) are
-tested through the real launcher and commands, each test proven to fail on 0.7.0; they were not run
-again in live host sessions.
+Not shown live: the stop report's message in the hosts' interactive views (`claude -p` and
+`codex exec` print no system messages), and `import` and `release` of these clones (the guard
+refuses them from an agent session, as designed; the unit tests run them through the real commands).
 
 **Open: shipping from an isolated session.** Inside the sandbox the agent cannot move the shared
 `main` or push from the shared checkout, so a task opened with `task.py open` ships through the
