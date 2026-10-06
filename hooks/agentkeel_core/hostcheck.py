@@ -56,17 +56,29 @@ def claude(repo, environ=os.environ):
     res = _run(["claude", "plugin", "list", "--json"], repo, environ)
     if res is None:
         return out
+    out["cli"] = True
     try:
         entries = json.loads(res.stdout)
     except Exception:
         return out
-    out["cli"] = True
-    mine = [e for e in entries if isinstance(e, dict) and e.get("id") == PLUGIN_ID]
-    out["installed"] = bool(mine) and all(os.path.isdir(e.get("installPath") or "") for e in mine)
-    if mine:
-        e = next((x for x in mine if x.get("enabled") or x.get("projectEnabled")), mine[0])
-        out["enabled"] = bool(e.get("enabled") or e.get("projectEnabled"))
-        out["version"], out["scope"] = e.get("version"), e.get("scope")
+    # The documented shape is a list of records with a string id; [] means nothing is installed.
+    # Any other shape is evidence of nothing, so every fact stays unknown.
+    if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("id"), str)
+                                                for e in entries):
+        return out
+    mine = [e for e in entries if e["id"] == PLUGIN_ID]
+    if not mine:
+        out["installed"] = False
+        return out
+    paths = [e.get("installPath") for e in mine]
+    if all(isinstance(p, str) and p for p in paths):
+        out["installed"] = all(os.path.isdir(p) for p in paths)
+    flags = [e.get(k) for e in mine for k in ("enabled", "projectEnabled") if k in e]
+    if flags and all(isinstance(f, bool) for f in flags):
+        out["enabled"] = any(flags)
+    e = mine[0]
+    out["version"] = e.get("version") if isinstance(e.get("version"), str) else None
+    out["scope"] = e.get("scope") if isinstance(e.get("scope"), str) else None
     return out
 
 
@@ -116,9 +128,11 @@ def codex(repo, environ=os.environ):
         if row is None:
             out["installed"] = False if "No plugins found" in res.stdout else UNKNOWN
         else:
-            status = [w.strip() for w in row[0].split(",")]
-            out["installed"] = "installed" in status
-            out["enabled"] = True if "enabled" in status else False if "disabled" in status else UNKNOWN
+            status = [w.strip() for w in row[0].split(",") if w.strip()]
+            known = {"installed", "not installed", "enabled", "disabled"}
+            if status and set(status) <= known:
+                out["installed"] = "installed" in status
+                out["enabled"] = True if "enabled" in status else False if "disabled" in status else UNKNOWN
             out["version"] = row[1] or None
     data = _toml(os.path.join(codex_dir(environ), "config.toml"), environ)
     if data is not None:

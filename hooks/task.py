@@ -399,11 +399,15 @@ def init(args, environ):
     c = hostcheck.claude(top, environ)
     if not c["cli"]:
         state = "unknown: the claude command was not found or did not answer"
+    elif c["installed"] is None:
+        state = "install state unknown: claude plugin list --json gave an unexpected answer"
     elif not c["installed"]:
         state = "plugin not installed: claude plugin install agentkeel@agentkeel"
     else:
-        state = f"plugin {c['version']} installed ({c['scope']} scope), " + (
-            "enabled" if c["enabled"] else "not enabled: claude plugin enable agentkeel@agentkeel")
+        state = (f"plugin {c['version'] or '(version unknown)'} installed"
+                 + (f" ({c['scope']} scope)" if c["scope"] else "") + ", "
+                 + {True: "enabled", False: "not enabled: claude plugin enable agentkeel@agentkeel"}.get(
+                     c["enabled"], "enabled state unknown"))
     if c["project_install"]:
         state += "; a project install is in .claude/settings.json" + (
             ": use one way per repository, not both" if c["installed"] and c["enabled"] else "")

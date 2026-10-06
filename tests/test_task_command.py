@@ -338,6 +338,37 @@ class Init(RepoCase):
         self.assertIn("codex     plugin not installed: codex plugin add", self.init().stdout)
 
 
+    def claude_says(self, payload):
+        self.fake_cli("claude", payload if isinstance(payload, str) else json.dumps(payload))
+        line = [ln for ln in self.init().stdout.splitlines() if ln.startswith("  claude")]
+        return line[0] if line else ""
+
+    def test_an_unexpected_claude_answer_is_unknown_never_absent(self):
+        """Regression: {} or {"plugins": []} read as "not installed", and null raised TypeError."""
+        self.with_bin()
+        for payload in ({}, {"plugins": []}, None, "not json", [1, 2], [{"version": "0.4.0"}]):
+            line = self.claude_says(payload)
+            self.assertIn("install state unknown: claude plugin list --json gave an unexpected answer", line,
+                          repr(payload))
+        self.assertIn("plugin not installed", self.claude_says([]))
+        self.assertIn("plugin not installed", self.claude_says([{"id": "other@other", "enabled": True}]))
+
+    def test_missing_claude_state_fields_stay_unknown(self):
+        self.with_bin()
+        install = os.path.join(self.tmp, "cache", "0.4.0"); os.makedirs(install)
+        base = {"id": "agentkeel@agentkeel", "version": "0.4.0", "scope": "user", "installPath": install}
+        self.assertIn("installed (user scope), enabled state unknown", self.claude_says([base]))
+        self.assertIn("installed (user scope), enabled state unknown", self.claude_says([{**base, "enabled": "yes"}]))
+        self.assertIn("install state unknown", self.claude_says([{**base, "enabled": True, "installPath": None}]))
+        self.assertIn("installed (user scope), enabled", self.claude_says([{**base, "enabled": True}]))
+        self.assertIn("not enabled: claude plugin enable", self.claude_says([{**base, "enabled": False}]))
+
+    def test_an_unfamiliar_codex_status_is_unknown(self):
+        self.with_bin()
+        self.fake_cli("codex", "PLUGIN               STATUS                  VERSION  SOURCE\n"
+                               "agentkeel@agentkeel  installed, quarantined  0.4.0    ./\n")
+        self.assertIn("install state unknown: codex plugin list did not show", self.init().stdout)
+
     def test_init_outside_a_repository_is_refused(self):
         out = self.task("init", cwd=self.tmp)
         self.assertEqual(out.returncode, 2); self.assertIn("not inside a git repository", out.stderr)
