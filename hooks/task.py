@@ -425,8 +425,7 @@ def init(args, environ):
             True: "enabled", False: "disabled"}.get(x["enabled"], "enabled state unknown")
     if x["installed"] is not False:
         if x["trusted"] is None:
-            state += ("; trust unknown: reading ~/.codex/config.toml needs Python 3.11 or newer (tomllib),"
-                      " so check /hooks in codex")
+            state += f"; trust unknown: {x['trust_unknown_because']}, so check /hooks in codex"
         else:
             state += f"; {x['trusted']}" + (f" of {want}" if want else "") + " hooks trusted (hashes not re-verified)"
             if not want or x["trusted"] < want:

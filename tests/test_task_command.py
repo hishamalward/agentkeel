@@ -209,6 +209,7 @@ class Init(RepoCase):
         os.makedirs(os.path.join(self.claude_dir, "plugins")); os.makedirs(self.codex_dir)
         self.env.update({"CLAUDE_CONFIG_DIR": self.claude_dir, "CODEX_HOME": self.codex_dir})
         self.policy = os.path.join(self.primary, "agentkeel.json")
+        self.with_bin()  # no real claude or codex: every host fact in these tests is staged
 
     def init(self):
         return self.task("init", cwd=self.primary)
@@ -218,6 +219,9 @@ class Init(RepoCase):
                               capture_output=True, text=True).stdout.strip()
 
     def test_first_init_creates_the_file_registers_and_does_not_commit(self):
+        self.with_bin()
+        self.fake_cli("claude", "[]")
+        self.fake_cli("codex", "No plugins found in marketplace `agentkeel`.\n")
         before = self.commits()
         out = self.init()
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -275,7 +279,15 @@ class Init(RepoCase):
     def with_bin(self):
         self.bin = os.path.join(self.tmp, "bin")
         os.makedirs(self.bin, exist_ok=True)
-        self.env["PATH"] = self.bin + os.pathsep + os.environ.get("PATH", "")
+        self.env["PATH"] = os.pathsep.join([self.bin, os.path.dirname(shutil.which("git")), "/usr/bin", "/bin"])
+
+    def test_no_codex_configuration_means_no_trust_not_an_old_python(self):
+        """Regression (CI at 9c0b309): a missing config.toml was blamed on the Python version."""
+        self.fake_cli("codex", "PLUGIN               STATUS              VERSION  SOURCE\n"
+                               "agentkeel@agentkeel  installed, enabled  0.4.0    ./\n")
+        out = self.init().stdout
+        self.assertIn("0 of 5 hooks trusted", out)
+        self.assertNotIn("Python 3.11", out)
 
     def test_a_policy_created_after_an_absence_check_is_kept_byte_for_byte(self):
         """Regression: init checked exists() and then opened with "w", so a policy written in

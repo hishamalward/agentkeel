@@ -96,31 +96,29 @@ def _codex_row(text):
 
 
 def _toml(path, environ):
-    """The parsed file as a dict, or None when no TOML parser is available or it does not parse."""
-    if not os.path.exists(path):
-        return None
+    """(the parsed file as a dict, None) or (None, why it could not be read)."""
     try:
         import tomllib
         with open(path, "rb") as fh:
-            return tomllib.load(fh)
+            return tomllib.load(fh), None
     except ImportError:
         pass
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"~/.codex/config.toml did not parse ({type(e).__name__})"
     for name in ("python3.14", "python3.13", "python3.12", "python3.11"):
         res = _run([name, "-c", TOML_TO_JSON, path], None, environ, timeout=20)
         if res is not None:
             try:
-                return json.loads(res.stdout)
+                return json.loads(res.stdout), None
             except Exception:
-                return None
-    return None
+                break
+    return None, "reading ~/.codex/config.toml needs Python 3.11 or newer (tomllib)"
 
 
 def codex(repo, environ=os.environ):
     """{'cli': bool, 'installed', 'enabled', 'version', 'trusted': int|None, 'project_install'}"""
     out = {"cli": False, "installed": UNKNOWN, "enabled": UNKNOWN, "version": None, "trusted": UNKNOWN,
-           "project_install": project_install(repo, os.path.join(".codex", "hooks.json"))}
+           "trust_unknown_because": None, "project_install": project_install(repo, os.path.join(".codex", "hooks.json"))}
     res = _run(["codex", "plugin", "list", "-m", "agentkeel"], repo, environ)
     if res is not None:
         out["cli"] = True
@@ -134,7 +132,11 @@ def codex(repo, environ=os.environ):
                 out["installed"] = "installed" in status
                 out["enabled"] = True if "enabled" in status else False if "disabled" in status else UNKNOWN
             out["version"] = row[1] or None
-    data = _toml(os.path.join(codex_dir(environ), "config.toml"), environ)
+    config = os.path.join(codex_dir(environ), "config.toml")
+    if not os.path.exists(config):
+        out["trusted"] = 0  # no configuration file holds no trust entries
+        return out
+    data, out["trust_unknown_because"] = _toml(config, environ)
     if data is not None:
         state = ((data.get("hooks") or {}).get("state") or {})
         out["trusted"] = sum(1 for k, v in state.items()
