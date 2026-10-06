@@ -25,14 +25,14 @@ A repository opts in with `"docs": "html"` in `agentkeel.json` (the agent's file
 | `...-mockup.html` | a design exploration; bespoke layout welcome |
 | `...-asset.<ext>` | a supporting file; an HTML asset is checked like a page (links, Working section) |
 | `keel.css` | the shared look; pages link `./keel.css` and may add their own styles |
-| `index.html` | derived by `task.py index`; never committed |
+| `index.html` | derived by `task.py index` (see [the index](#the-index)); never committed |
 
-The date is the family's creation date and never changes; related files reuse it, so a family sorts together. Names are lowercase kebab-case, the kind last. No subfolders. A repository can list legacy paths in `"docs_legacy"` (globs) while it migrates.
+The date is the family's creation date and never changes; related files reuse it, so a family sorts together. Names are lowercase kebab-case, the kind last. No subfolders. A repository can list legacy paths in `"docs_legacy"` (globs): those files stay as history, the check skips them, and the index links them.
 
 ### The page contract
 
 - A `<title>`, readable semantic HTML for the content, and stable `id`s on sections worth linking.
-- A state page keeps a fixed **State now** block: implementation, release and external checks, each with its source and date.
+- A state page keeps a fixed **State now** block: implementation, release and external checks, each with its source and date. It is `<section class="state-now" id="state-now">` with one `<dt>`/`<dd>` pair per line (the starter's form), or a section headed "State now" that holds a two-column table, one row per line.
 - **Remaining scope** holds outstanding outcomes from the start of phased work and is updated in place as phases land.
 - A **Working** section, `<section data-keel-transient="working">`, holds this phase's plan table, progress and next action. It is overwritten, never appended, and removed before `main` moves (`task.py finish <page>`).
 - A **boundary**, `<section data-keel-boundary>`, holds what the human agreed: outcome, constraints, acceptance checks, and for a large task its `data-keel-changes` and `data-keel-must-not` path lists. At most one per page; static HTML only.
@@ -50,6 +50,18 @@ The human runs `task.py approve <feature|page>` in their own terminal. It writes
 
 `task.py context <page>` prints the page as structured text: headings, list items, table rows, link targets, section ids and the marked sections. Styles and scripts are skipped, nothing runs, and nothing is written. Agents read with it and edit the HTML itself.
 
+### Claims the check proves
+
+In a State now line, text of the form `merged <full-sha> into <ref>` (a 40 or 64 hex commit id; `<ref>` a branch such as `main`) is a claim git can check. Each run judges it again, with read-only plumbing only (`cat-file`, `rev-parse`, `merge-base --is-ancestor`), so nothing refreshes the index or runs a filter:
+
+| Result | When | Effect |
+|---|---|---|
+| proven | the commit is an ancestor of `<ref>` (`refs/heads/<ref>`, else `refs/remotes/origin/<ref>`), or of the candidate commit being checked (the page lands only with the candidate, so the claim is true once it lands); with no `--rev`, the candidate is `HEAD` | none |
+| contradiction | the commit exists here and is an ancestor of neither | the docs check fails |
+| unknown | the commit is not in the object store (a shallow clone), the ref does not resolve and the candidate does not hold the commit, the history is shallow, or the text names a branch or a short id instead of a full commit id (`merged feat/x into main`) | a warning; it never fails |
+
+A branch name is never evidence: a branch moves and can be deleted, a commit id cannot. A merged commit stays proven after its branch gains commits or is deleted. Any other text, an authored outside fact such as "App Store review pending", is not a claim and is never touched.
+
 ### The docs check
 
 One validator, `hooks/agentkeel_core/pages.py`, runs in three places on the candidate commit, compared with what `main` holds now:
@@ -58,11 +70,20 @@ One validator, `hooks/agentkeel_core/pages.py`, runs in three places on the cand
 - The task guard, before an agent's push to a protected branch and before a local move whose new commit is known (`merge --ff-only`, `reset`, `update-ref`, `fetch .`, `push .`). The move names its commit by full SHA and runs alone in its call, so the commit checked is the commit that lands: `git merge --ff-only <full-sha>`. A branch name, `HEAD` or an earlier command in the same call is refused. When the check cannot run, the move is refused.
 - CI: the `docs` job of `templates/ci/required-checks.yml` runs on every push and pull request, docs-only changes included, and `agentkeel-required` is red unless it succeeds.
 
-It fails on: a misnamed file or a subfolder in `docs/`; a committed index; two state pages for one feature or two project canons; a page with no title; a Working section; a boundary that is unapproved, changed, malformed or scripted; approval data with no boundary; an approved page dropped or renamed; a local link or anchor that does not resolve; a `DECISIONS.md` or a path listed under `"retired"`.
+It fails on: a misnamed file or a subfolder in `docs/`; a committed index; two state pages for one feature or two project canons; a page with no title; a Working section; a boundary that is unapproved, changed, malformed or scripted; approval data with no boundary; an approved page dropped or renamed; a local link or anchor that does not resolve; a `DECISIONS.md` or a path listed under `"retired"`; a State now claim that git contradicts. An unknown claim is printed as a warning.
 
 ### Starting a page
 
-`task.py new state|reference|audit|mockup|project <family>` writes a starter page in the task's own worktree (it needs `implement`), and `keel.css` when missing. A large task's state page starts with a boundary. A feature that already has a state page is refused: edit it. A later page of a family reuses the family's first date, so its files sort together; the page itself shows the day it was created. `task.py index` groups each family's pages, qualifiers included, under one heading.
+`task.py new state|reference|audit|mockup|project <family>` writes a starter page in the task's own worktree (it needs `implement`), and `keel.css` when missing. A large task's state page starts with a boundary. A feature that already has a state page is refused: edit it. A later page of a family reuses the family's first date, so its files sort together; the page itself shows the day it was created.
+
+### The index
+
+`task.py index [--full]` writes `docs/index.html` and prints the same index as plain text for an agent to read. Both are derived from the working folder at each run and never stored, so they replace a hand-kept index and status page:
+
+- Each family under one heading, qualifiers included, the project canon first. Each page shows its kind, title, boundary state and a working tag; each state page shows its State now lines as the page says them now.
+- The legacy files (`"docs_legacy"` globs) grouped by folder. In `index.html` each is a link with its title: the first Markdown heading, or the HTML `<title>`, else the file name. The text lists each folder with its file count; `--full` also lists every file with its title.
+
+The index code lives in `pages.py`, so a repository's clean checkout runs it from its CI copy without the plugin: `python3 .github/agentkeel/pages.py index --root .` (`--full` too).
 
 ## Remaining scope
 

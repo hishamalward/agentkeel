@@ -18,7 +18,7 @@ Four hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A hook r
 | `plan-gate-guard.py` | before a subagent dispatch | a third gate dispatch for the same plan; on Codex, a third `plan_gate*` task name per task |
 | `plan-size-guard.sh` | after a file edit | nothing; it reports a Working section over 300 lines |
 | `session-start.py` | session start, plugin only | nothing; it prints the task command's real path and the session id |
-| `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, and starts, reads, finishes and checks docs pages. `approve` is the human's. |
+| `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, reports status, and starts, reads, finishes, checks and indexes docs pages. `approve` is the human's. |
 
 ## Protections
 
