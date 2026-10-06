@@ -61,8 +61,10 @@ does not appear in `git worktree list`, the ownership, resume and cleanup behavi
 - **Resume**: a resumed or new session for the same task opens the same clone from the record.
 - **Cleanup**: `task.py release` (P4) deletes a clone only after these checks, made at the moment of
   deletion and under the lock that `import` also takes, so that no import runs at the same time:
-  1. the folder is the one `task.py open` made: the record keeps its device and inode, and a
-     folder that is not the clone is never deleted, not even with `--discard`
+  1. the folder is the one `task.py open` made: the record keeps its device and inode and a random
+     id that `open` wrote into the clone's `.git`, and both must match, because a file system can
+     give a new folder the old inode number (measured on Linux). A folder that is not proven to be
+     the clone is never deleted, not even with `--discard`
   2. no process works in the clone, and the process list itself was read
   3. the clone's current tip is reachable from a ref in the shared repository: a branch, or
      `refs/agentkeel/accepted/<task>`; an earlier import of an older commit is not enough

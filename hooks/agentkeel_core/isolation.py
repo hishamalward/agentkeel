@@ -16,12 +16,14 @@ every other task's folders unwritable to the session's commands; see docs/enforc
 import json
 import os
 import re
+import secrets
 import stat
 import subprocess
 import time
 
 from . import gitops, record, repostate
 
+CLONE_ID_FILE = "agentkeel-clone-id"
 TASK_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOSTS = ("claude", "codex")
 
@@ -123,10 +125,13 @@ def open_task(repo, task, host, size, permissions, base=None, branch=None, path=
     scratch = os.path.join(scratch_root(environ), f"{os.path.basename(top)}-{task}")
     os.makedirs(scratch, exist_ok=True)
     st = os.lstat(clone)
+    token = secrets.token_hex(16)
+    with open(os.path.join(clone, ".git", CLONE_ID_FILE), "w") as fh:
+        fh.write(token + "\n")
     rec = {"version": 1, "task": task, "host": host, "size": size,
            "permissions": sorted(set(permissions)), "repo": top,
            "repo_common_dir": gitops.common_dir(top), "clone": clone, "branch": branch,
-           "base": base, "base_sha": base_sha, "scratch": scratch, "clone_id": [st.st_dev, st.st_ino],
+           "base": base, "base_sha": base_sha, "scratch": scratch, "clone_id": [st.st_dev, st.st_ino], "clone_token": token,
            "writable": _policy_writable(top), "opened_at": int(time.time()), "sessions": []}
     record.atomic_write_json(opened_path(task, environ), rec)
     if host == "claude":
@@ -310,8 +315,10 @@ def release_problems(rec):
 
 
 def identity_problem(rec):
-    """None when the folder at the recorded path is the clone `open` made, else why it is not.
-    A folder that is not the clone is never deleted, even with --discard."""
+    """None when the folder at the recorded path is the clone `open` made, else why it is not
+    proven to be. Two proofs: the folder's device and inode (a file system can reuse an inode
+    number for a new folder) and the random id `open` wrote into its .git. A folder that is not
+    proven to be the clone is never deleted, even with --discard."""
     clone = rec.get("clone") or ""
     home = os.path.realpath(os.path.expanduser("~"))
     repo = os.path.realpath(rec.get("repo") or "/")
@@ -324,8 +331,14 @@ def identity_problem(rec):
     if not stat.S_ISDIR(st.st_mode):
         return f"{clone} is not a folder"
     want = rec.get("clone_id")
-    if want and [st.st_dev, st.st_ino] != list(want):
+    if not want or [st.st_dev, st.st_ino] != list(want):
         return f"{clone} is not the folder task.py open made (another folder now has its name)"
+    try:
+        token = repostate._read(os.path.join(clone, ".git", CLONE_ID_FILE)).strip()
+    except repostate.InspectError:
+        token = None
+    if not rec.get("clone_token") or token != rec["clone_token"]:
+        return f"{clone} is not proven to be the folder task.py open made: its .git lacks the id open wrote"
     return None
 
 
@@ -347,9 +360,6 @@ def release_task(task, discard=False, environ=os.environ):
             busy = active_processes(clone)
             if busy:
                 raise OpenError(f"processes still work in {clone} (pid {', '.join(busy)}): end the session first")
-            if not rec.get("clone_id"):
-                problems.append("the task record predates clone identity checks, so the folder is not proven "
-                                "to be the clone")
             problems += release_problems(rec)
             if problems and not discard:
                 raise OpenError("not released, so no work is lost:\n  " + "\n  ".join(problems)

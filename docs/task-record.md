@@ -81,7 +81,7 @@ clone's branch with a fixed git and accepts it as `refs/agentkeel/accepted/<task
 exactly that commit; nothing else moves. `task.py release <task>` deletes the clone, scratch folder
 and records. It refuses while a process works in the clone, while its tip, a branch, a stash entry
 or a changed, staged or untracked file is not preserved in the shared repository, and while any of
-this cannot be read; `--discard` deletes anyway. It never deletes a folder that is not the clone
-`open` made, not even with `--discard`. `import` and `release` take the same lock.
+this cannot be read; `--discard` deletes anyway. It never deletes a folder that is not proven to be
+the clone `open` made (its inode and the id `open` wrote into its `.git`), not even with `--discard`. `import` and `release` take the same lock.
 
 `commands` adds regular expressions to a permission's built-in list; they are matched against the command's words, both as typed and with `npx`/`bunx` removed.

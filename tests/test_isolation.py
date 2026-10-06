@@ -335,6 +335,10 @@ class ImportAndRelease(RepoCase):
         git(self.clone, "commit", "-q", "--allow-empty", "-m", msg)
         return subprocess.run(["git", "-C", self.clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
 
+    def opened_record(self):
+        with open(os.path.join(self.home, "opened", "t.json")) as fh:
+            return json.load(fh)
+
     def ref(self, name):
         p = subprocess.run(["git", "-C", self.primary, "rev-parse", "-q", "--verify", name], capture_output=True, text=True)
         return p.stdout.strip() or None
@@ -457,13 +461,18 @@ class ImportAndRelease(RepoCase):
 
     def test_release_keeps_a_clone_it_cannot_read(self):
         import shutil
-        shutil.rmtree(os.path.join(self.clone, ".git"))
+        for part in ("objects", "refs"):
+            shutil.rmtree(os.path.join(self.clone, ".git", part))
         with open(os.path.join(self.clone, "work.txt"), "w") as fh:
             fh.write("unsaved")
         out = self.human("release", "t")
         self.assertEqual(out.returncode, 2); self.assertIn("could not be inspected", out.stderr)
         self.assertTrue(os.path.exists(os.path.join(self.clone, "work.txt")))
         self.assertTrue(os.path.exists(os.path.join(self.home, "opened", "t.json")))
+        shutil.rmtree(os.path.join(self.clone, ".git"))  # no .git at all: not proven to be the clone
+        out = self.human("release", "t", "--discard")
+        self.assertEqual(out.returncode, 2); self.assertIn("not proven", out.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.clone, "work.txt")))
 
     def test_release_keeps_a_clone_with_a_corrupt_head(self):
         with open(os.path.join(self.clone, ".git", "HEAD"), "w") as fh:
@@ -493,7 +502,14 @@ class ImportAndRelease(RepoCase):
         with open(os.path.join(self.clone, "someone-elses.txt"), "w") as fh:
             fh.write("x")
         out = self.human("release", "t", "--discard")
-        self.assertEqual(out.returncode, 2); self.assertIn("not the folder task.py open made", out.stderr)
+        self.assertEqual(out.returncode, 2); self.assertIn("the folder task.py open made", out.stderr)
+        rec = self.opened_record()  # a file system may give the new folder the old inode number
+        st = os.lstat(self.clone)
+        rec["clone_id"] = [st.st_dev, st.st_ino]
+        with open(os.path.join(self.home, "opened", "t.json"), "w") as fh:
+            json.dump(rec, fh)
+        out = self.human("release", "t", "--discard")
+        self.assertEqual(out.returncode, 2); self.assertIn("the folder task.py open made", out.stderr)
         self.assertTrue(os.path.exists(os.path.join(self.clone, "someone-elses.txt")))
 
     def test_import_waits_for_the_release_lock(self):
