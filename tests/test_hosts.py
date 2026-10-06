@@ -228,7 +228,13 @@ class SessionOwnership(RepoCase):
         from helpers import HOOKS
         out = subprocess.run([sys.executable, os.path.join(HOOKS, "session-start.py")], text=True, capture_output=True,
                              input=json.dumps(fixture("codex", "session-start") | {"cwd": self.repo}), env={**os.environ, **self.env})
-        self.assertIn("AGENTKEEL_SESSION_ID=" + fixture("codex", "session-start")["session_id"], out.stdout)
+        sid = fixture("codex", "session-start")["session_id"]
+        self.assertIn(f"Your session id is {sid}", out.stdout)
+        # Regression (pilot P1, 2026-10-06): offering "AGENTKEEL_SESSION_ID=<id> python3 task.py" made
+        # agents prefix every declaration, which no host permission rule matches, so each new
+        # session asked the human again. The prefix is task.py's own fallback, not the default.
+        self.assertNotIn("AGENTKEEL_SESSION_ID=", out.stdout)
+        self.assertIn("with nothing in front of python3", out.stdout)
 
 
 class PlanSizeOnCodex(unittest.TestCase):

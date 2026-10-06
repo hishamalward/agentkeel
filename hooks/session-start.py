@@ -111,8 +111,10 @@ def main():
           "Code changes happen in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>).\n"
           f'Docs pages (where agentkeel.json sets "docs": "html"): read with python3 "{task}" context <page>,\n'
           "start one with task.py new; plan and progress go in the page's Working section."
-          + (f"\nYour session id is {payload['session_id']}. If task.py says it cannot tell which session\n"
-             f"runs it, prefix the command with AGENTKEEL_SESSION_ID={payload['session_id']}"
+          + (f"\nRun task.py exactly as shown, with nothing in front of python3: the host's permission\n"
+             "rules match the command as written. Your session id is "
+             f"{payload['session_id']}; you need it only if\n"
+             "task.py itself says it cannot tell which session runs it, and then it tells you how to give it."
              if payload.get("session_id") else ""))
     return 0
 

@@ -65,7 +65,9 @@ claude plugin install agentkeel@agentkeel
 
 In a session, the same commands are `/plugin marketplace add hishamalward/agentkeel` and
 `/plugin install agentkeel@agentkeel`. Claude Code runs the plugin's hooks with no further trust
-step.
+step. The first time an agent declares a task, Claude Code asks you to allow the `task.py` command;
+allow it always, and later sessions do not ask again (an update to a new version asks once more,
+because the path includes the version).
 
 ### Codex
 
@@ -84,8 +86,8 @@ Installing the plugin makes AgentKeel available; opting a repository in turns it
 
 ```bash
 cd path/to/your-repo
-python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.5.0/hooks/task.py init   # Claude Code
-python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.5.0/hooks/task.py init    # Codex
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py init    # Codex
 ```
 
 `init` creates `agentkeel.json` only when it is missing, and never changes an existing one. It
@@ -128,8 +130,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.5.0/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.5.0/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it. The same message says where the session is (the
 checkout, its branch, its task) and lists the repository's other worktrees with the task that
 holds each.
