@@ -259,7 +259,8 @@ def _reachable_in_repo(repo, sha):
     return bool(out.strip())
 
 
-LSOF = "/usr/sbin/lsof"
+# a fixed system path, never the session's PATH: macOS keeps lsof in /usr/sbin, Linux in /usr/bin
+LSOF = next((p for p in ("/usr/sbin/lsof", "/usr/bin/lsof") if os.path.exists(p)), "/usr/sbin/lsof")
 
 
 def active_processes(clone):
