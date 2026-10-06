@@ -15,7 +15,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, record  # noqa: E402
+from agentkeel_core import gitops, isolation, record  # noqa: E402
 
 MAX_OTHERS = 12
 
@@ -98,12 +98,23 @@ def main():
     if record.plugin_inactive(sys.argv, payload):
         return 0
     task = os.path.join(os.path.dirname(os.path.abspath(__file__)), "task.py")
+    cwd = payload.get("cwd") or os.getcwd()
     try:
-        here = where(payload.get("cwd") or os.getcwd(), payload.get("session_id"))
+        opened = isolation.bind(payload.get("session_id"), cwd)
+    except Exception:
+        opened = None
+    try:
+        here = where(cwd, payload.get("session_id"))
     except Exception:
         here = []
     if here:
         print("\n".join(here) + "\n")
+    if opened:
+        print(f"This session was opened for task '{opened['task']}' with task.py open: it works in its own clone,\n"
+              f"{opened['clone']} (branch {opened['branch']}), and its shell writes only there, in its scratch\n"
+              f"folder {opened['scratch']}, and in declared caches. The task is already declared; do not run\n"
+              "task.py start. The shared checkout and other tasks' folders are outside this session's boundary.")
+        return 0
     print("agentkeel is active in this repository. Before your first write, declare the task from\n"
           "your reading of the request, state that reading in your first update, and proceed:\n"
           f'  python3 "{task}" start <task-id> --size small|medium|large --allow <permissions>\n'

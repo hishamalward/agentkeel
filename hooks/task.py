@@ -3,6 +3,9 @@
 
   task.py init                     opt this repository in: create agentkeel.json if it is missing
                                    (never overwrite it), register the opt-in, report each host
+  task.py open <task-id> --host claude|codex --size S --allow P [--base B] [--branch BR] [--path DIR]
+               [--print]           HUMAN ONLY: make the task's own clone and scratch folder, and
+                                   start the host in the clone with this session's sandbox boundary
   task.py start <task-id> --size small|medium|large --allow <permissions>
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
@@ -33,6 +36,7 @@ terminal of their own, outside the agent session.
 """
 import argparse
 import datetime
+import shlex
 import json
 import os
 import subprocess
@@ -40,7 +44,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, hostcheck, instructions, pages, record, starters  # noqa: E402
+from agentkeel_core import gitops, hostcheck, instructions, isolation, pages, record, starters  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -128,6 +132,31 @@ def start(args, environ):
               f"    git worktree add ../{os.path.basename(top)}-{args.task} -b feat/{args.task}")
     print(f"  record: {path}")
     return 0
+
+
+def open_cmd(args, environ):
+    perms = [p.strip() for p in (args.allow or "").split(",") if p.strip()]
+    unknown = [p for p in perms if p not in record.PERMISSIONS]
+    if not perms or unknown:
+        return fail(f"--allow needs one or more of: {', '.join(record.PERMISSIONS)}"
+                    + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
+    try:
+        rec = isolation.open_task(os.getcwd(), args.task, args.host, args.size, perms, base=args.base,
+                                  branch=args.branch, path=args.path, environ=environ)
+    except isolation.OpenError as exc:
+        return fail(str(exc))
+    argv = isolation.launch_argv(rec, environ)
+    print(f"agentkeel: opened task '{rec['task']}' ({rec['size']}; {', '.join(rec['permissions'])})")
+    print(f"  clone:   {rec['clone']} (branch {rec['branch']}, from {rec['base']} at {rec['base_sha'][:12]})")
+    print(f"  scratch: {rec['scratch']}")
+    print(f"  record:  {isolation.opened_path(rec['task'], environ)}")
+    print("  start the session with:")
+    print("    cd " + shlex.quote(rec["clone"]) + " && " + " ".join(shlex.quote(a) for a in argv))
+    if args.print_only:
+        return 0
+    sys.stdout.flush()
+    os.chdir(rec["clone"])
+    os.execvp(argv[0], argv)
 
 
 def show(args, environ):
@@ -505,6 +534,15 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--write-root", action="append")
     s.add_argument("--worktree", action="append")
     s.add_argument("--resource", action="append")
+    o = sub.add_parser("open")
+    o.add_argument("task")
+    o.add_argument("--host", required=True, choices=isolation.HOSTS)
+    o.add_argument("--size", required=True, choices=record.SIZES)
+    o.add_argument("--allow", required=True)
+    o.add_argument("--base")
+    o.add_argument("--branch")
+    o.add_argument("--path")
+    o.add_argument("--print", dest="print_only", action="store_true")
     sub.add_parser("show")
     sub.add_parser("init")
     v = sub.add_parser("verify")
@@ -529,7 +567,7 @@ def main(argv=None, environ=os.environ):
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"init": init, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
+    handlers = {"init": init, "open": open_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
                 "context": context, "finish": finish, "check": check, "index": index}
     if args.action not in handlers:
         p.print_help()

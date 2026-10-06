@@ -160,7 +160,8 @@ def judge_edit(ev, rec, environ):
             "Temp files go in the task's scratch folder. If this path is really part of the task,\n"
             "re-declare with --write-root <folder>.")
     owned_repos = {gitops.common_dir(w) for w in rec.get("worktrees") or [] if os.path.isdir(w)}
-    if gitops.is_primary(root) and (not owned_repos or gitops.common_dir(root) in owned_repos):
+    own_clone = bool(rec.get("clone")) and root == os.path.realpath(rec["clone"])
+    if not own_clone and gitops.is_primary(root) and (not owned_repos or gitops.common_dir(root) in owned_repos):
         raise Block(
             f"refusing to write {target}: {root} is the repository's shared checkout.\n"
             "Every code task, small ones included, works in its own worktree, so the shared checkout\n"
@@ -292,11 +293,18 @@ def normalise(argv):
     return argv
 
 
-def is_task_approve(argv):
+def human_task_command(argv):
+    """'approve' or 'open' when the line runs one of task.py's human-only commands, else None."""
     for i, tok in enumerate(argv):
-        if os.path.basename(tok) == "task.py" and "approve" in argv[i + 1:i + 4]:
-            return True
-    return False
+        if os.path.basename(tok) == "task.py":
+            for word in ("approve", "open"):
+                if word in argv[i + 1:i + 4]:
+                    return word
+    return None
+
+
+def is_task_approve(argv):
+    return human_task_command(argv) == "approve"
 
 
 def need(rec, perm, what):
@@ -542,10 +550,15 @@ def judge_command(command, cwd, rec, environ, session, line=None):
         if not argv:
             continue
         judge_session_claim(sc, session)
-        if is_task_approve(sc.argv):
+        human = human_task_command(sc.argv)
+        if human == "approve":
             raise Block(
                 "`task.py approve` is the human's command (gate G1): an approval the agent can\n"
                 "produce is not the human's consent. Ask the human to run it in their own terminal.")
+        if human == "open":
+            raise Block(
+                "`task.py open` is the human's command: it sets the write boundary of a new session,\n"
+                "and a boundary the agent chooses for itself proves nothing. Ask the human to run it.")
         if argv[0] == "git" or "--dry-run" in argv:
             if argv[0] == "git":
                 judge_git(sc, rec, environ, session, line)
