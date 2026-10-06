@@ -8,7 +8,8 @@ from helpers import HOOKS, SESSION, RepoCase, git, run_hook
 import test_task_command
 
 
-class Open(RepoCase):
+class OpenCase(RepoCase):
+    """A repository that opted in, and the human's `task.py open` in it."""
     task = test_task_command.TaskCommand.task
 
     def setUp(self):
@@ -34,6 +35,8 @@ class Open(RepoCase):
                              env={**os.environ, **self.env})
         return out.stdout
 
+
+class Open(OpenCase):
     def test_the_clone_owns_its_objects(self):
         out = self.open()
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -75,6 +78,9 @@ class Open(RepoCase):
         self.assertTrue(sandbox["enabled"] and sandbox["failIfUnavailable"])
         self.assertFalse(sandbox["allowUnsandboxedCommands"])
         self.assertEqual(sandbox["filesystem"]["allowWrite"][0], self.opened()["scratch"])
+        self.assertEqual(sandbox["filesystem"]["denyWrite"],
+                         [os.path.join(self.clone, p) for p in
+                          (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules")])
         self.assertIn(f"claude --settings {settings_path}", out.stdout)
 
     def test_codex_session_arguments(self):
@@ -87,7 +93,9 @@ class Open(RepoCase):
         self.assertEqual(args[-2:], ["-c", 'default_permissions="agentkeel-json-flag"'])
         self.assertNotIn("-P", args)  # codex exec rejects -P
         table = next(a for a in args if a.startswith("permissions.agentkeel-json-flag.filesystem="))
-        self.assertIn('":workspace_roots"={"."="write",".git"="write",".claude"="read"}', table)
+        self.assertIn('":workspace_roots"={"."="write",".git"="write",".claude"="read",".git/config"="read",'
+                      '".git/hooks"="read",".git/commondir"="read",".git/info/exclude"="read",".gitmodules"="read"}',
+                      table)
         self.assertIn('":tmpdir"="read"', table)
         self.assertIn('":slash_tmp"="read"', table)
         self.assertIn(json.dumps(self.opened()["scratch"]) + '="write"', table)
@@ -143,6 +151,95 @@ class Open(RepoCase):
         code, err = self.hook(self.bash(f"python3 {os.path.join(HOOKS, 'task.py')} open x --host claude "
                                         "--size small --allow implement"))
         self.assertEqual(code, 2); self.assertIn("human's command", err)
+
+
+class HostGitRunsNothing(OpenCase):
+    """A host runs its own git in the task's clone, outside the sandbox (Codex: `git status`). The
+    session writes the work tree and most of .git, so `open` fixes what that git can be made to
+    run, and the sandbox profile keeps the session from changing it (the read-only paths above).
+    These tests do what a session can still do inside that boundary."""
+    HOST_STATUS = ("-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null",
+                   "-c", "core.fsmonitor=false", "status", "--porcelain")
+
+    def nested(self, clone, name="sub"):
+        """A nested repository whose own config names programs, listed in the clone's index, with a
+        file git must read again to compare (the same size, a later time): a clean filter runs then."""
+        marker = os.path.join(self.tmp, "host-git-ran")
+        scripts = {}
+        for kind, tail in (("fsmonitor", ""), ("filter", "cat\n")):
+            scripts[kind] = os.path.join(self.tmp, f"planted-{kind}.sh")
+            with open(scripts[kind], "w") as fh:
+                fh.write(f"#!/bin/sh\necho {kind} >> {marker}\n{tail}")
+            os.chmod(scripts[kind], 0o755)
+        sub = os.path.join(clone, name)
+        os.makedirs(sub)
+        git(sub, "init", "-q")
+        git(sub, "config", "core.fsmonitor", scripts["fsmonitor"])
+        git(sub, "config", "filter.planted.clean", scripts["filter"])
+        for path, text in ((".gitattributes", "f filter=planted\n"), ("f", "x\n")):
+            with open(os.path.join(sub, path), "w") as fh:
+                fh.write(text)
+        git(sub, "add", "-A")
+        git(sub, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "nested")
+        git(clone, "add", name)
+        with open(os.path.join(sub, "f"), "w") as fh:
+            fh.write("y\n")
+        later = os.path.getmtime(os.path.join(sub, "f")) + 5
+        os.utime(os.path.join(sub, "f"), (later, later))
+        if os.path.exists(marker):
+            os.remove(marker)  # the session's own git may run them inside the sandbox; the host's must not
+        return marker
+
+    def host_status(self, clone):
+        return subprocess.run(["git", "-C", clone, *self.HOST_STATUS], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=60)
+
+    def test_a_nested_repository_runs_nothing(self):
+        self.assertEqual(self.open(host="codex").returncode, 0)
+        marker = self.nested(self.clone)
+        out = self.host_status(self.clone)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(os.path.exists(marker), "the host's git status ran a nested repository's program")
+
+    def test_without_the_settings_the_same_tree_runs_it(self):
+        plain = os.path.join(self.tmp, "plain-clone")
+        subprocess.run(["git", "clone", "-q", "--no-local", self.primary, plain], check=True)
+        marker = self.nested(plain)
+        self.host_status(plain)
+        self.assertTrue(os.path.exists(marker), "this route no longer runs anything: the tests above prove nothing")
+
+    def test_a_gitmodules_entry_in_the_index_or_a_commit_does_not_turn_it_back_on(self):
+        self.assertEqual(self.open(host="codex").returncode, 0)
+        marker = self.nested(self.clone)
+        blob = subprocess.run(["git", "-C", self.clone, "hash-object", "-w", "--stdin"], capture_output=True, text=True,
+                              input='[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = none\n').stdout.strip()
+        git(self.clone, "update-index", "--add", "--cacheinfo", f"100644,{blob},.gitmodules")
+        self.host_status(self.clone)
+        self.assertFalse(os.path.exists(marker), "a .gitmodules in the index re-enabled the nested repository")
+        git(self.clone, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "modules")
+        self.host_status(self.clone)
+        self.assertFalse(os.path.exists(marker), "a committed .gitmodules re-enabled the nested repository")
+        self.assertEqual(os.path.getsize(os.path.join(self.clone, ".gitmodules")), 0)
+
+    def test_a_submodule_the_repository_names_is_ignored_too(self):
+        text = '[submodule "lib"]\n\tpath = lib\n\turl = ./lib\n\tignore = none\n'
+        with open(os.path.join(self.primary, ".gitmodules"), "w") as fh:
+            fh.write(text)
+        git(self.primary, "add", ".gitmodules")
+        git(self.primary, "commit", "-q", "-m", "modules")
+        self.assertEqual(self.open(host="codex").returncode, 0)
+        with open(os.path.join(self.clone, ".gitmodules")) as fh:
+            self.assertEqual(fh.read(), text)
+        marker = self.nested(self.clone, "lib")
+        self.host_status(self.clone)
+        self.assertFalse(os.path.exists(marker), "a submodule the repository names ran its program")
+
+    def test_the_added_gitmodules_is_empty_and_hidden(self):
+        self.assertEqual(self.open().returncode, 0)
+        self.assertEqual(os.path.getsize(os.path.join(self.clone, ".gitmodules")), 0)
+        self.assertEqual(self.host_status(self.clone).stdout, "")
+        from agentkeel_core import repostate
+        self.assertEqual(repostate.inspect(self.clone)["changed"], [])
 
 
 class Evidence(RepoCase):

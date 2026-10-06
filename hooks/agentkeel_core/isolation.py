@@ -24,6 +24,12 @@ import time
 from . import gitops, record, repostate
 
 CLONE_ID_FILE = "agentkeel-clone-id"
+# Read-only to the task's session, inside its clone: what git runs programs from (config, hooks),
+# what redirects where git reads config (commondir), and what sets git's submodule rules
+# (.gitmodules, and the exclude file that hides the one harden_clone adds). A host runs its own git
+# in the clone outside the sandbox, so the session must not be able to change what that git
+# executes. See harden_clone.
+GUARDED = (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules")
 TASK_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOSTS = ("claude", "codex")
 
@@ -98,6 +104,30 @@ def _git(cwd, *args):
     return p.stdout.strip()
 
 
+def harden_clone(clone):
+    """Fix, before the session starts, the git settings it could otherwise use to make git run a
+    program for whoever runs git in the clone outside the sandbox (the host does: Codex runs
+    `git status` there). The sandbox keeps the session from changing these afterwards (GUARDED).
+
+    A nested repository with its own config is the one route that stays inside the writable work
+    tree: git runs `status` inside a nested repository that the index lists, with that repository's
+    config. So git is told to ignore nested repositories when it reports changes, for every path
+    and for every submodule the repository names. A .gitmodules entry could turn that off again for
+    a path, so the file is made to exist: git then reads it from the work tree, where the session
+    cannot write it, and never from the index or a commit, where it can."""
+    _git(clone, "config", "diff.ignoreSubmodules", "all")
+    modules = os.path.join(clone, ".gitmodules")
+    if os.path.lexists(modules):
+        p = subprocess.run(["git", "config", "-z", "-f", modules, "--name-only", "--get-regexp", r"^submodule\..*\.path$"],
+                           capture_output=True, text=True)
+        for key in filter(None, p.stdout.split("\0")):
+            _git(clone, "config", key[:-len(".path")] + ".ignore", "all")
+    else:
+        open(modules, "w").close()
+        with open(os.path.join(clone, ".git", "info", "exclude"), "a") as fh:
+            fh.write("# agentkeel: an empty .gitmodules pins where git reads submodule settings (isolation.py)\n/.gitmodules\n")
+
+
 def open_task(repo, task, host, size, permissions, base=None, branch=None, path=None,
               environ=os.environ):
     """Create the clone, the scratch folder and the opened-task record. Returns the record."""
@@ -122,6 +152,7 @@ def open_task(repo, task, host, size, permissions, base=None, branch=None, path=
     base_sha = _git(top, "rev-parse", "--verify", f"{base}^{{commit}}")
     _git(os.path.dirname(clone), "clone", "-q", "--no-local", "--branch", base, top, clone)
     _git(clone, "switch", "-q", "-c", branch)
+    harden_clone(clone)
     scratch = os.path.join(scratch_root(environ), f"{os.path.basename(top)}-{task}")
     os.makedirs(scratch, exist_ok=True)
     st = os.lstat(clone)
@@ -143,7 +174,8 @@ def claude_settings(rec):
     """Session-only sandbox settings for Claude Code (`claude --settings <file>`). The working
     folder, the clone, is writable by default; the scratch folder and declared caches are added."""
     return {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
-                        "filesystem": {"allowWrite": [rec["scratch"]] + list(rec.get("writable") or [])}}}
+                        "filesystem": {"allowWrite": [rec["scratch"]] + list(rec.get("writable") or []),
+                                       "denyWrite": [os.path.join(rec["clone"], g) for g in GUARDED]}}}
 
 
 def _toml_str(s):
@@ -156,7 +188,8 @@ def codex_args(rec):
     that contains a dot."""
     name = "agentkeel-" + rec["task"]
     # .claude holds a project install's hook scripts; Codex trusts a hook's command, not its file
-    rules = {'":workspace_roots"': '{"."="write",".git"="write",".claude"="read"}',
+    roots = {".": "write", ".git": "write", ".claude": "read", **{g: "read" for g in GUARDED}}
+    rules = {'":workspace_roots"': "{" + ",".join(f"{_toml_str(k)}={_toml_str(v)}" for k, v in roots.items()) + "}",
              _toml_str(rec["scratch"]): '"write"', '":tmpdir"': '"read"', '":slash_tmp"': '"read"'}
     for w in rec.get("writable") or []:
         rules[_toml_str(w)] = '"write"'
