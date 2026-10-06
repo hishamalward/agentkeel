@@ -35,7 +35,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 | `push` | every push to a remote, the task's own branch included; deploy commands (`railway up`, `vercel --prod`, `fly deploy`, `netlify deploy --prod`) |
 | `distribution-build` | `eas build`, `xcodebuild archive`, `fastlane gym` and similar |
 | `store-submission` | `eas submit`, `eas update`, `npm publish`, `fastlane deliver/pilot/supply` |
-| `paid-job` | the command patterns a repository lists in `agentkeel.json`; MCP calls that bill per call (DataForSEO `/live` and `task_post`, Sentry Seer analysis) |
+| `paid-job` | the command patterns a repository lists in `agentkeel.json`; MCP calls that bill per call (DataForSEO `/live` and `task_post`, Sentry Seer analysis, which also needs its organization listed under `mcp`) |
 | `remote-write` | MCP calls that change a guarded service (RevenueCat, PostHog, Sentry), only on a target `agentkeel.json` lists for it; a git push permission does not cover them |
 
 ## Rules
@@ -49,7 +49,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 - **Every code task has its own worktree**, even when you are the only agent, and the guard enforces it: the shared checkout never takes code edits, whatever branch it is on, and `task.py start` there records no worktree. `git worktree add ../<repo>-<task> -b feat/<task>` (recorded as the task's automatically). The protected branch stays clean for merges.
 - **Explicit-path commits**: `git commit -m "..." -- <paths>`. A bare `git commit` commits the whole index, including what another agent staged. Finishing a merge is the one exception (git refuses a partial commit then).
 - **A new task in the same session starts fresh.** Only re-declaring the same task id keeps its worktrees, write roots and evidence.
-- **Evidence**: `task.py verify -- <command>` runs a check; the hooks record its result, not the command. The guard notes the start with `HEAD` and a tree id; the PostToolUse hook records "passed" only for a foreground success that Claude Code reports with `interrupted` false, on unchanged code. A background run, an interrupted run, a run where the code moved, and every Codex run (no exit status reaches its hooks) are unrecorded or stale. A failure leaves the run pending. It is a record, not a gate: shipping is gated by the CI required check.
+- **Evidence**: `task.py verify -- <command>` runs a check; the hooks record its result, not the command. The guard notes the start with `HEAD` and a tree id, read without running anything the repository's config names; the PostToolUse hook records "passed" only for a foreground success that Claude Code reports with `interrupted` false, on unchanged code. A background run, an interrupted run, a run where the code moved, and every Codex run (no exit status reaches its hooks) are unrecorded or stale. A failure leaves the run pending. It is a record, not a gate: shipping is gated by the CI required check.
 - **The human approves a boundary**: `task.py approve <feature|page>` writes the page's `keel-approval` meta (a digest of the boundary, the approver from git `user.name`, the date) and keeps the approved boundary in `AGENTKEEL_HOME/approvals/`. The guard refuses it when the agent runs it, and refuses an agent edit that adds, changes or removes the approval, or that renames or deletes an approved page. The human runs it in a terminal of their own.
 - **`task.py end`** drops the record and lists what the task owned. It does not remove the task's worktrees or slots: cleanup that knows which task owns what is not built yet.
 
@@ -68,7 +68,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 
 `writable` adds caches that a session opened with `task.py open` may write besides its clone and
 scratch folder. `mcp` lists, per guarded service, the targets a `remote-write` task may change
-(`"*"` for any) and, under `"servers"`, other names the host gives that service's server.
+and a `paid-job` call may name (`"*"` for any) and, under `"servers"`, other names the host gives that service's server.
 
 ## A task in its own clone
 
@@ -79,7 +79,9 @@ host in the clone with that session's sandbox boundary. The session start binds 
 task, so the agent does not run `task.py start`. `task.py import <task> --sha <full id>` fetches the
 clone's branch with a fixed git and accepts it as `refs/agentkeel/accepted/<task>` only if it is
 exactly that commit; nothing else moves. `task.py release <task>` deletes the clone, scratch folder
-and records, and refuses while a process works in the clone or while its tip, a branch, a stash or a
-file is not preserved in the shared repository; `--discard` deletes anyway.
+and records. It refuses while a process works in the clone, while its tip, a branch, a stash entry
+or a changed, staged or untracked file is not preserved in the shared repository, and while any of
+this cannot be read; `--discard` deletes anyway. It never deletes a folder that is not the clone
+`open` made, not even with `--discard`. `import` and `release` take the same lock.
 
 `commands` adds regular expressions to a permission's built-in list; they are matched against the command's words, both as typed and with `npx`/`bunx` removed.

@@ -2,7 +2,7 @@
 
 This page says what each layer can enforce today, on each host, and how AgentKeel closes its two
 largest gaps: shell and script writes outside a task's boundary, and MCP calls that change, publish,
-deploy or spend. It is built in 0.7.0 (`task.py open`, `import`, `release`, the hook launcher, the
+deploy or spend. It is built in 0.7.1 (`task.py open`, `import`, `release`, the hook launcher, the
 evidence hooks and the four MCP adapters), and the live acceptance passed on both hosts. The
 feasibility results come from throwaway repositories on macOS with Claude Code 2.1.290 and Codex
 0.160.0 (2026-10-06); each one names what it proves and what it leaves open.
@@ -60,16 +60,25 @@ does not appear in `git worktree list`, the ownership, resume and cleanup behavi
   The session banner and the ownership checks read the task records, not `git worktree list`.
 - **Resume**: a resumed or new session for the same task opens the same clone from the record.
 - **Cleanup**: `task.py release` (P4) deletes a clone only after these checks, made at the moment of
-  deletion and under the release lock, so that no import or session for the task runs at the same
-  time:
-  1. no session for the task is active
-  2. the clone's current tip is reachable from a ref in the shared repository: a branch, or
+  deletion and under the lock that `import` also takes, so that no import runs at the same time:
+  1. the folder is the one `task.py open` made: the record keeps its device and inode, and a
+     folder that is not the clone is never deleted, not even with `--discard`
+  2. no process works in the clone, and the process list itself was read
+  3. the clone's current tip is reachable from a ref in the shared repository: a branch, or
      `refs/agentkeel/accepted/<task>`; an earlier import of an older commit is not enough
-  3. every branch and stash in the clone is reachable there too
-  4. the clone has no modified or untracked files
+  4. every branch and every stash entry in the clone is reachable there too, older entries included
+  5. the clone has no modified, staged or untracked files
 
-  If one check fails, release refuses and names what is not preserved. The human's explicit discard
-  is a separate command that says what it will delete.
+  If one check fails, or cannot be made, release refuses and names what is not preserved. A missing
+  or corrupt `.git`, an unreadable ref and a failed process listing are failures, never "clean". The
+  human's explicit discard is a separate command that says what it will delete.
+- **Inspection runs nothing from the clone.** The agent can write its clone's `.git/config`, and a
+  clean filter or `core.fsmonitor` there runs on `git add` or `git status` with the rights of whoever
+  runs git; `core.hooksPath` does not stop them. So release and the evidence hooks read the clone's
+  refs, `HEAD` and stash reflog as files, and compute its tree with git in a temporary git folder that
+  holds only AgentKeel's config, with the clone's objects as a read-only alternate and no system or
+  global config (`hooks/agentkeel_core/repostate.py`). A filter that `.gitattributes` names has no
+  definition there, so git runs none.
 - **Accepted work is kept apart from staging.** A successful import also writes
   `refs/agentkeel/accepted/<task>`. A later import that fails deletes only the staging ref, so
   accepted work never becomes disposable.
@@ -77,7 +86,9 @@ does not appear in `git worktree list`, the ownership, resume and cleanup behavi
 Measured: after the import of A, release was allowed. After commit B in the clone, release refused
 ("tip is not preserved in the shared repository"). A later import with the stale expected SHA A was
 refused, and the accepted ref still pointed to A. After the import of B, release was allowed. An
-untracked file then made it refuse again.
+untracked file then made it refuse again. With a planted clean filter and `core.fsmonitor` in the
+clone, release and the evidence hooks (through `run.sh`) ran neither. A clone with no `.git`, a
+corrupt `HEAD`, an unpreserved older stash entry or another folder at its path was kept.
 
 ### The import into the shared repository
 
@@ -209,7 +220,8 @@ A hook writes the evidence. It records "passed" only for a completion it can ide
 adapter names the exact events and fields it trusts:
 
 - **Start and completion are paired** by the tool call's id. The PreToolUse event records the command,
-  `HEAD` and a hash of the working tree.
+  `HEAD` and a hash of the working tree, read without the repository's config (see Cleanup above). A
+  state that cannot be read makes the run unrecorded.
 - **Claude Code** (measured on 2.1.290): a foreground Bash command that ends with exit status 0 sends
   `PostToolUse` with `tool_response.interrupted` false and no `backgroundTaskId`. A non-zero exit
   sends `PostToolUseFailure` with "Exit code N" (exit 3, exit 4 and a timeout, "Exit code 143", all
@@ -277,17 +289,22 @@ An adapter binds one server's tools to the task's permissions and to its allowed
 tool name and the arguments, never the tool's description or annotations.
 
 - **Classes**: read (passes), remote-write (creates, updates, archives, deletes, resolves, changes
-  settings), paid (bills per call), deploy, publish. An action the adapter does not know is refused in
-  a guarded server, never assumed to be a read.
+  settings), paid (bills per call), deploy, publish. Each adapter lists its operations by exact name
+  (`hooks/agentkeel_core/mcp_catalog.py`, taken from each server's own catalog). A name it does not
+  list is refused, however it is spelled: `get_` or `list` in a name does not make it a read.
 - **Permissions keep their meaning.** Remote writes need a new permission, `remote-write`, scoped to
   a service and a target. Paid calls need `paid-job`. Deploy and publish each need their own grant:
   `distribution-build` is not permission to deploy, and `store-submission` is not permission to
   publish anywhere else. A review task can change nothing.
 - **Targets**: `agentkeel.json` names the allowed targets per server (for example one RevenueCat
   project, one PostHog project). A remote write to any other target is refused, even with
-  `remote-write`.
-- **Generic tools**: PostHog's `exec` is classified by its command verb, DataForSEO's `api_request`
-  by method and path (`/live` is paid; `appendix/user_data` is a read).
+  `remote-write`. A paid call that names a target (a Sentry organization) is held to the same list:
+  `paid-job` is permission to spend, not permission for every organization. A paid call with no
+  target at all (DataForSEO) needs only `paid-job`.
+- **Generic tools**: PostHog's `exec` is classified by its command verb and the listed tool that
+  `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
+  segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment
+  is a read).
 - **First adapters**: revenuecat, posthog, sentry, dataforseo. Every other server stays explicitly
   unsupported and is listed as such in `init`'s report.
 - **What an adapter does not protect.** A refusal stops that MCP call only. The same credentials used
@@ -313,7 +330,7 @@ A batch means one tool call that carries several actions: the hook sees it whole
 one refused part refuses the whole batch. Separate parallel calls are not a batch: each forbidden call
 must reach the server zero times, and its permitted siblings may run.
 
-## What is built (0.7.0)
+## What is built (0.7.1)
 
 The four choices above were approved on 2026-10-06: `remote-write` scoped to service and target,
 remote browser activity unsupported with local QA kept, an independent clone for every task size,
@@ -344,6 +361,11 @@ Live acceptance, both hosts, sessions started from `task.py open` with the branc
 | MCP: allowed read and allowed write reach the server | pass | pass, inside `exec` |
 | MCP: other target, unknown action, paid without `paid-job`, refused write in a parallel pair | refused, 0 calls at the server | refused, 0 calls at the server, built name included |
 | `import` then `release` by the human | release refused before import, allowed after | the same |
+
+The live runs above used 0.7.0. The 0.7.1 corrections (inspection without the repository's config,
+release that fails closed, the import lock, the exact-name catalog and targets for paid calls) are
+tested through the real launcher and commands, each test proven to fail on 0.7.0; they were not run
+again in live host sessions.
 
 **Open: shipping from an isolated session.** Inside the sandbox the agent cannot move the shared
 `main` or push from the shared checkout, so a task opened with `task.py open` ships through the
