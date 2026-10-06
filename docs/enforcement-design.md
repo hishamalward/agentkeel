@@ -177,12 +177,21 @@ would let any test script run outside the boundary. Instead:
 - **Control state is written only by trusted code outside the sandbox**: `task.py open`,
   `task.py import` and `task.py release` (run by the human) and the hooks, which both hosts run
   outside the sandbox from the installed plugin. No session command is exempted.
-- **The hook's interpreter cannot be redirected from the clone.** The hooks run a script file by its
-  absolute path, so Python puts the script's own folder first on its import path, not the session's
-  working folder. They also run in isolated mode (`python3 -I`), which ignores `PYTHONPATH` and the
-  other `PYTHON*` variables. Measured on Claude Code: a `json.py` planted in the clone and an
-  `export PYTHONPATH` into the clone did not reach the hook; it loaded the standard library each time.
-  Still to measure on Codex.
+- **The hook's interpreter cannot be redirected.** A hook command names a verified absolute
+  interpreter (Python 3.10 or later, recorded by `init`), runs it in isolated mode (`-I`, which
+  ignores `PYTHONPATH`, the other `PYTHON*` variables and the user site folder) under an emptied
+  environment (`env -i` with only `HOME` and a fixed `PATH`), and names the plugin script by its
+  absolute path. Measured, with the plain form `python3 <script>`:
+  - on Claude Code, a `json.py` planted in the clone and an `export PYTHONPATH` in the agent's shell
+    did not reach the hook
+  - on Codex, a `PYTHONPATH` that the Codex process inherited did redirect the hook: a planted
+    `json.py` loaded in every hook run
+
+  So the plain form is not safe, and the hardened form is required. Measured outside the host, the
+  hardened form ignored the same `PYTHONPATH` and loaded the standard library. Still to measure: the
+  hardened form as a trusted Codex hook. A plugin's `hooks.json` cannot hold a per-machine interpreter
+  path, so the plugin's hook command is a fixed `/bin/sh` launcher in the plugin that reads the
+  recorded interpreter path from `AGENTKEEL_HOME` and runs it this way.
 
 Measured on Claude Code: a test script and a `python3` placed first on `PATH` inside the clone, both
 aimed at another task's clone, were refused, as on Codex.
@@ -203,8 +212,12 @@ adapter names the exact events and fields it trusts:
   code 0" and then exited 4 arrived as `PostToolUseFailure`: the event decides, never the output.
 - **A background command** returns at once with a `backgroundTaskId`, and its later exit reached no
   hook. It is unrecorded, never passed.
-- **Codex**: to measure in the trusted-hook run. Until an adapter has a measured rule, its evidence is
-  unrecorded.
+- **Codex** (measured on 0.160.0): hooks cannot record test evidence. `PostToolUse` for a shell
+  command carries the call id and the output text but no exit status, so `true`, `exit 3` and
+  `exit 4` arrive the same. A command that is still running sends no completion event. The session
+  file does hold an exit code, but inside the output of the model-written `exec` code, so the model
+  controls it. On Codex, local evidence is therefore unrecorded, and evidence for shipping comes from
+  the CI required check that AgentKeel's push gate already uses.
 - **The rule is a host fact, so it is tested.** An adapter self-test runs a success, a failure, a
   timeout and a background command on the installed host version and refuses to record evidence if
   the events differ from the rule.
@@ -235,20 +248,18 @@ An adapter has value only if every call it guards passes through it before the s
 - **Claude Code, measured.** A synthetic MCP server records every call it receives; a session hook
   refuses one tool. Direct calls and two calls made in parallel in one message all reached the hook
   with their arguments. The refused calls reached the server zero times; the allowed reads reached it.
-- **Codex, partly measured.** Codex 0.160.0 offered the test server's tools only inside the
-  JavaScript `exec` tool. A direct call, a call by a name built at run time
-  (`["mcp","akprobe","write_thing"].join("__")`) and two parallel calls each appeared as a separate MCP
-  dispatch with the resolved tool name and arguments. In that run Codex's own approval check refused
-  all four first, so the run does not show what the hook does. Codex documents that PreToolUse
-  supports code-mode nested calls.
-- **Still to measure on Codex**, with a test hook the founder has trusted and the test server's tools
-  set to `approve` so that the hook, not the host's approval check, is the layer that refuses: a
-  permitted read reaches both the hook and the server; the forbidden direct, built-name and parallel
-  calls reach the hook, return its refusal, and reach the server zero times.
-- **If the Codex hook does not see nested calls**, matching the `exec` source text is not a boundary
-  (aliases and built names pass it). The options are Codex's own per-tool `approval_mode`, which is
-  static and not task-aware, a gateway process in front of the guarded servers, or refusing `exec` in
-  guarded mode. A gateway is then in scope, because it is the only mechanism left.
+- **Codex, measured** (0.160.0, a test hook the founder trusted, the test tools set to `approve` so
+  that only the hook could refuse). The tools are offered only inside the JavaScript `exec` tool, and
+  PreToolUse fired for each nested call with its resolved name and arguments. The allowed read
+  reached the hook and the server. The forbidden write, the write by a name built at run time and the
+  write inside `Promise.all` each reached the hook, returned its refusal, and reached the server zero
+  times. In the parallel case the permitted read in the same `Promise.all` did not run either.
+- **Codex trust covers the hook command, not the script.** The saved trust is a hash of the hook
+  definition; changing the script file needed no new review. The plugin's script files must
+  therefore stay outside every session's write boundary, which the task profile already ensures.
+- **If a later Codex version stops sending nested calls to hooks**, matching the `exec` source text
+  is not a boundary (aliases and built names pass it). The adapter self-test then fails, and the
+  options are Codex's per-tool `approval_mode`, a gateway process, or refusing `exec` in guarded mode.
 
 ### The adapter
 
@@ -295,11 +306,10 @@ must reach the server zero times, and its permitted siblings may run.
 ## Build order
 
 1. Finish the feasibility checks:
-   - the Codex trusted-hook run: nested MCP calls, and completion events with their exit status
-   - on Codex, the hook interpreter probe
+   - the hardened hook command as a trusted Codex hook, under an inherited `PYTHONPATH`
 2. Shell isolation for both hosts: `task.py open`, independent clones, session-only boundaries,
    `task.py import`, evidence by hook, and the ownership, resume and cleanup changes.
-3. The four adapters, after step 1 shows an interception path on each host.
+3. The four adapters. Both hosts showed an interception path.
 
 This is integration work across both hosts, not a hook patch. An estimate in days waits for step 1.
 
@@ -316,5 +326,5 @@ This is integration work across both hosts, not a hook patch. An estimate in day
 ## Not in this design
 
 Other hosts, a new approval service, and proof of who approved. The task record still describes the
-scope; it is not the human's consent. A gateway process is not excluded: it enters if Codex's hooks
-cannot see nested MCP calls.
+scope; it is not the human's consent. A gateway process is not excluded: it enters if a later Codex
+version stops sending nested MCP calls to hooks.
