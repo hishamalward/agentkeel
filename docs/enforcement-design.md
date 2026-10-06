@@ -187,11 +187,17 @@ would let any test script run outside the boundary. Instead:
   - on Codex, a `PYTHONPATH` that the Codex process inherited did redirect the hook: a planted
     `json.py` loaded in every hook run
 
-  So the plain form is not safe, and the hardened form is required. Measured outside the host, the
-  hardened form ignored the same `PYTHONPATH` and loaded the standard library. Still to measure: the
-  hardened form as a trusted Codex hook. A plugin's `hooks.json` cannot hold a per-machine interpreter
+  - on Codex, with the hardened form trusted beside the plain one and the same inherited
+    `PYTHONPATH`: both hardened runs used the recorded interpreter in isolated mode, saw no
+    `PYTHONPATH` and loaded the standard library; all 5 loads of the planted module came from
+    non-isolated processes, none from a hardened run
+
+  So the plain form is not safe, and the hardened form is required. A plugin's `hooks.json` cannot hold a per-machine interpreter
   path, so the plugin's hook command is a fixed `/bin/sh` launcher in the plugin that reads the
-  recorded interpreter path from `AGENTKEEL_HOME` and runs it this way.
+  recorded interpreter path from `AGENTKEEL_HOME` and runs it this way. The whole launch chain (the
+  plugin scripts, the launcher, the recorded interpreter path and the interpreter itself) stays
+  outside every task's write boundary, and the build tests the final launcher, not only this direct
+  command.
 
 Measured on Claude Code: a test script and a `python3` placed first on `PATH` inside the clone, both
 aimed at another task's clone, were refused, as on Codex.
@@ -217,7 +223,8 @@ adapter names the exact events and fields it trusts:
   `exit 4` arrive the same. A command that is still running sends no completion event. The session
   file does hold an exit code, but inside the output of the model-written `exec` code, so the model
   controls it. On Codex, local evidence is therefore unrecorded, and evidence for shipping comes from
-  the CI required check that AgentKeel's push gate already uses.
+  the CI required check that AgentKeel's push gate already uses: an absent, pending or failed check,
+  or a check on another SHA, refuses shipping, and no transcript or success text replaces it.
 - **The rule is a host fact, so it is tested.** An adapter self-test runs a success, a failure, a
   timeout and a background command on the installed host version and refuses to record evidence if
   the events differ from the rule.
@@ -253,7 +260,9 @@ An adapter has value only if every call it guards passes through it before the s
   PreToolUse fired for each nested call with its resolved name and arguments. The allowed read
   reached the hook and the server. The forbidden write, the write by a name built at run time and the
   write inside `Promise.all` each reached the hook, returned its refusal, and reached the server zero
-  times. In the parallel case the permitted read in the same `Promise.all` did not run either.
+  times. In that `Promise.all` run the permitted read did not run either; that is one observation,
+  not a promise that parallel calls are all-or-nothing. Each refusal must still show zero calls at
+  the server.
 - **Codex trust covers the hook command, not the script.** The saved trust is a hash of the hook
   definition; changing the script file needed no new review. The plugin's script files must
   therefore stay outside every session's write boundary, which the task profile already ensures.
@@ -305,13 +314,12 @@ must reach the server zero times, and its permitted siblings may run.
 
 ## Build order
 
-1. Finish the feasibility checks:
-   - the hardened hook command as a trusted Codex hook, under an inherited `PYTHONPATH`
+1. Feasibility: done on 2026-10-06; every probe above becomes a regression or acceptance test.
 2. Shell isolation for both hosts: `task.py open`, independent clones, session-only boundaries,
    `task.py import`, evidence by hook, and the ownership, resume and cleanup changes.
 3. The four adapters. Both hosts showed an interception path.
 
-This is integration work across both hosts, not a hook patch. An estimate in days waits for step 1.
+This is integration work across both hosts, not a hook patch.
 
 ## Decisions for the founder
 
