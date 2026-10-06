@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 
-from helpers import HOOKS, SESSION, RepoCase, run_hook
+from helpers import HOOKS, SESSION, RepoCase, git, run_hook
 
 T = os.path.join(HOOKS, "task.py")
 
@@ -430,6 +430,36 @@ class CodexTrust(unittest.TestCase):
                 sys.modules.pop("tomllib", None)
             else:
                 sys.modules["tomllib"] = saved
+
+
+class SessionBanner(RepoCase):
+    task = TaskCommand.task
+    """3.3: the session-start message answers "worktree or main?" before anyone asks."""
+
+    def banner(self, cwd, session=SESSION):
+        out = subprocess.run([sys.executable, os.path.join(HOOKS, "session-start.py")], text=True, capture_output=True,
+                             input=json.dumps({"session_id": session, "cwd": cwd}), env={**os.environ, **self.env})
+        return out.stdout
+
+    def test_the_shared_checkout_and_its_protected_branch_are_named(self):
+        git(self.primary, "checkout", "-q", "-b", "master")
+        out = self.banner(self.primary)
+        self.assertIn(f"Where you are: {self.primary} (the repository's shared checkout), on branch master (protected).", out)
+        self.assertIn("Your task: none declared yet.", out)
+        self.assertIn(f"  {self.repo}  branch main  no task record", out)
+
+    def test_a_declared_task_and_another_sessions_worktree_are_named(self):
+        other = os.path.join(self.tmp, "other")
+        git(self.primary, "worktree", "add", "-q", other, "-b", "feat/other")
+        self.assertEqual(self.task("start", "other-task", "--size", "small", "--allow", "implement",
+                                   session="session-b", cwd=other).returncode, 0)
+        self.branch("feat/mine")
+        self.assertEqual(self.task("start", "mine", "--size", "small", "--allow", "implement,merge").returncode, 0)
+        out = self.banner(self.repo)
+        self.assertIn(f"Where you are: {self.repo} (a linked worktree), on branch feat/mine.", out)
+        self.assertIn("Your task: mine (small; implement, merge).", out)
+        self.assertIn(f"  {other}  branch feat/other  task other-task", out)
+        self.assertNotIn(f"  {self.repo}  ", out)
 
 
 if __name__ == "__main__":
