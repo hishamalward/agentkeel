@@ -197,5 +197,94 @@ class TaskCommand(RepoCase):
         self.assertEqual(run_hook("task-guard.py", payload, env=self.env)[0], 0)
 
 
+class Init(RepoCase):
+    task = TaskCommand.task
+    """task.py init: opt in without overwriting policy; installation, opt-in and trust apart."""
+
+    def setUp(self):
+        super().setUp()
+        self.claude_dir = os.path.join(self.tmp, "claude-config")
+        self.codex_dir = os.path.join(self.tmp, "codex-home")
+        os.makedirs(os.path.join(self.claude_dir, "plugins")); os.makedirs(self.codex_dir)
+        self.env.update({"CLAUDE_CONFIG_DIR": self.claude_dir, "CODEX_HOME": self.codex_dir})
+        self.policy = os.path.join(self.primary, "agentkeel.json")
+
+    def init(self):
+        return self.task("init", cwd=self.primary)
+
+    def commits(self):
+        return subprocess.run(["git", "-C", self.primary, "rev-list", "--all", "--count"],
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_first_init_creates_the_file_registers_and_does_not_commit(self):
+        before = self.commits()
+        out = self.init()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        with open(self.policy) as fh:
+            self.assertEqual(json.load(fh), {})
+        self.assertEqual(self.commits(), before)
+        self.assertIn("??", subprocess.run(["git", "-C", self.primary, "status", "--porcelain", "agentkeel.json"],
+                                           capture_output=True, text=True).stdout)
+        with open(os.path.join(self.home, "opted-in.json")) as fh:
+            self.assertEqual(len(json.load(fh)), 1)
+        for text in ("created agentkeel.json", "protected branches: main, master", '"docs": "html"',
+                     "require_check_before_push", "plugin not installed: claude plugin install",
+                     "codex plugin add agentkeel@agentkeel", "git add agentkeel.json"):
+            self.assertIn(text, out.stdout)
+
+    def test_the_opt_in_reaches_a_worktree_without_a_commit(self):
+        from agentkeel_core import record
+        payload = {"cwd": self.repo, "tool_name": "Write", "tool_input": {"file_path": os.path.join(self.repo, "a.txt")}}
+        self.assertTrue(record.plugin_inactive(["--plugin"], payload, {"AGENTKEEL_HOME": self.home}))
+        self.assertEqual(self.init().returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "agentkeel.json")))
+        self.assertFalse(record.plugin_inactive(["--plugin"], payload, {"AGENTKEEL_HOME": self.home}))
+
+    def test_repeating_init_keeps_an_existing_policy_byte_for_byte(self):
+        text = '{"protected_branches": ["release"], "docs": "html"}\n'
+        with open(self.policy, "w") as fh:
+            fh.write(text)
+        for _ in range(2):
+            out = self.init()
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("kept the existing agentkeel.json (keys: docs, protected_branches)", out.stdout)
+        with open(self.policy) as fh:
+            self.assertEqual(fh.read(), text)
+        self.assertIn("protected branches: release", out.stdout)
+        self.assertNotIn('HTML work records ("docs"', out.stdout)
+
+    def test_a_malformed_policy_is_refused_and_left_alone(self):
+        with open(self.policy, "w") as fh:
+            fh.write("{not json")
+        out = self.init()
+        self.assertEqual(out.returncode, 2); self.assertIn("left as it is", out.stderr)
+        with open(self.policy) as fh:
+            self.assertEqual(fh.read(), "{not json")
+
+    def test_hosts_report_install_enable_and_trust_separately(self):
+        with open(os.path.join(self.claude_dir, "plugins", "installed_plugins.json"), "w") as fh:
+            json.dump({"version": 2, "plugins": {"agentkeel@agentkeel": [{"scope": "user"}]}}, fh)
+        with open(os.path.join(self.claude_dir, "settings.json"), "w") as fh:
+            json.dump({"enabledPlugins": {"agentkeel@agentkeel": True}}, fh)
+        trust = lambda n: "".join(f'[hooks.state."agentkeel@agentkeel:hook_{i}:0:0"]\ntrusted_hash = "sha256:x"\n\n'
+                                  for i in range(n))
+        config = os.path.join(self.codex_dir, "config.toml")
+        with open(config, "w") as fh:
+            fh.write('[plugins."agentkeel@agentkeel"]\nenabled = true\n\n[hooks.state]\n\n' + trust(2))
+        out = self.init()
+        self.assertIn("plugin installed (user scope), enabled", out.stdout)
+        self.assertIn("2 of 5 hooks trusted", out.stdout)
+        self.assertIn("trust the agentkeel hooks in /hooks", out.stdout)
+        with open(config, "w") as fh:
+            fh.write('[plugins."agentkeel@agentkeel"]\nenabled = true\n\n' + trust(5))
+        out = self.init()
+        self.assertIn("5 of 5 hooks trusted", out.stdout)
+        self.assertNotIn("/hooks", out.stdout)
+
+    def test_init_outside_a_repository_is_refused(self):
+        out = self.task("init", cwd=self.tmp)
+        self.assertEqual(out.returncode, 2); self.assertIn("not inside a git repository", out.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

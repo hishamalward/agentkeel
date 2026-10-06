@@ -1,4 +1,5 @@
 """Contracts the repo makes about itself."""
+import json
 import os
 import subprocess
 import unittest
@@ -107,3 +108,58 @@ class ProductDocs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseCheck(unittest.TestCase):
+    """release_check.py: one product version in every version field, and the tag on a release."""
+
+    FILES = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/marketplace.json",
+             ".agents/plugins/marketplace.json", "README.md")
+
+    def run_check(self, root, *args):
+        import subprocess, sys
+        return subprocess.run([sys.executable, os.path.join(ROOT, "release_check.py"), "--root", root, *args],
+                              capture_output=True, text=True)
+
+    def copy(self):
+        import shutil, tempfile
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        for rel in self.FILES:
+            os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(tmp, rel))
+        return tmp
+
+    def version(self):
+        with open(os.path.join(ROOT, ".claude-plugin/plugin.json")) as fh:
+            return json.load(fh)["version"]
+
+    def test_this_repository_agrees_with_itself_and_its_own_tag(self):
+        self.assertEqual(self.run_check(ROOT).returncode, 0)
+        self.assertEqual(self.run_check(ROOT, "--tag", "v" + self.version()).returncode, 0)
+
+    def test_a_mismatched_manifest_fails(self):
+        tmp = self.copy()
+        path = os.path.join(tmp, ".codex-plugin/plugin.json")
+        with open(path) as fh:
+            data = json.load(fh)
+        data["version"] = "9.9.9"
+        with open(path, "w") as fh:
+            json.dump(data, fh)
+        out = self.run_check(tmp)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn(".codex-plugin/plugin.json = 9.9.9", out.stdout)
+
+    def test_a_stale_readme_path_fails(self):
+        tmp = self.copy()
+        path = os.path.join(tmp, "README.md")
+        with open(path) as fh:
+            text = fh.read()
+        with open(path, "w") as fh:
+            fh.write(text.replace(f"agentkeel/agentkeel/{self.version()}/", "agentkeel/agentkeel/0.0.1/", 1))
+        self.assertEqual(self.run_check(tmp).returncode, 1)
+
+    def test_a_tag_that_disagrees_fails(self):
+        out = self.run_check(ROOT, "--tag", "v0.1.0")
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("does not match the tag v0.1.0", out.stdout)

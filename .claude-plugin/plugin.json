@@ -1,7 +1,7 @@
 {
   "name": "agentkeel",
-  "version": "0.3.0",
-  "description": "Bounded writes for coding agents: a task record (size, permissions, resources) that guards read before every edit, commit, push and build. Acts only in repositories with an agentkeel.json.",
+  "version": "0.4.0",
+  "description": "Guardrail plugins for Claude Code and Codex: task scope, worktree isolation, and shipping checks. Acts only in repositories that opt in with agentkeel.json.",
   "author": { "name": "Hisham Al-Ward" },
   "homepage": "https://github.com/hishamalward/agentkeel",
   "repository": "https://github.com/hishamalward/agentkeel",

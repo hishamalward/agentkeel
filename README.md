@@ -1,13 +1,17 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/261005-brand-banner-dark-asset.svg">
-  <img src="docs/261005-brand-banner-light-asset.svg" width="100%" alt="AgentKeel: guardrails beneath your AI coding agents. The mark is a boat carrying blocks of work, with a keel below the waterline.">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/261005-brand-banner-dark-asset.svg">
+    <img src="docs/261005-brand-banner-light-asset.svg" width="100%" alt="AgentKeel: guardrails beneath your AI coding agents. The mark is a boat carrying blocks of work, with a keel below the waterline.">
+  </picture>
+</p>
 
-[![validate](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml/badge.svg)](https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-2f5bd3)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-2f5bd3)](#requirements)
-[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-2f5bd3)](#claude-code)
-[![Codex plugin](https://img.shields.io/badge/Codex-plugin-2f5bd3)](#codex)
+<p align="center">
+  <a href="https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml"><img src="https://github.com/hishamalward/agentkeel/actions/workflows/validate.yml/badge.svg" alt="validate"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f5bd3" alt="License: MIT"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/python-3.10%2B-2f5bd3" alt="Python 3.10+"></a>
+  <a href="#claude-code"><img src="https://img.shields.io/badge/Claude%20Code-plugin-2f5bd3" alt="Claude Code plugin"></a>
+  <a href="#codex"><img src="https://img.shields.io/badge/Codex-plugin-2f5bd3" alt="Codex plugin"></a>
+</p>
 
 AgentKeel keeps AI coding agents inside the task you gave them. Each agent declares its task
 before its first write. Hooks then check every tool call against that declaration and refuse what
@@ -75,17 +79,29 @@ plugin hook until you trust it.
 
 ### Opt a repository in
 
+Installing the plugin makes AgentKeel available; opting a repository in turns it on there. Run
+`init` from the repository, with the path of the host you installed:
+
 ```bash
 cd path/to/your-repo
-echo '{}' > agentkeel.json
-git add agentkeel.json && git commit -m "Opt in to AgentKeel" -- agentkeel.json
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.4.0/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.4.0/hooks/task.py init    # Codex
 ```
 
-The plugin now acts in this repository and in its worktrees, and nowhere else. The file holds
-the repository's policy, such as protected branches; `{}` takes the defaults
-([`agentkeel.json`](docs/task-record.md#the-repository-policy-file)). The opt-in is also kept in
-`~/.agentkeel/opted-in.json`, so a shell command that deletes the file does not switch the guards
-off.
+`init` creates `agentkeel.json` only when it is missing, and never changes an existing one. It
+registers the opt-in in `~/.agentkeel/opted-in.json`, so the guards act in this repository and all
+its worktrees at once, before any commit, and a shell command that deletes the file does not
+switch them off. It then reports three things apart: what the policy turns on, whether each host
+has the plugin installed and enabled, and (Codex) how many of its hooks you have trusted.
+
+An empty policy, `{}`, protects `main` and `master` and needs a task for every write. It does not
+turn on HTML work records (`"docs": "html"`) or the push gate (`"require_check_before_push"`);
+see [the policy file](docs/task-record.md#the-repository-policy-file). `init` does not commit.
+Share the policy through your normal workflow when you choose:
+
+```bash
+git add agentkeel.json && git commit -m "Opt in to AgentKeel" -- agentkeel.json
+```
 
 ### Prove it works
 
@@ -110,8 +126,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.3.0/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.3.0/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.4.0/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.4.0/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it.
 
 ### Update and remove
@@ -121,6 +137,7 @@ path, so an agent never has to guess it.
 | Update | `claude plugin marketplace update agentkeel`, then `claude plugin update agentkeel@agentkeel` | `codex plugin marketplace upgrade agentkeel`; trust changed hooks again in `/hooks` |
 | Remove | `claude plugin uninstall agentkeel@agentkeel`, then `claude plugin marketplace remove agentkeel` | `codex plugin remove agentkeel@agentkeel`, then `codex plugin marketplace remove agentkeel`; then delete the empty `~/.codex/plugins/cache/agentkeel` folder and any `hooks.state."agentkeel@agentkeel:..."` sections in `~/.codex/config.toml`, which Codex leaves |
 | Opt one repository out | delete its `agentkeel.json` and its entry in `~/.agentkeel/opted-in.json` | the same |
+| Check the setup | run `task.py init` again in the repository: it changes nothing that exists and reports each host | the same |
 
 ### Per-repository install (fallback)
 
@@ -215,6 +232,10 @@ python3 -m unittest discover -s tests
 ```
 
 CI runs the suite on macOS and Linux, on Python 3.10 and 3.13, plus each hook's `--selftest`.
+
+Every version field (both plugin manifests, the marketplace entry and the plugin paths in this
+README) states one product version. `python3 release_check.py --tag vX.Y.Z` refuses a release
+whose fields disagree with each other or with the tag, and CI runs it on every push and tag.
 
 ## License
 

@@ -3,6 +3,7 @@ name: validate
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -34,3 +35,5 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: product docs links (README.md and docs/*.md)
         run: python3 -m unittest tests.test_repo_contract.ProductDocs -v
+      - name: release check (one version everywhere; on a tag, the tag too)
+        run: python3 release_check.py ${{ startsWith(github.ref, 'refs/tags/') && format('--tag {0}', github.ref_name) || '' }}

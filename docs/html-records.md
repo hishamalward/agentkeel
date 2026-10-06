@@ -6,8 +6,8 @@ In a repository that opts in, every work record is one authored HTML page in a f
 
 | | |
 |---|---|
-| Implementation | Merged into AgentKeel's local `main` at `ef79009` on 2026-10-05; not pushed. |
-| Release | Not released. AgentKeel's own docs are Markdown (see the [canon](canon.md#documentation-has-one-current-owner-per-fact)). |
+| Implementation | On `main` since `ef79009`; pushed to GitHub on 2026-10-05 (at `fc72847`). |
+| Release | Not in a published release yet; the last release, `v0.1.0`, predates it. AgentKeel's own docs are Markdown (see the [canon](canon.md#documentation-has-one-current-owner-per-fact)). |
 | External checks | Live Claude Code and Codex runs on 2026-10-05 (see Verification). No hosted run of the CI docs job yet. |
 
 ## Current behavior and constraints

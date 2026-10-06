@@ -2,6 +2,8 @@
 
 Before its first write, the agent declares its task in one command. The record answers three separate questions: how much process (size), which actions (permissions) and where (worktrees). The hooks read it on every tool call.
 
+A repository opts in once, before any task: `task.py init` in the repository creates `agentkeel.json` when it is missing (it never changes an existing one), registers the opt-in for the repository and all its worktrees, and reports what the policy turns on and each host's install, enable and trust state. It does not commit.
+
 Declare it from your reading of the human's request:
 
 ```

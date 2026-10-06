@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """agentkeel task: declare what this session's task is, before the first write.
 
+  task.py init                     opt this repository in: create agentkeel.json if it is missing
+                                   (never overwrite it), register the opt-in, report each host
   task.py start <task-id> --size small|medium|large --allow <permissions>
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
@@ -38,7 +40,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, pages, record, starters  # noqa: E402
+from agentkeel_core import gitops, hostcheck, pages, record, starters  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -328,6 +330,95 @@ INDEX_HEAD = """<!doctype html>
 """
 
 
+def init(args, environ):
+    """Opt the repository in without touching an existing policy, and say what that does and
+    does not turn on. Installation (the host has the plugin), opt-in (this repository) and trust
+    (Codex: the human trusted the hooks in /hooks) are reported separately. It never commits."""
+    top = gitops.toplevel(os.getcwd())
+    if not top:
+        return fail("not inside a git repository: run init from the repository you want to opt in")
+    top = os.path.realpath(top)
+    path = os.path.join(top, "agentkeel.json")
+    rows = []
+    if os.path.exists(path):
+        try:
+            with open(path) as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+        except Exception as e:
+            return fail(f"agentkeel.json exists but is not a JSON object ({e}). It was left as it is;\n"
+                        "fix it by hand, then run init again.")
+        keys = ", ".join(sorted(data)) or "none set, so the defaults apply"
+        rows.append(("policy", f"kept the existing agentkeel.json (keys: {keys})"))
+        created = False
+    else:
+        data = {}
+        with open(path, "w") as fh:
+            fh.write("{}\n")
+        rows.append(("policy", "created agentkeel.json with {}: the defaults below"))
+        created = True
+    common = gitops.common_dir(top) or top
+    reg_path = os.path.join(record.home(environ), "opted-in.json")
+    os.makedirs(os.path.dirname(reg_path), exist_ok=True)
+    with record.locked(reg_path):
+        try:
+            with open(reg_path) as fh:
+                registry = json.load(fh)
+        except Exception:
+            registry = {}
+        new = common not in registry
+        registry.setdefault(common, int(time.time()))
+        record.atomic_write_json(reg_path, registry)
+    rows.append(("opt-in", ("registered" if new else "already registered")
+                 + f" in {reg_path}: on every host with the plugin, the guards act in this repository and"
+                 " all its worktrees, before any commit"))
+    pol = record.policy(top)
+    rows.append(("in force", "protected branches: " + ", ".join(sorted(pol["protected"]))
+                 + "; every write needs a declared task and its own worktree; shipping needs its permission"))
+    off = []
+    if data.get("docs") != "html":
+        off.append('HTML work records ("docs": "html")')
+    if not pol["require_check"]:
+        off.append('the push gate ("require_check_before_push": "<check name>", see docs/required-checks.md)')
+    if off:
+        rows.append(("not on", "; ".join(off)))
+    hooks_dir = os.path.dirname(os.path.abspath(__file__))
+    c = hostcheck.claude(top, environ)
+    if c["installed"]:
+        state = f"plugin installed ({', '.join(c['installed'])} scope), " + ("enabled" if c["enabled"] else
+                "not enabled: claude plugin enable agentkeel@agentkeel")
+    else:
+        state = "plugin not installed: claude plugin install agentkeel@agentkeel"
+    if c["project_install"]:
+        state += "; a project install is in .claude/settings.json" + (
+            ": use one way per repository, not both" if c["installed"] and c["enabled"] else "")
+    rows.append(("claude", state))
+    x = hostcheck.codex(top, environ)
+    want = hostcheck.plugin_hook_count(hooks_dir)
+    if not x["readable"]:
+        state = "plugin not installed (no Codex configuration found): codex plugin add agentkeel@agentkeel"
+    elif x["installed"]:
+        state = "plugin installed, " + ("enabled" if x["enabled"] else "disabled")
+        state += f"; {x['trusted']}" + (f" of {want}" if want else "") + " hooks trusted (hashes not re-verified)"
+        if not want or x["trusted"] < want:
+            state += ": open codex in this repository and trust the agentkeel hooks in /hooks"
+    else:
+        state = "plugin not installed: codex plugin add agentkeel@agentkeel"
+    if x["project_install"]:
+        state += "; a project install is in .codex/hooks.json"
+    rows.append(("codex", state))
+    if created:
+        rows.append(("next", "share the policy through your normal workflow when you choose, for example:\n"
+                     "git add agentkeel.json && git commit -m \"Opt in to AgentKeel\" -- agentkeel.json"))
+    width = max(len(k) for k, _ in rows)
+    rows = [(k, v.replace("\n", "\n" + " " * (width + 4))) for k, v in rows]
+    print(f"agentkeel init: {top}")
+    for k, v in rows:
+        print(f"  {k.ljust(width)}  {v}")
+    return 0
+
+
 def index(args, environ):
     import html as h
     top = os.path.realpath(gitops.toplevel(os.getcwd()) or os.getcwd())
@@ -374,6 +465,7 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--worktree", action="append")
     s.add_argument("--resource", action="append")
     sub.add_parser("show")
+    sub.add_parser("init")
     v = sub.add_parser("verify")
     v.add_argument("cmd", nargs=argparse.REMAINDER)
     sub.add_parser("end")
@@ -396,7 +488,7 @@ def main(argv=None, environ=os.environ):
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
+    handlers = {"init": init, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
                 "context": context, "finish": finish, "check": check, "index": index}
     if args.action not in handlers:
         p.print_help()

@@ -4,14 +4,14 @@
     "name": "Hisham Al-Ward",
     "url": "https://github.com/hishamalward"
   },
-  "description": "Guardrails beneath your AI coding agents.",
+  "description": "Guardrail plugins for Claude Code and Codex.",
   "plugins": [
     {
       "name": "agentkeel",
       "displayName": "AgentKeel",
       "source": "./",
-      "description": "Bounded writes for coding agents: a task record that hooks read before every edit, commit, push and build. Acts only in repositories with an agentkeel.json.",
-      "version": "0.3.0",
+      "description": "Guardrail plugins for Claude Code and Codex: task scope, worktree isolation, and shipping checks. Acts only in repositories that opt in with agentkeel.json.",
+      "version": "0.4.0",
       "author": { "name": "Hisham Al-Ward" },
       "homepage": "https://github.com/hishamalward/agentkeel",
       "repository": "https://github.com/hishamalward/agentkeel",
