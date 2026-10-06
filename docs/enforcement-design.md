@@ -58,8 +58,25 @@ does not appear in `git worktree list`, the ownership, resume and cleanup behavi
 - **Ownership**: the task record names the clone's path, its branch and the full SHA of its base.
   The session banner and the ownership checks read the task records, not `git worktree list`.
 - **Resume**: a resumed or new session for the same task opens the same clone from the record.
-- **Cleanup**: `task.py release` (P4) removes a clone only when its branch is imported or the human
-  says to drop it, the clone is clean, and the record still names this task.
+- **Cleanup**: `task.py release` (P4) deletes a clone only after these checks, made at the moment of
+  deletion and under the release lock, so that no import or session for the task runs at the same
+  time:
+  1. no session for the task is active
+  2. the clone's current tip is reachable from a ref in the shared repository: a branch, or
+     `refs/agentkeel/accepted/<task>`; an earlier import of an older commit is not enough
+  3. every branch and stash in the clone is reachable there too
+  4. the clone has no modified or untracked files
+
+  If one check fails, release refuses and names what is not preserved. The human's explicit discard
+  is a separate command that says what it will delete.
+- **Accepted work is kept apart from staging.** A successful import also writes
+  `refs/agentkeel/accepted/<task>`. A later import that fails deletes only the staging ref, so
+  accepted work never becomes disposable.
+
+Measured: after the import of A, release was allowed. After commit B in the clone, release refused
+("tip is not preserved in the shared repository"). A later import with the stale expected SHA A was
+refused, and the accepted ref still pointed to A. After the import of B, release was allowed. An
+untracked file then made it refuse again.
 
 ### The import into the shared repository
 
@@ -78,13 +95,18 @@ nothing from the task's own files:
    refused.
 6. **Moving `main` and shipping stay separate**, separately authorized operations.
 
-Measured: the import of the expected SHA succeeded. After the clone's branch moved by one commit,
-the same import was refused with "SHA mismatch", and `main` and the task branch did not change. A
-clone with seven planted routes (`core.fsmonitor`, `core.hooksPath`, `uploadpack.packObjectsHook`,
-`core.sshCommand` and three hooks) ran none of them during the fetch. These results are regression
-tests for this command, not a proof that any fetch from agent-controlled Git state is safe. Still to
-test: a replaced clone path or branch in the record, an unauthorized destination, and injected
-execution config; each must fail or leave the accepted commit unchanged.
+Measured: the import of the expected SHA succeeded. These were refused before any fetch: a task
+name aimed at `main` (`a:refs/heads/main`), a branch given as a refspec (`feat/a:refs/heads/main`), a
+branch given as an option (`--upload-pack=...`), and a short SHA. After the clone's branch moved by
+one commit, the import was refused with "SHA mismatch". A clone `.git` replaced by a pointer to
+another repository made the fetch fail. A branch made into a symbolic ref to the right commit
+imported that commit, which the SHA check allows. A clone with planted `core.fsmonitor`,
+`core.hooksPath`, `uploadpack.packObjectsHook`, `core.sshCommand`, `core.gitProxy`, an
+`include.path` file with its own hook settings, and three hooks ran none of them during the import;
+the same planted config did run when the agent's own `git commit` ran inside the clone, which is
+inside the sandbox. In every case, `main` and the shared branches did not change. These are
+regression tests for this command, not a proof that any fetch from agent-controlled Git state is
+safe.
 
 ### The write boundary of a task
 
@@ -152,29 +174,45 @@ Measured on both hosts, from inside one task's clone: a write to the clone and t
 would let any test script run outside the boundary. Instead:
 
 - **Commands stay sandboxed.** `verify` runs its command inside the sandbox like any other command.
-- **Control state is written only by trusted code outside the sandbox**: `task.py open` and
-  `task.py import` (run by the human) and the hooks, which both hosts run outside the sandbox from the
-  installed plugin. No session command is exempted.
-- **The interpreter and the helper come from outside the task's reach.** The hook commands name the
-  plugin's own files and a fixed interpreter path; a task's clone, `PATH` entries or `PYTHONPATH`
-  inside the clone cannot replace them.
+- **Control state is written only by trusted code outside the sandbox**: `task.py open`,
+  `task.py import` and `task.py release` (run by the human) and the hooks, which both hosts run
+  outside the sandbox from the installed plugin. No session command is exempted.
+- **The hook's interpreter cannot be redirected from the clone.** The hooks run a script file by its
+  absolute path, so Python puts the script's own folder first on its import path, not the session's
+  working folder. They also run in isolated mode (`python3 -I`), which ignores `PYTHONPATH` and the
+  other `PYTHON*` variables. Measured on Claude Code: a `json.py` planted in the clone and an
+  `export PYTHONPATH` into the clone did not reach the hook; it loaded the standard library each time.
+  Still to measure on Codex.
+
+Measured on Claude Code: a test script and a `python3` placed first on `PATH` inside the clone, both
+aimed at another task's clone, were refused, as on Codex.
 
 ### Test evidence is bound to the completed run and the exact code
 
-A hook writes the evidence, and it records "passed" only when all of these hold:
+A hook writes the evidence. It records "passed" only for a completion it can identify, and each host
+adapter names the exact events and fields it trusts:
 
-- **Start and completion are paired.** The PreToolUse event records the command, `HEAD` and a hash of
-  the working tree; the completion event for the same call closes it.
-- **The exit status is the real one.** Measured on Claude Code: a foreground success arrives as
-  `PostToolUse` with no exit field, and a failure as `PostToolUseFailure` with "Exit code 1". A
-  background command returns at once with only a `backgroundTaskId`, and its later `exit 3` reached
-  no hook. So a background or still-running command is recorded as unrecorded, never passed. Codex:
-  to measure in the trusted-hook run.
+- **Start and completion are paired** by the tool call's id. The PreToolUse event records the command,
+  `HEAD` and a hash of the working tree.
+- **Claude Code** (measured on 2.1.290): a foreground Bash command that ends with exit status 0 sends
+  `PostToolUse` with `tool_response.interrupted` false and no `backgroundTaskId`. A non-zero exit
+  sends `PostToolUseFailure` with "Exit code N" (exit 3, exit 4 and a timeout, "Exit code 143", all
+  did). So the adapter records "passed" only for `PostToolUse` paired with its PreToolUse, with
+  `run_in_background` not set, `interrupted` false and no `backgroundTaskId`. It records "failed" for
+  `PostToolUseFailure`. Everything else is unrecorded. A command that printed "all tests passed, exit
+  code 0" and then exited 4 arrived as `PostToolUseFailure`: the event decides, never the output.
+- **A background command** returns at once with a `backgroundTaskId`, and its later exit reached no
+  hook. It is unrecorded, never passed.
+- **Codex**: to measure in the trusted-hook run. Until an adapter has a measured rule, its evidence is
+  unrecorded.
+- **The rule is a host fact, so it is tested.** An adapter self-test runs a success, a failure, a
+  timeout and a background command on the installed host version and refuses to record evidence if
+  the events differ from the rule.
 - **The code did not move.** If `HEAD` or the working-tree hash differs between start and completion,
   the run is recorded as stale.
 - **Shipping accepts only clean, current evidence**: a passed run whose `HEAD` is the candidate's full
-  SHA, with a clean tree. Missing completion, a missing exit status, a dirty tree or another commit
-  means no evidence. A resumed shell process follows the same rule.
+  SHA, with a clean tree. Missing completion, a failure, a dirty tree or another commit means no
+  evidence. A resumed shell process follows the same rule.
 
 ## Part 3: MCP calls with consequences
 
@@ -258,9 +296,7 @@ must reach the server zero times, and its permitted siblings may run.
 
 1. Finish the feasibility checks:
    - the Codex trusted-hook run: nested MCP calls, and completion events with their exit status
-   - the import contract's hostile cases (replaced path or branch, unauthorized destination,
-     injected config)
-   - on Claude Code, the test-script and `PATH` substitution probes
+   - on Codex, the hook interpreter probe
 2. Shell isolation for both hosts: `task.py open`, independent clones, session-only boundaries,
    `task.py import`, evidence by hook, and the ownership, resume and cleanup changes.
 3. The four adapters, after step 1 shows an interception path on each host.
