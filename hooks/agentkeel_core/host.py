@@ -10,6 +10,7 @@ fixtures in tests/fixtures/.
   edit      a file is written: `path` (absolute), and what is known of the new content
   command   a shell command line
   dispatch  a subagent is launched: its readable prompt (if any) and its task name (if any)
+  mcp       an MCP tool call: its name and arguments, for the adapters in mcp.py
   gap       a tool that may write but that agentkeel cannot read: refused, so the gap is visible
 """
 import os
@@ -20,7 +21,8 @@ from . import patch as patchmod
 
 # Tools that write no repository file: reads, planning, messaging, scheduling (a scheduled prompt
 # runs later as ordinary tool calls, which are judged then). Everything else whose name suggests a
-# write is a gap and refused; MCP tools are outside agentkeel's scope and pass (README says so).
+# write is a gap and refused. MCP tools become mcp events: guarded servers are judged by their
+# adapter (mcp.py), and every other server passes, reported as unsupported.
 NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite", "TaskList",
                  "TaskGet", "TaskCreate", "TaskUpdate", "TaskStop", "TaskOutput", "ToolSearch",
                  "Skill", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "SendMessage",
@@ -47,6 +49,7 @@ class Event:
     edit: dict = field(default_factory=dict)        # Edit: old_string/new_string/replace_all
     change: object = None             # patch.FileChange for an apply_patch update or move
     source_path: str = ""             # for a move: the file the content comes from
+    args: dict = field(default_factory=dict)        # mcp: the tool call's arguments
 
 
 def _abs(cwd, p):
@@ -104,6 +107,8 @@ def events(payload, cwd):
         prompt = ti.get("prompt") if tool in ("Agent", "Task") else ""
         return [Event("dispatch", tool, prompt=str(prompt or ""),
                       name=str(ti.get("task_name") or ti.get("description") or ""))]
-    if tool.startswith("mcp__") or tool in READ_ONLY or not MAY_WRITE_RE.search(tool):
+    if tool.startswith("mcp__"):
+        return [Event("mcp", tool, args=ti)]  # judged by an adapter when the server has one (mcp.py)
+    if tool in READ_ONLY or not MAY_WRITE_RE.search(tool):
         return []
     return [Event("gap", tool)]

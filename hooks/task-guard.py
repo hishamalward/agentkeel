@@ -40,7 +40,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import checks, evidence, gitops, host, pages, patch as patchmod, record, shell  # noqa: E402
+from agentkeel_core import checks, evidence, gitops, host, mcp, pages, patch as patchmod, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -584,6 +584,20 @@ def judge_command(command, cwd, rec, environ, session, line=None):
         line["earlier"] = line.get("earlier", 0) + (sc.name not in ("cd", "pushd", "popd"))
 
 
+def judge_mcp(ev, cwd, rec):
+    """A guarded server's call against the task's permissions and agentkeel.json's targets."""
+    root = gitops.toplevel(cwd) if cwd and os.path.isdir(cwd) else None
+    pol_mcp = record.policy(os.path.realpath(root) if root else None)["mcp"]
+    extra = {svc: (cfg or {}).get("servers") for svc, cfg in pol_mcp.items() if isinstance(cfg, dict)}
+    call = mcp.match(ev.tool, extra)
+    if not call:
+        return  # no adapter for this server: unsupported, and reported as such by init
+    call.args = ev.args
+    reason = mcp.judge(call, rec, pol_mcp)
+    if reason:
+        raise Block(reason)
+
+
 def decide(payload, environ=os.environ):
     cwd = payload.get("cwd") or environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     session = payload.get("session_id")
@@ -594,6 +608,8 @@ def decide(payload, environ=os.environ):
                 judge_edit(ev, rec, environ)
             elif ev.kind == "command":
                 judge_command(ev.command, cwd, rec, environ, session)
+            elif ev.kind == "mcp":
+                judge_mcp(ev, cwd, rec)
             elif ev.kind == "gap":
                 raise Block(
                     f"agentkeel cannot read the tool '{ev.tool}' and it may write, so it is refused rather\n"

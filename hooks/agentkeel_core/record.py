@@ -3,7 +3,8 @@
 A task record answers three separate questions (project canon, #task-record):
 
   size         small | medium | large      how much process the task buys
-  permissions  review, implement, merge, push, distribution-build, store-submission, paid-job
+  permissions  review, implement, merge, push, distribution-build, store-submission, paid-job,
+               remote-write
   resources    the worktrees and report folders the task owns
 
 It is bound to one agent session (the host's session id), so a second session cannot inherit
@@ -22,7 +23,7 @@ import time
 
 SIZES = ("small", "medium", "large")
 PERMISSIONS = ("review", "implement", "merge", "push", "distribution-build", "store-submission",
-               "paid-job")
+               "paid-job", "remote-write")
 DEFAULT_PROTECTED = ("main", "master")
 # The session id each host gives the shell commands it runs. When one agent runs inside another
 # (Codex started from a Claude Code shell), both variables are set; the nearest agent process
@@ -225,7 +226,8 @@ def policy(root):
     for k, v in (data.get("commands") or {}).items():
         if k in commands and isinstance(v, list):
             commands[k] += [str(x) for x in v]
-    return {"protected": protected, "commands": commands,
+    mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else {}
+    return {"protected": protected, "commands": commands, "mcp": mcp,
             "require_check": str(data.get("require_check_before_push") or "")}
 
 

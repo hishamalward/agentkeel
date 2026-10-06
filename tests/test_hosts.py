@@ -69,7 +69,8 @@ class CapturedShapes(unittest.TestCase):
         import helpers  # noqa: F401
         from agentkeel_core import host
         self.assertEqual(host.events({"tool_name": "write_file_v2", "tool_input": {}}, "/r")[0].kind, "gap")
-        self.assertEqual(host.events({"tool_name": "mcp__fs__write", "tool_input": {}}, "/r"), [])
+        mcp_events = host.events({"tool_name": "mcp__fs__write", "tool_input": {"a": 1}}, "/r")
+        self.assertEqual([(e.kind, e.args) for e in mcp_events], [("mcp", {"a": 1})])  # an adapter judges it, never a gap
         self.assertEqual(host.events({"tool_name": "Read", "tool_input": {}}, "/r"), [])
 
 

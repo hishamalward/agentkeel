@@ -29,7 +29,8 @@ Documentation (repositories with "docs": "html" in agentkeel.json; see docs/ in 
   task.py index                    write the derived docs/index.html (never committed)
 
 Permissions (comma separated, any combination): review, implement, merge, push,
-distribution-build, store-submission, paid-job. Size never grants a permission: they are
+distribution-build, store-submission, paid-job, remote-write (changes on a guarded MCP service,
+within the targets agentkeel.json lists). Size never grants a permission: they are
 separate answers to separate questions. "merge and push" in the human's request means
 --allow implement,merge,push; a distribution build is never implied by shipping.
 

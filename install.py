@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK_FILES = ["task.py", "task-guard.py", "secret-guard.py", "plan-gate-guard.py", "plan-size-guard.sh",
               "verify-record.py"]
 CORE_FILES = ["__init__.py", "shell.py", "gitops.py", "record.py", "patch.py", "host.py", "checks.py", "pages.py",
-              "starters.py", "hostcheck.py", "instructions.py", "isolation.py", "evidence.py"]
+              "starters.py", "hostcheck.py", "instructions.py", "isolation.py", "evidence.py", "mcp.py"]
 OBSOLETE = ["tier.sh", "tier-guard.py", "write-path-guard.py"]
 START, END = "<!-- agentkeel:start -->", "<!-- agentkeel:end -->"
 
