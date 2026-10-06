@@ -28,22 +28,32 @@ REVENUECAT_READ = frozenset("""
 """.split())
 
 REVENUECAT_WRITE = frozenset("""
-    apply_product_store_state_plan archive_entitlement archive_offering archive_product
-    archive_virtual_currency assign_customer_offering attach_offering_to_paywall
-    attach_products_to_entitlement attach_products_to_package create_app create_audience
-    create_entitlement create_experiment create_offering create_packages create_paywall_ai
-    create_product create_product_prices create_product_store_state_plan create_project
-    create_targeting_rule create_virtual_currency create_webhook_integration
-    delete_package_from_offering delete_targeting_rule delete_webhook_integration
-    detach_offering_from_paywall detach_products_from_entitlement detach_products_from_package
-    discard_product_store_state_plan duplicate_offering duplicate_paywall edit_paywall_ai
-    equalize_subscription_prices grant_customer_entitlement pause_experiment
-    plan_product_store_state_plan publish_paywall resume_experiment set_product_store_state
-    start_experiment stop_experiment submit_products_to_store unarchive_entitlement
-    unarchive_offering unarchive_product unarchive_virtual_currency unpublish_paywall update_app
-    update_audience update_entitlement update_experiment update_offering update_product
-    update_product_store_state_plan update_project_ui_config update_targeting_rule
-    update_virtual_currency update_webhook_integration upload_product_store_state_screenshot
+    archive_entitlement archive_offering archive_product archive_virtual_currency
+    assign_customer_offering attach_offering_to_paywall attach_products_to_entitlement
+    attach_products_to_package create_app create_audience create_entitlement create_experiment
+    create_offering create_packages create_paywall_ai create_product
+    create_product_store_state_plan create_project create_targeting_rule create_virtual_currency
+    create_webhook_integration delete_package_from_offering delete_targeting_rule
+    delete_webhook_integration detach_offering_from_paywall detach_products_from_entitlement
+    detach_products_from_package discard_product_store_state_plan duplicate_offering
+    duplicate_paywall edit_paywall_ai grant_customer_entitlement pause_experiment
+    plan_product_store_state_plan stop_experiment unarchive_entitlement unarchive_offering
+    unarchive_product unarchive_virtual_currency update_app update_audience update_entitlement
+    update_experiment update_offering update_product update_product_store_state_plan
+    update_project_ui_config update_targeting_rule update_virtual_currency
+    update_webhook_integration
+""".split())
+
+# Makes something live for the app's users at once: a paywall, an experiment. Needs `publish`.
+REVENUECAT_PUBLISH = frozenset("""
+    publish_paywall resume_experiment start_experiment unpublish_paywall
+""".split())
+
+# Changes or submits products in the app stores (App Store Connect, Google Play), the review
+# submission included. Needs `store-submission`.
+REVENUECAT_STORE = frozenset("""
+    apply_product_store_state_plan create_product_prices equalize_subscription_prices
+    set_product_store_state submit_products_to_store upload_product_store_state_screenshot
 """.split())
 
 # Sentry: direct tools and the tools execute_sentry_tool runs; analyze_issue_with_seer is paid
@@ -182,20 +192,20 @@ POSTHOG_WRITE = frozenset("""
     alert-destinations-create alert-destinations-delete alert-simulate alert-update
     annotation-create annotation-delete annotations-partial-update batch-export-create
     batch-export-delete batch-export-update broadcasts-create canvas-create canvas-draft-create
-    canvas-edit-create canvas-layout-patch canvas-layout-publish canvas-move
-    canvas-promote-create canvas-publish-create canvas-publish-current-version canvas-state-set
-    canvas-validate-create cdp-functions-create cdp-functions-delete cdp-functions-discard-draft
-    cdp-functions-invocations-create cdp-functions-list-revisions cdp-functions-partial-update
-    cdp-functions-publish cdp-functions-rearrange-partial-update cdp-functions-restore-revision
-    channel-create channel-instructions-update
-    cohorts-add-persons-to-static-cohort-partial-update cohorts-create cohorts-partial-update
-    cohorts-rm-person-from-static-cohort-partial-update comments-create
-    conversations-tickets-notes-destroy conversations-tickets-notes-partial-update
-    conversations-tickets-reply-create conversations-tickets-update conversations-views-create
-    conversations-views-update create-feature-flag custom-property-sources-backfill
-    custom-property-sources-sync dashboard-create dashboard-create-tile dashboard-delete
-    dashboard-delete-tile dashboard-reorder-tiles dashboard-tile-copy dashboard-transfer-tile
-    dashboard-update dashboard-update-text-tile data-catalog-certification-certify-execute
+    canvas-edit-create canvas-layout-patch canvas-move canvas-promote-create
+    canvas-publish-current-version canvas-state-set canvas-validate-create cdp-functions-create
+    cdp-functions-delete cdp-functions-discard-draft cdp-functions-invocations-create
+    cdp-functions-list-revisions cdp-functions-partial-update
+    cdp-functions-rearrange-partial-update cdp-functions-restore-revision channel-create
+    channel-instructions-update cohorts-add-persons-to-static-cohort-partial-update
+    cohorts-create cohorts-partial-update cohorts-rm-person-from-static-cohort-partial-update
+    comments-create conversations-tickets-notes-destroy
+    conversations-tickets-notes-partial-update conversations-tickets-reply-create
+    conversations-tickets-update conversations-views-create conversations-views-update
+    create-feature-flag custom-property-sources-backfill custom-property-sources-sync
+    dashboard-create dashboard-create-tile dashboard-delete dashboard-delete-tile
+    dashboard-reorder-tiles dashboard-tile-copy dashboard-transfer-tile dashboard-update
+    dashboard-update-text-tile data-catalog-certification-certify-execute
     data-catalog-certification-certify-prepare data-catalog-certification-deprecate-execute
     data-catalog-certification-deprecate-prepare data-catalog-certification-propose
     data-catalog-metric-approve-execute data-catalog-metric-approve-prepare
@@ -220,32 +230,29 @@ POSTHOG_WRITE = frozenset("""
     experiment-archive experiment-cleanup-task experiment-copy-to-project experiment-create
     experiment-create-from-prompt experiment-delete experiment-duplicate experiment-end
     experiment-freeze-exposure experiment-holdouts-create experiment-holdouts-destroy
-    experiment-holdouts-partial-update experiment-launch experiment-metrics-recalculation-create
-    experiment-migrate experiment-pause experiment-reset experiment-resume
-    experiment-saved-metrics-create experiment-saved-metrics-destroy
-    experiment-saved-metrics-partial-update experiment-ship-variant experiment-unarchive
-    experiment-unfreeze-exposure experiment-update experiments-bulk-update-tags-create
-    external-data-schemas-cancel external-data-schemas-delete-data
-    external-data-schemas-incremental-fields-create external-data-schemas-partial-update
-    external-data-schemas-reload external-data-schemas-resync
-    external-data-sources-bulk-update-schemas
+    experiment-holdouts-partial-update experiment-metrics-recalculation-create
+    experiment-migrate experiment-pause experiment-reset experiment-saved-metrics-create
+    experiment-saved-metrics-destroy experiment-saved-metrics-partial-update
+    experiment-unarchive experiment-unfreeze-exposure experiment-update
+    experiments-bulk-update-tags-create external-data-schemas-cancel
+    external-data-schemas-delete-data external-data-schemas-incremental-fields-create
+    external-data-schemas-partial-update external-data-schemas-reload
+    external-data-schemas-resync external-data-sources-bulk-update-schemas
     external-data-sources-check-cdc-prerequisites-create external-data-sources-create
     external-data-sources-create-webhook-create external-data-sources-delete-webhook-create
     external-data-sources-destroy external-data-sources-partial-update
     external-data-sources-preview-resource external-data-sources-refresh-schemas
     external-data-sources-reload external-data-sources-repair-cdc-create
     external-data-sources-update-webhook-inputs-create external-data-sources-wizard
-    feature-flag-archive feature-flag-disable feature-flag-enable
-    feature-flag-roll-out-to-everyone feature-flag-set-release-condition-rollout
-    feature-flag-unarchive feature-flags-bulk-delete-create
-    feature-flags-bulk-update-tags-create feature-flags-copy-dependencies-check
-    feature-flags-copy-flags-create feature-flags-test-evaluation-create
-    feature-flags-user-blast-radius-create file-download-batch-exports-cancel-create
-    file-download-batch-exports-count-rows-create file-download-batch-exports-create
-    heatmaps-saved-create heatmaps-saved-regenerate heatmaps-saved-update
-    identity-provider-configs-create-execute identity-provider-configs-create-prepare
-    identity-provider-configs-destroy-execute identity-provider-configs-destroy-prepare
-    identity-provider-configs-partial-update-execute
+    feature-flag-archive feature-flag-disable feature-flag-unarchive
+    feature-flags-bulk-delete-create feature-flags-bulk-update-tags-create
+    feature-flags-copy-dependencies-check feature-flags-copy-flags-create
+    feature-flags-test-evaluation-create feature-flags-user-blast-radius-create
+    file-download-batch-exports-cancel-create file-download-batch-exports-count-rows-create
+    file-download-batch-exports-create heatmaps-saved-create heatmaps-saved-regenerate
+    heatmaps-saved-update identity-provider-configs-create-execute
+    identity-provider-configs-create-prepare identity-provider-configs-destroy-execute
+    identity-provider-configs-destroy-prepare identity-provider-configs-partial-update-execute
     identity-provider-configs-partial-update-prepare
     identity-provider-configs-scim-token-create-execute
     identity-provider-configs-scim-token-create-prepare inbox-report-artefacts-create
@@ -300,8 +307,8 @@ POSTHOG_WRITE = frozenset("""
     skill-file-create skill-file-delete skill-file-rename skill-rename
     skill-store-install-command skill-update sql-variables-create sql-variables-delete
     sql-variables-update subscriptions-create subscriptions-delete subscriptions-partial-update
-    subscriptions-test-delivery-create survey-create survey-delete survey-launch survey-stop
-    survey-update surveys-summarize-responses-create update-feature-flag usage-metrics-create
+    subscriptions-test-delivery-create survey-create survey-delete survey-stop survey-update
+    surveys-summarize-responses-create update-feature-flag usage-metrics-create
     usage-metrics-destroy usage-metrics-partial-update user-home-settings-update
     user-settings-update view-create view-delete view-materialize view-run view-run-history
     view-unmaterialize view-update vision-alerts-create vision-alerts-delete
@@ -319,13 +326,21 @@ POSTHOG_WRITE = frozenset("""
     warehouse-column-annotations-partial-update warehouse-tables-create
     warehouse-tables-refresh-schema-create web-analytics-bot-rules-create
     web-analytics-bot-rules-destroy web-analytics-weekly-digest workflows-archive
-    workflows-create workflows-create-email-template workflows-discard-draft workflows-enable
+    workflows-create workflows-create-email-template workflows-discard-draft
     workflows-get-email-template workflows-list-batch-jobs workflows-list-email-templates
     workflows-list-invocations workflows-list-revisions workflows-list-versions
     workflows-patch-action-email workflows-patch-email-template workflows-patch-graph
-    workflows-publish workflows-restore-revision workflows-run-batch workflows-schedule-create
-    workflows-test-run workflows-update workflows-update-email-template
-    workflows-update-schedule
+    workflows-restore-revision workflows-schedule-create workflows-update
+    workflows-update-email-template workflows-update-schedule
+""".split())
+
+# Makes something live for end users or sends to them: a published workflow or function, a
+# launched survey or experiment, a flag turned on or rolled out, a batch run. Needs `publish`.
+POSTHOG_PUBLISH = frozenset("""
+    canvas-layout-publish canvas-publish-create cdp-functions-publish experiment-launch
+    experiment-resume experiment-ship-variant feature-flag-enable feature-flag-roll-out-to-everyone
+    feature-flag-set-release-condition-rollout survey-launch workflows-enable workflows-publish
+    workflows-run-batch workflows-test-run
 """.split())
 
 POSTHOG_VERBS_READ = frozenset({"help", "tools", "search", "info", "schema", "learn", "switch"})

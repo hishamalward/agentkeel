@@ -12,11 +12,22 @@ a class from a name's shape. It sorts a call into a class:
   paid          bills per call: needs `paid-job`, and a listed target too when the call names one
                 (a Sentry organization); a paid call with no target at all (DataForSEO) needs only
                 `paid-job`
+  publish       makes something live for end users at once, or sends to them (a paywall, an
+                experiment, a workflow, a flag rollout): needs `publish` and a listed target
+  store         changes or submits products in the app stores: needs `store-submission` and a
+                listed target
   unknown       a name the catalog does not list, however it is spelled: refused
 
 agentkeel.json, for example:
   "mcp": {"revenuecat": {"targets": ["proj1a2b3c"]}, "posthog": {"targets": ["12345"]},
           "sentry": {"targets": ["my-org"]}, "dataforseo": {}}
+`remote-write` alone never publishes and never submits to a store. The adapter sorts by the
+operation's name, not by every argument: a generic update that can also turn something on through
+a field (PostHog's update-feature-flag with "active") stays a remote write.
+
+PostHog's tools act on the server's active project and do not name it (only the project-* tools
+carry an id). The adapter cannot establish that target, so with specific targets listed it refuses
+those writes and says why; reads pass.
 "targets": ["*"] allows any target for that server. A server name the host gives a guarded
 service under another name is added with "servers": ["name"]. Servers with no adapter here pass and
 are reported as unsupported; a refusal stops only the MCP call, not the same credentials used from
@@ -27,8 +38,13 @@ import re
 
 from . import mcp_catalog as cat
 
-READ, WRITE, PAID, UNKNOWN = "read", "remote-write", "paid", "unknown"
+READ, WRITE, PAID, PUBLISH, STORE, UNKNOWN = "read", "remote-write", "paid", "publish", "store", "unknown"
 NO_TARGET = object()
+# the permission each class needs, and how a refusal describes the class
+NEEDS = {WRITE: ("remote-write", "changes the remote service"),
+         PAID: ("paid-job", "bills per call"),
+         PUBLISH: ("publish", "makes something live for end users or sends to them"),
+         STORE: ("store-submission", "changes or submits products in the app stores")}
 
 # server names each service is known by on Claude Code and Codex installs
 SERVERS = {
@@ -55,13 +71,10 @@ def match(tool_name, extra_servers=None):
     return None
 
 
-def _listed(name, read, write, paid=frozenset()):
-    if name in read:
-        return READ
-    if name in paid:
-        return PAID
-    if name in write:
-        return WRITE
+def _listed(name, read, write, paid=frozenset(), publish=frozenset(), store=frozenset()):
+    for cls, names in ((READ, read), (PAID, paid), (PUBLISH, publish), (STORE, store), (WRITE, write)):
+        if name in names:
+            return cls
     return UNKNOWN
 
 
@@ -89,7 +102,8 @@ def classify(call):
     agentkeel can read, or NO_TARGET for an operation that has no target at all."""
     a, svc = call.args, call.service
     if svc == "revenuecat":
-        return _listed(call.tool, cat.REVENUECAT_READ, cat.REVENUECAT_WRITE), a.get("project_id"), call.tool
+        return (_listed(call.tool, cat.REVENUECAT_READ, cat.REVENUECAT_WRITE, publish=cat.REVENUECAT_PUBLISH,
+                        store=cat.REVENUECAT_STORE), a.get("project_id"), call.tool)
     if svc == "sentry":
         name, args = call.tool, a
         if call.tool == "execute_sentry_tool":
@@ -110,7 +124,7 @@ def classify(call):
             target_tool = rest[0]
             body = _json_tail(str(a.get("command")))
             target = body.get("project_id") or (body.get("id") if target_tool.startswith("project") else None)
-            return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE),
+            return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE, publish=cat.POSTHOG_PUBLISH),
                     None if target is None else str(target), target_tool)
         return UNKNOWN, None, verb or "exec"
     if svc == "dataforseo":
@@ -143,19 +157,21 @@ def judge(call, rec, policy_mcp):
         return (f"{label} is not an action agentkeel's {call.service} adapter knows, so it is refused rather\n"
                 "than assumed to be a read. If the human wants it, they run it themselves, or the adapter\n"
                 "learns it.")
-    if cls == PAID:
-        if "paid-job" not in perms:
-            return (f"{label} bills per call and needs the 'paid-job' permission; task '{rec.get('task')}' has "
-                    f"{', '.join(sorted(perms)) or 'none'}.")
-        if target is NO_TARGET:
-            return None
-    elif "remote-write" not in perms:
-        return (f"{label} changes the remote service and needs the 'remote-write' permission; task "
-                f"'{rec.get('task')}' has {', '.join(sorted(perms)) or 'none'}.\n"
-                "A git push permission does not cover changes to other services.")
+    need, does = NEEDS[cls]
+    if need not in perms:
+        more = {WRITE: "\nA git push permission does not cover changes to other services.",
+                PUBLISH: "\n'remote-write' does not cover it.", STORE: "\n'remote-write' does not cover it."}
+        return (f"{label} {does} and needs the '{need}' permission; task '{rec.get('task')}' has "
+                f"{', '.join(sorted(perms)) or 'none'}." + more.get(cls, ""))
+    if target is NO_TARGET:
+        return None
     allowed = [str(t) for t in ((policy_mcp or {}).get(call.service) or {}).get("targets") or []]
     if "*" in allowed:
         return None
+    if target is None and call.service == "posthog":
+        return (f"{label} acts on PostHog's active project, which the call does not name, so agentkeel\n"
+                "cannot tell which project it changes. It is refused while agentkeel.json lists specific\n"
+                'projects. The human runs it, or allows every project with "mcp": {"posthog": {"targets": ["*"]}}.')
     if target is None:
         return (f"{label} acts on the remote service, and agentkeel cannot tell which "
                 f"{call.service} target it changes.\nIt is refused. agentkeel.json can allow every target for "

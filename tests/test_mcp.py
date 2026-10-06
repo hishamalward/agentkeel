@@ -132,6 +132,52 @@ class Adapters(RepoCase):
         self.refused("mcp__plugin_posthog_posthog__exec",
                      {"command": 'call --confirm project-settings-update {"id": 111}'}, "remote-write")
 
+    def test_remote_write_alone_never_publishes_or_submits(self):
+        self.declare(allow=("implement", "remote-write"))
+        for tool in ("publish_paywall", "unpublish_paywall", "start_experiment", "resume_experiment"):
+            err = self.refused("mcp__revenuecat__" + tool, {"project_id": "proj_ok"}, "'publish' permission")
+            self.assertIn("'remote-write' does not cover it", err)
+        for tool in ("submit_products_to_store", "apply_product_store_state_plan"):
+            err = self.refused("mcp__revenuecat__" + tool, {"project_id": "proj_ok"}, "'store-submission' permission")
+            self.assertIn("'remote-write' does not cover it", err)
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            json.dump({"mcp": {"posthog": {"targets": ["*"]}}}, fh)
+        for command in ('call workflows-publish {"id": "w"}', 'call --confirm workflows-run-batch {"workflow_id": "w"}',
+                        'call feature-flag-enable {"id": 3}', 'call experiment-launch {"id": 3}',
+                        'call --json survey-launch {"id": "s"}', 'call cdp-functions-publish {"id": "f"}'):
+            self.refused("mcp__plugin_posthog_posthog__exec", {"command": command}, "'publish' permission")
+        self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call update-feature-flag {"id": 3, "name": "n"}'})
+
+    def test_publish_and_store_calls_pass_with_their_own_permission_and_a_listed_target(self):
+        self.declare(allow=("implement", "publish"))
+        self.ok("mcp__revenuecat__publish_paywall", {"project_id": "proj_ok", "paywall_id": "p"})
+        self.refused("mcp__revenuecat__publish_paywall", {"project_id": "proj_other"}, "targets 'proj_other'")
+        self.refused("mcp__revenuecat__submit_products_to_store", {"project_id": "proj_ok"},
+                     "'store-submission' permission")
+        self.refused("mcp__revenuecat__create_product", {"project_id": "proj_ok"}, "'remote-write' permission")
+        self.declare(allow=("implement", "store-submission"))
+        self.ok("mcp__revenuecat__submit_products_to_store", {"project_id": "proj_ok"})
+        self.refused("mcp__revenuecat__submit_products_to_store", {"project_id": "proj_other"}, "targets 'proj_other'")
+        self.refused("mcp__revenuecat__publish_paywall", {"project_id": "proj_ok"}, "'publish' permission")
+
+    def test_a_posthog_write_on_the_active_project_says_why_it_is_refused(self):
+        self.declare(allow=("implement", "remote-write", "publish"))
+        for command in ('call update-feature-flag {"id": 4, "name": "x"}', 'call survey-launch {"id": "s"}'):
+            err = self.refused("mcp__plugin_posthog_posthog__exec", {"command": command}, "active project")
+            self.assertIn("does not name", err)
+        self.ok("mcp__plugin_posthog_posthog__exec",
+                {"command": 'call project-settings-update {"id": 111, "autocapture_opt_out": true}'})
+
+    def test_every_listed_operation_has_one_class(self):
+        import itertools
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
+        from agentkeel_core import mcp_catalog as cat
+        for prefix in ("REVENUECAT_", "SENTRY_", "POSTHOG_"):
+            sets = {n: getattr(cat, n) for n in dir(cat) if n.startswith(prefix) and "VERBS" not in n}
+            for a, b in itertools.combinations(sorted(sets), 2):
+                self.assertFalse(sets[a] & sets[b], f"{a} and {b} share {sorted(sets[a] & sets[b])}")
+
     def test_no_task_refuses_writes_and_paid_calls(self):
         self.refused("mcp__revenuecat__create_product", {"project_id": "proj_ok"}, "no task")
         self.refused("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/x/live"}, "no task")

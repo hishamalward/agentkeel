@@ -23,7 +23,7 @@ import time
 
 SIZES = ("small", "medium", "large")
 PERMISSIONS = ("review", "implement", "merge", "push", "distribution-build", "store-submission",
-               "paid-job", "remote-write")
+               "paid-job", "remote-write", "publish")
 DEFAULT_PROTECTED = ("main", "master")
 # The session id each host gives the shell commands it runs. When one agent runs inside another
 # (Codex started from a Claude Code shell), both variables are set; the nearest agent process
