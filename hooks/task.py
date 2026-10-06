@@ -447,6 +447,9 @@ def init(args, environ):
                  + f" in {reg_path}: on every host with the plugin, the guards act in this repository and"
                  " all its worktrees, before any commit"))
     rows.append(("hooks", record_interpreter(environ)))
+    ppath, ptext = record.profile(environ)
+    rows.append(("profile", f"{ppath} ({ptext.rstrip(chr(10)).count(chr(10)) + 1} lines)" if ptext
+                 else f"none (optional: {ppath})"))
     pol = record.policy(top)
     rows.append(("in force", "protected branches: " + ", ".join(sorted(pol["protected"]))
                  + "; every write needs a declared task and its own worktree; shipping needs its permission"))

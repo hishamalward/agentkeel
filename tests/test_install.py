@@ -135,6 +135,9 @@ class Install(unittest.TestCase):
         cfg = json.loads(self.get(".codex/hooks.json"))
         cmds = [h["command"] for g in cfg["hooks"]["PreToolUse"] for h in g["hooks"]]
         self.assertTrue(any("/.claude/hooks/task-guard.py" in c for c in cmds))
+        stop = [h["command"] for g in cfg["hooks"]["Stop"] for h in g["hooks"]]
+        self.assertTrue(any("/.claude/hooks/stop-report.py" in c for c in stop))
+        self.assertTrue(os.path.exists(os.path.join(self.repo, ".claude", "hooks", "stop-report.py")))
         self.run_install("--uninstall", "--apply")
         self.assertFalse(os.path.exists(os.path.join(self.repo, ".codex", "hooks.json")))
 
@@ -184,6 +187,26 @@ class InstallContract(unittest.TestCase):
         hooks = os.path.join(os.path.dirname(INSTALL), "hooks")
         shipped = set(mod.HOOK_FILES) | {"session-start.py", "run.sh"}  # these ship only with the plugin
         self.assertEqual(shipped, {f for f in os.listdir(hooks) if f.endswith((".py", ".sh"))})
+
+
+class SharedSkill(unittest.TestCase):
+    """skills/review-page/SKILL.md ships in the plugin root, which both hosts install whole."""
+
+    def test_the_review_page_skill_is_shipped_to_both_hosts(self):
+        path = os.path.join(ROOT, "skills", "review-page", "SKILL.md")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        front = text.split("---\n")[1]
+        self.assertIn("name: review-page\n", front)
+        self.assertIn("description: \"Write or update a present-state review page:", front)
+        self.assertLessEqual(len(text.splitlines()), 60)
+        # Claude Code loads skills/<name>/SKILL.md from the plugin root; Codex needs the manifest field
+        with open(os.path.join(ROOT, ".codex-plugin", "plugin.json")) as fh:
+            self.assertEqual(json.load(fh)["skills"], "./skills/")
+        for rel in (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"):
+            with open(os.path.join(ROOT, rel)) as fh:
+                src = json.load(fh)["plugins"][0]["source"]
+            self.assertIn(src if isinstance(src, str) else src["path"], ("./", "."), rel)
 
 
 class UserHookWithAgentkeelName(unittest.TestCase):
