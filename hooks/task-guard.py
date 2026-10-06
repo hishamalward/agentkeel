@@ -40,7 +40,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import checks, gitops, host, pages, patch as patchmod, record, shell  # noqa: E402
+from agentkeel_core import checks, evidence, gitops, host, pages, patch as patchmod, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json",)
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -596,6 +596,10 @@ def decide(payload, environ=os.environ):
                     "or tell the human this tool needs an adapter.")
     except Block as b:
         return block(str(b))
+    try:
+        evidence.start(rec, payload, environ)
+    except Exception as exc:  # recording must never block the call
+        sys.stderr.write(f"task-guard: verify start not recorded: {exc}\n")
     return 0
 
 

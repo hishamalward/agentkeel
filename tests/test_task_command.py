@@ -80,8 +80,7 @@ class TaskCommand(RepoCase):
         self.assertEqual(self.task("show").returncode, 0)
         out = self.task("verify", "--", sys.executable, "-c", "raise SystemExit(3)")
         self.assertEqual(out.returncode, 3)
-        ev = self.record()["evidence"][-1]
-        self.assertEqual(ev["exit"], 3); self.assertTrue(ev["head"])
+        self.assertEqual(self.record()["evidence"], [])  # the hooks record results, not the command
         self.assertEqual(self.task("end").returncode, 0)
         self.assertEqual(self.task("show").returncode, 1)
 
@@ -286,7 +285,7 @@ class Init(RepoCase):
         self.fake_cli("codex", "PLUGIN               STATUS              VERSION  SOURCE\n"
                                "agentkeel@agentkeel  installed, enabled  0.4.0    ./\n")
         out = self.init().stdout
-        self.assertIn("0 of 5 hooks trusted", out)
+        self.assertIn("0 of 6 hooks trusted", out)
         self.assertNotIn("Python 3.11", out)
 
     def test_a_policy_created_after_an_absence_check_is_kept_byte_for_byte(self):

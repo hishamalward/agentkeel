@@ -148,7 +148,8 @@ def codex_args(rec):
     only. The filesystem rules are one inline table, because a dotted -c key cannot hold a path
     that contains a dot."""
     name = "agentkeel-" + rec["task"]
-    rules = {'":workspace_roots"': '{"."="write",".git"="write"}',
+    # .claude holds a project install's hook scripts; Codex trusts a hook's command, not its file
+    rules = {'":workspace_roots"': '{"."="write",".git"="write",".claude"="read"}',
              _toml_str(rec["scratch"]): '"write"', '":tmpdir"': '"read"', '":slash_tmp"': '"read"'}
     for w in rec.get("writable") or []:
         rules[_toml_str(w)] = '"write"'

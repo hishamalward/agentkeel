@@ -9,7 +9,7 @@
   task.py start <task-id> --size small|medium|large --allow <permissions>
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
-  task.py verify -- <command...>   run a check and record its exit code against HEAD
+  task.py verify -- <command...>   run a check; the hooks record its result against HEAD and the tree
   task.py end                      drop the record (the task is finished or abandoned)
   task.py approve <task-id|page>   HUMAN ONLY: approve the boundary of a docs/ page
 
@@ -169,25 +169,17 @@ def show(args, environ):
 
 
 def verify(args, environ):
-    session = record.session_from_env(environ)
-    rec = record.load(session, environ)
-    if not rec:
-        return fail("no task declared for this session; declare one with task.py start")
+    """Run a check. The hooks, not this command, record its result: the guard notes the start
+    (HEAD and the working tree), and the PostToolUse hook the completion the host reports. A
+    record the agent's own command writes would prove nothing."""
     cmd = list(args.cmd or [])
     if cmd and cmd[0] == "--":
         cmd = cmd[1:]
     if not cmd:
         return fail("usage: task.py verify -- <command...>")
-    started = time.time()
     code = subprocess.call(cmd)
-    head = gitops.run_git(os.getcwd(), "rev-parse", "HEAD")
-    dirty = bool(gitops.run_git(os.getcwd(), "status", "--porcelain"))
-    rec["evidence"] = (rec.get("evidence") or [])[-19:] + [{
-        "command": " ".join(cmd), "exit": code, "head": head, "dirty_tree": dirty,
-        "at": int(started), "seconds": round(time.time() - started, 1)}]
-    record.save(rec, environ)
-    sys.stderr.write(f"agentkeel: recorded `{' '.join(cmd)}` exit {code} at {head[:12] if head else '?'}"
-                     f"{' (uncommitted changes present)' if dirty else ''}\n")
+    sys.stderr.write(f"agentkeel: `{' '.join(cmd)}` exited {code}; the hooks record the result "
+                     "(task.py show)\n")
     return code
 
 

@@ -34,6 +34,12 @@
         "hooks": [
           { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/plan-size-guard.sh\" --plugin", "timeout": 30 }
         ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/verify-record.py\" --plugin", "timeout": 30 }
+        ]
       }
     ]
   }

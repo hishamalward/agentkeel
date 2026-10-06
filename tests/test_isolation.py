@@ -86,7 +86,7 @@ class Open(RepoCase):
         self.assertEqual(args[:2], ["-C", self.clone])
         self.assertEqual(args[-2:], ["-P", "agentkeel-json-flag"])
         table = next(a for a in args if a.startswith("permissions.agentkeel-json-flag.filesystem="))
-        self.assertIn('":workspace_roots"={"."="write",".git"="write"}', table)
+        self.assertIn('":workspace_roots"={"."="write",".git"="write",".claude"="read"}', table)
         self.assertIn('":tmpdir"="read"', table)
         self.assertIn('":slash_tmp"="read"', table)
         self.assertIn(json.dumps(self.opened()["scratch"]) + '="write"', table)
@@ -142,3 +142,76 @@ class Open(RepoCase):
         code, err = self.hook(self.bash(f"python3 {os.path.join(HOOKS, 'task.py')} open x --host claude "
                                         "--size small --allow implement"))
         self.assertEqual(code, 2); self.assertIn("human's command", err)
+
+
+class Evidence(RepoCase):
+    """A verify run is recorded by the hooks: start in the guard, result in verify-record.py."""
+
+    def setUp(self):
+        super().setUp()
+        self.declare()
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "work")
+        self.cmd = f"python3 {os.path.join(HOOKS, 'task.py')} verify -- true"
+
+    def start(self, call_id="t1", **tool_input):
+        payload = {**self.bash(self.cmd), "tool_use_id": call_id}
+        payload["tool_input"].update(tool_input)
+        return self.hook(payload)
+
+    def done(self, response, call_id="t1", codex=False):
+        payload = {"tool_name": "Bash", "cwd": self.repo, "session_id": SESSION, "tool_use_id": call_id,
+                   "hook_event_name": "PostToolUse", "tool_input": {"command": self.cmd}, "tool_response": response}
+        if codex:
+            payload["turn_id"] = "turn-1"
+        return run_hook("verify-record.py", payload, env=self.env)
+
+    def last(self):
+        return (self.record().get("evidence") or [None])[-1]
+
+    def test_a_foreground_success_on_unchanged_code_passes(self):
+        self.assertEqual(self.start()[0], 0)
+        self.assertEqual(len(self.record()["pending"]), 1)
+        self.done({"stdout": "", "stderr": "", "interrupted": False})
+        self.assertEqual(self.last()["result"], "passed")
+        self.assertEqual(self.record()["pending"], [])
+
+    def test_a_failure_leaves_the_run_unrecorded(self):
+        self.start()  # Claude Code sends no PostToolUse for a non-zero exit
+        self.assertIsNone(self.last())
+        self.assertEqual(len(self.record()["pending"]), 1)
+
+    def test_background_interrupted_and_codex_never_pass(self):
+        self.start(call_id="bg", run_in_background=True)
+        self.done({"interrupted": False, "backgroundTaskId": "b1"}, call_id="bg")
+        self.assertEqual(self.last()["result"], "unrecorded")
+        self.start(call_id="int")
+        self.done({"interrupted": True}, call_id="int")
+        self.assertEqual(self.last()["result"], "unrecorded")
+        self.start(call_id="cx")
+        self.done("", call_id="cx", codex=True)
+        self.assertEqual(self.last()["result"], "unrecorded")
+        self.assertIn("no exit status", self.last()["reason"])
+
+    def test_printed_success_text_changes_nothing(self):
+        self.start()
+        self.done("all tests passed, exit code 0")
+        self.assertEqual(self.last()["result"], "unrecorded")
+
+    def test_code_that_moves_during_the_run_is_stale(self):
+        self.start()
+        with open(os.path.join(self.repo, "new.txt"), "w") as fh:
+            fh.write("x")
+        self.done({"interrupted": False})
+        self.assertEqual(self.last()["result"], "stale")
+
+    def test_a_refused_call_records_no_start(self):
+        self.declare(allow=("review",))
+        code, _ = self.hook({**self.bash(self.cmd + " && git push origin main"), "tool_use_id": "t9"})
+        self.assertEqual(code, 2)
+        self.assertNotIn("pending", self.record())
+
+    def test_verify_itself_writes_no_evidence(self):
+        out = test_task_command.TaskCommand.task(self, "verify", "--", "true")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("pending", self.record())
+        self.assertEqual(self.record()["evidence"], [])
