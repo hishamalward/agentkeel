@@ -36,6 +36,14 @@ rules that matter into hooks, outside the model's memory.
 - **Shipping is a permission.** Moving `main` needs `merge`. Any remote push needs `push`.
   Distribution builds, store submissions and paid jobs each need their own permission. Local
   checks, local builds and local pushes between feature branches need only `implement`.
+- **An isolated task, when you open it.** `task.py open` gives a task its own clone and starts
+  Claude Code or Codex there with an OS sandbox boundary for that session only: every shell
+  write, from any command or script, stays in the clone, its scratch folder and declared caches.
+  `task.py import` brings the result back by exact commit; `task.py release` deletes the clone
+  only when nothing in it would be lost.
+- **Remote changes are a permission.** For RevenueCat, PostHog, Sentry and DataForSEO, an MCP call
+  that changes the service needs `remote-write` and a target that `agentkeel.json` lists, a call
+  that bills needs `paid-job`, and an action the adapter does not know is refused.
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
 - **Records with one current owner per fact.** In a repository that opts in, the agents' work
@@ -86,8 +94,8 @@ Installing the plugin makes AgentKeel available; opting a repository in turns it
 
 ```bash
 cd path/to/your-repo
-python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py init   # Claude Code
-python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py init    # Codex
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.7.0/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.7.0/hooks/task.py init    # Codex
 ```
 
 `init` creates `agentkeel.json` only when it is missing, and never changes an existing one. It
@@ -135,8 +143,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.7.0/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.7.0/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it. The same message says where the session is (the
 checkout, its branch, its task) and lists the repository's other worktrees with the task that
 holds each.
@@ -209,10 +217,35 @@ What the hooks refuse on the way, and why:
 "Merge" did not include "push", so the agent stops at step 5 and reports that the work is
 ready to push.
 
+## An isolated task
+
+Run these in your own terminal, in the shared checkout. The agent cannot run them.
+
+```bash
+# A clone of its own, a scratch folder, and the host started there inside its sandbox boundary
+python3 "$TASK" open json-flag --host claude --size small --allow implement
+# ... the session works and commits in ../<repo>-json-flag ...
+python3 "$TASK" import json-flag --sha <the full commit id the work was reviewed at>
+git merge --ff-only <that commit id>
+python3 "$TASK" release json-flag      # refused while anything in the clone is not preserved
+```
+
+The session's boundary comes from the command line (`claude --settings <file>`, or `codex -c ...`),
+so no user or project settings change, and two open tasks never share a boundary. The design and
+the measured results on both hosts are in [enforcement design](docs/enforcement-design.md).
+
 ## Limits
 
-- The hooks see the agent's tool calls, not the filesystem. A shell write that is not git
-  (`sed -i`, `>`), a command inside a script, and MCP tools are not checked.
+- Without `task.py open`, the hooks see the agent's tool calls, not the filesystem: a shell
+  write that is not git (`sed -i`, `>`) and a command inside a script are not checked. With it,
+  the host's OS sandbox limits those writes to the task's clone, scratch folder and declared caches.
+- Claude Code gives every session of one user the same temp folder (`/tmp/claude-<uid>`), so
+  temp files are not isolated between Claude Code sessions.
+- MCP servers other than RevenueCat, PostHog, Sentry and DataForSEO are not checked. An adapter
+  stops the MCP call only, not the same credentials used from a shell, a script or a browser.
+  Browser automation that changes remote state is unsupported.
+- Codex reports no exit status to its hooks, so a test run in Codex is recorded as unrecorded.
+  Shipping evidence comes from a CI required check on both hosts.
 - The task record is the agent's declaration, not your consent. It makes every action match
   one stated scope. For consent itself, use your host's permission prompts.
 - An approval digest detects a change to an approved boundary. It does not prove who approved.
@@ -233,7 +266,7 @@ ready to push.
 | [Required checks](docs/required-checks.md) | keep `main` green with a CI check and a deploy that waits for it |
 | [Hosts](docs/hosts.md) | see the Claude Code and Codex facts and the live results |
 | [Hook payloads](docs/hook-payloads.md) | read the captured JSON that the hooks parse |
-| [Enforcement design](docs/enforcement-design.md) | see what each host and AgentKeel enforce, and the planned shell and MCP controls (not built) |
+| [Enforcement design](docs/enforcement-design.md) | see what each host and AgentKeel enforce: task clones, the session sandbox, the MCP adapters, and the measured limits |
 
 Related work: [agent-slots](https://github.com/hishamalward/agent-slots) isolates the database,
 ports and queues of several agents on one machine. AgentKeel is the process side; agent-slots is

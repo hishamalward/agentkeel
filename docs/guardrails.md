@@ -45,7 +45,12 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: it is refused with a reason | ConfiguredRoute |
 | One review round per scope (G3) | guidance only |  |
 | Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
-| Shell writes that are not git, commands inside scripts, MCP tools | unsupported |  |
+| In a session started with `task.py open`: a shell write outside the task's clone, scratch folder and declared caches, from any command, script or child process | prevents, by the host's OS sandbox (Claude Code `--settings`, Codex permission profile) | Open, ImportAndRelease; live on both hosts |
+| `task.py open`, `import` and `release` are the human's commands | prevents | Open, ImportAndRelease |
+| A guarded MCP server (RevenueCat, PostHog, Sentry, DataForSEO): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job`, an unknown action is refused | prevents, also for Codex calls inside `exec` | Adapters; live on both hosts |
+| A plugin hook's interpreter or imports redirected by the environment | prevents: the hooks run through `run.sh` (recorded interpreter, `-I`, emptied environment) | HookLauncher |
+| A test run's result is recorded by the hooks, bound to `HEAD` and the tree; only an unambiguous foreground success on unchanged code is "passed" | records; Codex runs stay unrecorded | Evidence |
+| Shell writes that are not git and commands inside scripts, in a session not started with `task.py open`; other MCP servers; browser automation | unsupported |  |
 
 ## Blind spots
 

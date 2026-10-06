@@ -11,7 +11,7 @@
       "displayName": "AgentKeel",
       "source": "./",
       "description": "Guardrail plugins for Claude Code and Codex: task scope, worktree isolation, and shipping checks. Acts only in repositories that opt in with agentkeel.json.",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "author": { "name": "Hisham Al-Ward" },
       "homepage": "https://github.com/hishamalward/agentkeel",
       "repository": "https://github.com/hishamalward/agentkeel",

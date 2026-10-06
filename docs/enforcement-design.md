@@ -2,9 +2,10 @@
 
 This page says what each layer can enforce today, on each host, and how AgentKeel closes its two
 largest gaps: shell and script writes outside a task's boundary, and MCP calls that change, publish,
-deploy or spend. Nothing on it is built. The feasibility results come from throwaway repositories
-on macOS with Claude Code 2.1.290 and Codex 0.160.0 (2026-10-06); each one names what it proves and
-what it leaves open.
+deploy or spend. It is built in 0.7.0 (`task.py open`, `import`, `release`, the hook launcher, the
+evidence hooks and the four MCP adapters), and the live acceptance passed on both hosts. The
+feasibility results come from throwaway repositories on macOS with Claude Code 2.1.290 and Codex
+0.160.0 (2026-10-06); each one names what it proves and what it leaves open.
 
 ## Who enforces what, today
 
@@ -312,24 +313,42 @@ A batch means one tool call that carries several actions: the hook sees it whole
 one refused part refuses the whole batch. Separate parallel calls are not a batch: each forbidden call
 must reach the server zero times, and its permitted siblings may run.
 
-## Build order
+## What is built (0.7.0)
 
-1. Feasibility: done on 2026-10-06; every probe above becomes a regression or acceptance test.
-2. Shell isolation for both hosts: `task.py open`, independent clones, session-only boundaries,
-   `task.py import`, evidence by hook, and the ownership, resume and cleanup changes.
-3. The four adapters. Both hosts showed an interception path.
+The four choices above were approved on 2026-10-06: `remote-write` scoped to service and target,
+remote browser activity unsupported with local QA kept, an independent clone for every task size,
+and per-session settings on both hosts. Every feasibility probe is now a test in
+`tests/test_isolation.py` or `tests/test_mcp.py`. Where the build differs from the text above:
 
-This is integration work across both hosts, not a hook patch.
+- **Codex profile selection.** `codex` and `codex exec` have no `-P` (only `codex sandbox` has it),
+  so the session selects its profile with `-c default_permissions="agentkeel-<task>"`. Found in the
+  live run.
+- **No `PostToolUseFailure` entry.** Codex documents no such event, and both hosts read one hooks
+  file. On Claude Code a failure sends no `PostToolUse`, so the run stays pending, which counts as
+  unrecorded, never passed.
+- **No `deploy` or `publish` permission yet.** None of the four adapters has a deploy or publish
+  action; the permission arrives with the first adapter that needs it.
+- **Project installs.** Their hook scripts live in `.claude/hooks/` inside the repository, and Codex
+  trusts a hook's command, not its script, so the Codex task profile keeps `.claude` read-only.
 
-## Decisions for the founder
+Live acceptance, both hosts, sessions started from `task.py open` with the branch's hooks:
 
-1. **`remote-write`**, scoped to service and target, separate from `push`, with paid, deploy and
-   publish still granted separately.
-2. **Browser automation**: explicitly unsupported for remote changes in this version; local QA stays.
-3. **Commits**: in an independent task clone, with the shared `.git` read-only. No writable shared
-   `.git`, no prompt per commit.
-4. **Settings**: per session on both hosts, written by `task.py open`; measured without a user-scope
-   change.
+| Check | Claude Code | Codex |
+|---|---|---|
+| Shell write, file-tool write and a signed commit in the task's clone | pass | pass |
+| Shell write to the shared checkout, another task's clone, `AGENTKEEL_HOME` | refused by the sandbox | refused by the sandbox |
+| File-tool write to the shared checkout | refused by the guard | refused by the guard |
+| `task.py import` from the agent | refused by the guard | refused by the guard |
+| Session start binds the session to the opened task | pass | pass |
+| `verify` result | passed | unrecorded (no exit status) |
+| MCP: allowed read and allowed write reach the server | pass | pass, inside `exec` |
+| MCP: other target, unknown action, paid without `paid-job`, refused write in a parallel pair | refused, 0 calls at the server | refused, 0 calls at the server, built name included |
+| `import` then `release` by the human | release refused before import, allowed after | the same |
+
+**Open: shipping from an isolated session.** Inside the sandbox the agent cannot move the shared
+`main` or push from the shared checkout, so a task opened with `task.py open` ships through the
+human's `import` and merge. A session that is not opened works as before, with the guards only. A
+trusted ship step that the hooks run for a task with `merge` and `push` is a later decision.
 
 ## Not in this design
 
