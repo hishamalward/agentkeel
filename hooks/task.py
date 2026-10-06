@@ -351,6 +351,19 @@ INDEX_HEAD = """<!doctype html>
 """
 
 
+def record_interpreter(environ):
+    """The interpreter the plugin's hook launcher (hooks/run.sh) runs, recorded by the human's init
+    so a session's environment cannot choose it. Python 3.10 or later, by its real path."""
+    exe = os.path.realpath(sys.executable)
+    if sys.version_info < (3, 10) or not os.path.isabs(exe):
+        return f"not recorded: {exe} is Python {sys.version.split()[0]}; run init with Python 3.10 or later"
+    path = os.path.join(record.home(environ), "interpreter")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(exe + "\n")
+    return f"run with {exe} in isolated mode (recorded in {path})"
+
+
 def init(args, environ):
     """Opt the repository in without touching an existing policy, and say what that does and
     does not turn on. Installation (the host has the plugin), opt-in (this repository) and trust
@@ -422,6 +435,7 @@ def init(args, environ):
     rows.append(("opt-in", ("registered" if new else "already registered")
                  + f" in {reg_path}: on every host with the plugin, the guards act in this repository and"
                  " all its worktrees, before any commit"))
+    rows.append(("hooks", record_interpreter(environ)))
     pol = record.policy(top)
     rows.append(("in force", "protected branches: " + ", ".join(sorted(pol["protected"]))
                  + "; every write needs a declared task and its own worktree; shipping needs its permission"))

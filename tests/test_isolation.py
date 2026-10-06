@@ -215,3 +215,68 @@ class Evidence(RepoCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertNotIn("pending", self.record())
         self.assertEqual(self.record()["evidence"], [])
+
+
+class HookLauncher(RepoCase):
+    """hooks/run.sh: a verified interpreter, isolated mode, an emptied environment."""
+    RUN = os.path.join(HOOKS, "run.sh")
+
+    def launch(self, hook, payload, env=None, cwd=None):
+        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")}
+        return subprocess.run(["/bin/sh", self.RUN, hook], input=json.dumps(payload), text=True,
+                              capture_output=True, cwd=cwd or self.repo, env={**clean, **self.env, **(env or {})})
+
+    def plant(self, folder):
+        os.makedirs(folder, exist_ok=True)
+        marker = os.path.join(self.tmp, "PLANTED")
+        with open(os.path.join(folder, "json.py"), "w") as fh:
+            fh.write(f"open({marker!r}, 'a').write('loaded')\nraise ImportError('planted')\n")
+        return marker
+
+    def test_a_poisoned_environment_does_not_reach_the_hook(self):
+        marker = self.plant(os.path.join(self.tmp, "evil"))
+        self.plant(self.repo)  # also a json.py in the session's working folder
+        out = self.launch("task-guard.py", self.write("src/a.py"),
+                          env={"PYTHONPATH": os.path.join(self.tmp, "evil"), "PYTHONSTARTUP": marker,
+                               "PYTHONHOME": "/nonexistent"})
+        self.assertEqual(out.returncode, 2, out.stderr)  # the guard ran: no task is declared
+        self.assertIn("declare", out.stderr.lower())
+        self.assertFalse(os.path.exists(marker), "a planted module ran inside the hook")
+
+    def test_the_plain_form_is_redirected_by_the_same_environment(self):
+        marker = self.plant(os.path.join(self.tmp, "evil"))
+        subprocess.run([sys.executable, os.path.join(HOOKS, "task-guard.py")], input="{}", text=True,
+                       capture_output=True, env={**os.environ, "PYTHONPATH": os.path.join(self.tmp, "evil")})
+        self.assertTrue(os.path.exists(marker), "baseline: without the launcher the planted module loads")
+
+    def test_agentkeel_home_passes_and_the_record_is_read(self):
+        self.declare()
+        out = self.launch("task-guard.py", self.bash("git status"))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_the_recorded_interpreter_is_used(self):
+        fake = os.path.join(self.tmp, "fakepy")
+        with open(fake, "w") as fh:
+            fh.write(f"#!/bin/sh\necho \"$@\" > {os.path.join(self.tmp, 'used')}\n")
+        os.chmod(fake, 0o755)
+        os.makedirs(self.home, exist_ok=True)
+        with open(os.path.join(self.home, "interpreter"), "w") as fh:
+            fh.write(fake + "\n")
+        self.launch("task-guard.py", {})
+        with open(os.path.join(self.tmp, "used")) as fh:
+            self.assertTrue(fh.read().startswith("-I " + os.path.join(os.path.realpath(HOOKS), "task-guard.py")))
+
+    def test_only_a_hook_file_in_the_folder_runs(self):
+        for bad in ("../install.py", "/bin/sh", ".hidden", "missing.py"):
+            out = self.launch(bad, {})
+            self.assertEqual(out.returncode, 0)
+            self.assertIn("agentkeel:", out.stderr)
+
+    def test_every_plugin_hook_goes_through_the_launcher(self):
+        with open(os.path.join(HOOKS, "hooks.json")) as fh:
+            groups = [g for gs in json.load(fh)["hooks"].values() for g in gs]
+        commands = [h["command"] for g in groups for h in g["hooks"]]
+        self.assertTrue(commands)
+        for c in commands:
+            self.assertTrue(c.startswith('/bin/sh "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh" '), c)
+            self.assertTrue(os.path.exists(os.path.join(HOOKS, c.split()[2])), c)

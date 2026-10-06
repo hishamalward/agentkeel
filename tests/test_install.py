@@ -182,7 +182,7 @@ class InstallContract(unittest.TestCase):
         core = os.path.join(os.path.dirname(INSTALL), "hooks", "agentkeel_core")
         self.assertEqual(sorted(mod.CORE_FILES), sorted(f for f in os.listdir(core) if f.endswith(".py")))
         hooks = os.path.join(os.path.dirname(INSTALL), "hooks")
-        shipped = set(mod.HOOK_FILES) | {"session-start.py"}  # session-start ships only with the plugin
+        shipped = set(mod.HOOK_FILES) | {"session-start.py", "run.sh"}  # these ship only with the plugin
         self.assertEqual(shipped, {f for f in os.listdir(hooks) if f.endswith((".py", ".sh"))})
 
 
