@@ -2,7 +2,7 @@
 
 Before its first write, the agent declares its task in one command. The record answers three separate questions: how much process (size), which actions (permissions) and where (worktrees). The hooks read it on every tool call.
 
-A repository opts in once, before any task: `task.py init` in the repository creates `agentkeel.json` when it is missing (it never changes an existing one), keeps one agentkeel block in `AGENTS.md` (the shared instructions for both hosts; never a `CLAUDE.md`), registers the opt-in for the repository and all its worktrees, and reports what the policy turns on and each host's install, enable and trust state. It does not commit.
+A repository opts in once, before any task: `task.py init` in the repository creates `agentkeel.json` when it is missing (it never changes an existing one), keeps one agentkeel block in `AGENTS.md` (the shared instructions for both hosts; never a `CLAUDE.md`), registers the opt-in for the repository and all its worktrees, and reports what the policy turns on, the human's profile (its path and line count, or none), and each host's install, enable and trust state. It does not commit.
 
 Declare it from your reading of the human's request:
 
@@ -51,7 +51,11 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 - **A new task in the same session starts fresh.** Only re-declaring the same task id keeps its worktrees, write roots and evidence.
 - **Evidence**: `task.py verify -- <command>` runs a check; the hooks record its result, not the command. The guard notes the start with `HEAD` and a tree id, read without running anything the repository's config names; the PostToolUse hook records "passed" only for a foreground success that Claude Code reports with `interrupted` false, on unchanged code. A background run, an interrupted run, a run where the code moved, and every Codex run (no exit status reaches its hooks) are unrecorded or stale. A failure leaves the run pending. It is a record, not a gate: shipping is gated by the CI required check.
 - **The human approves a boundary**: `task.py approve <feature|page>` writes the page's `keel-approval` meta (a digest of the boundary, the approver from git `user.name`, the date) and keeps the approved boundary in `AGENTKEEL_HOME/approvals/`. The guard refuses it when the agent runs it, and refuses an agent edit that adds, changes or removes the approval, or that renames or deletes an approved page. The human runs it in a terminal of their own.
-- **`task.py end`** drops the record and lists what the task owned. It does not remove the task's worktrees or slots: cleanup that knows which task owns what is not built yet.
+- **`task.py end`** drops the record and lists what the task owned. It does not remove the task's worktrees or slots. While the record exists, the stop hook reports at the end of each turn what the task still holds: each worktree that still exists (its branch, whether its tip is merged into a protected branch and so can be removed, or how many commits are not, and how many files are changed or untracked), and for a session opened with `task.py open`, whether its clone is ready to release or why not. It speaks once per distinct report and removes nothing; removing is the human's step.
+
+## The human's profile
+
+`profile.md` in `AGENTKEEL_HOME` (default `~/.agentkeel/profile.md`) holds the human's standing preferences for every session on both hosts. In a repository that opted in, the session-start message prints it after the lines that say where the session is and before the task instructions, under one heading line with its path and line count. The agent follows it. It is plain text for the session: it grants no permission and changes no guard. At most 200 lines or 8,000 characters are printed, and one line says so when it is cut. A missing or empty file prints nothing. A session opened in its own clone gets it too.
 
 ## The repository policy file
 

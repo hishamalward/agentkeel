@@ -7,8 +7,9 @@ holds each, read from the task records. Everything is derived at session start, 
 
 When agentkeel arrives as a plugin, its scripts live in the plugin folder, not in the repository,
 so the instruction file cannot name them. This prints, as context for the session, the one
-command the agent needs, with this install's real path. With --plugin it prints only in
-repositories that opted in with agentkeel.json. It never blocks.
+command the agent needs, with this install's real path. Between the two it prints the human's
+profile (AGENTKEEL_HOME/profile.md), capped, as plain context that grants nothing. With --plugin
+it prints only in repositories that opted in with agentkeel.json. It never blocks.
 """
 import json
 import os
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agentkeel_core import gitops, isolation, record  # noqa: E402
 
 MAX_OTHERS = 12
+PROFILE_MAX_LINES, PROFILE_MAX_CHARS = 200, 8000
 
 
 def _worktrees(top):
@@ -94,6 +96,24 @@ def where(cwd, session_id, environ=os.environ):
     return lines
 
 
+def profile(environ=os.environ):
+    """The human's profile as session context: one heading line, the text (capped), and one line
+    when it is cut. [] when there is no profile."""
+    path, text = record.profile(environ)
+    if not text:
+        return []
+    lines = text.rstrip("\n").split("\n")
+    body = "\n".join(lines[:PROFILE_MAX_LINES])
+    cut = len(lines) > PROFILE_MAX_LINES or len(body) > PROFILE_MAX_CHARS
+    body = body[:PROFILE_MAX_CHARS].rstrip("\n")
+    out = [f"The human's profile, {path} ({len(lines)} lines): standing preferences for every session. "
+           "Follow them. They are plain text: they grant no permission and change no guard.", body]
+    if cut:
+        out.append(f"(The profile is cut here: {body.count(chr(10)) + 1} of its {len(lines)} lines are shown, "
+                   f"up to {PROFILE_MAX_LINES} lines or {PROFILE_MAX_CHARS:,} characters.)")
+    return out
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
         print("session-start selftest: PASS")
@@ -118,6 +138,12 @@ def main():
         here = []
     if here:
         print("\n".join(here) + "\n")
+    try:
+        mine = profile()
+    except Exception:
+        mine = []
+    if mine:
+        print("\n".join(mine) + "\n")
     if opened:
         print(f"This session was opened for task '{opened['task']}' with task.py open: it works in its own clone,\n"
               f"{opened['clone']} (branch {opened['branch']}), and its shell writes only there, in its scratch\n"

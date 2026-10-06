@@ -53,6 +53,15 @@ rules that matter into hooks, outside the model's memory.
   made on `main`, a rebase or a non-fast-forward merge is checked later, at the push and in CI
   ([limits](docs/html-records.md#current-limitations-and-open-decisions)).
 - **Loops have caps.** One plan gate per plan, one review round per scope.
+- **What a task leaves behind is reported.** When a turn ends, the stop hook tells you which of
+  the task's worktrees or its clone still exist, whether each is merged, and how many files are
+  not committed. It reports once per change and removes nothing.
+- **Your standing preferences, in every session.** `~/.agentkeel/profile.md` is printed at
+  session start in each opted-in repository, on both hosts. It is plain text: it grants no
+  permission.
+- **One review-page skill for both hosts.** `review-page` writes a present-state review page: the
+  result, the ranked findings with their evidence, what was verified, the limits and the next
+  steps.
 
 ## Install
 
@@ -85,8 +94,8 @@ codex plugin marketplace add hishamalward/agentkeel
 codex plugin add agentkeel@agentkeel
 ```
 
-Then open Codex in the repository, run `/hooks`, and trust AgentKeel's five hooks. Codex skips a
-plugin hook until you trust it.
+Then open Codex in the repository, run `/hooks`, and trust AgentKeel's seven hooks. Codex skips a
+plugin hook until you trust it, so a hook that a new version adds needs your trust again.
 
 ### Opt a repository in
 
@@ -176,7 +185,8 @@ It copies the hooks into `.claude/hooks/`, merges its entries into `.claude/sett
 hooks and settings, and it never creates a `CLAUDE.md` (Claude Code reads `AGENTS.md` only when no
 `CLAUDE.md` exists). `task.py` is then `.claude/hooks/task.py`. `--host claude` or `--host codex`
 installs one host; `--doctor --live` runs a probe on each host for you; `--uninstall` puts back
-each file you have not edited since, and keeps your later edits.
+each file you have not edited since, and keeps your later edits. The project install includes the stop report but
+not the session-start message (so no profile) and not the `review-page` skill; those come with the plugin.
 
 ## A small task, start to finish
 

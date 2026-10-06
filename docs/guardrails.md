@@ -4,7 +4,7 @@ What each hook refuses, what it cannot see, and the test that proves each protec
 
 ## Hooks
 
-Four hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A hook reads the tool call as JSON on stdin ([captured payloads](hook-payloads.md)), then allows it (exit 0) or blocks it with a reason the model reads (exit 2).
+Six hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A guard reads the tool call as JSON on stdin ([captured payloads](hook-payloads.md)), then allows it (exit 0) or blocks it with a reason the model reads (exit 2). The session-start and stop hooks only report.
 
 1. **Tool call**: the host sends the call to the hook as JSON.
 2. **Events**: `host.py` turns it into file edits, shell commands or dispatches.
@@ -17,7 +17,8 @@ Four hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A hook r
 | `secret-guard.py` | before a shell command | printing `.env*` (not `.env.example`), key files and credentials; bare `env` or `printenv`; `echo $SECRET_NAME`; `git show` or `diff` of `.env` |
 | `plan-gate-guard.py` | before a subagent dispatch | a third gate dispatch for the same plan; on Codex, a third `plan_gate*` task name per task |
 | `plan-size-guard.sh` | after a file edit | nothing; it reports a Working section over 300 lines |
-| `session-start.py` | session start, plugin only | nothing; it prints the task command's real path and the session id |
+| `session-start.py` | session start, plugin only | nothing; it prints where the session is, the human's profile (`AGENTKEEL_HOME/profile.md`, at most 200 lines or 8,000 characters, as plain context that grants no permission), the task command's real path and the session id |
+| `stop-report.py` | the end of every turn, both hosts | nothing; it reports to the human what the session's task still holds (each worktree: branch, merged or commits not merged, changed files; an opened clone: ready to release or why not), once per distinct report, and never removes anything |
 | `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, and starts, reads, finishes and checks docs pages. `approve` is the human's. |
 
 ## Protections
@@ -41,6 +42,7 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
 | A third plan-gate dispatch | prevents with the `[plan-gate]` marker; heuristic without it | `test_plan_gate_guard.py` |
 | A Working section over 300 lines | warns after | `test_plan_size_guard.py` |
+| Worktrees and clones a task leaves behind | reports after each turn, never removes; an unreadable worktree is reported as unreadable | StopReport |
 | The same protections on Codex (`apply_patch`, shell, subagents) | prevents | SameDecision, CapturedShapes |
 | A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: it is refused with a reason | ConfiguredRoute |
 | One review round per scope (G3) | guidance only |  |

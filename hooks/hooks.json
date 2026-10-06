@@ -41,6 +41,13 @@
           { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" verify-record.py --plugin", "timeout": 30 }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" stop-report.py --plugin", "timeout": 60 }
+        ]
+      }
     ]
   }
 }

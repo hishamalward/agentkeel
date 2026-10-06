@@ -47,6 +47,15 @@ def home(environ=os.environ):
     return os.path.realpath(os.path.expanduser(environ.get("AGENTKEEL_HOME") or "~/.agentkeel"))
 
 
+def profile(environ=os.environ):
+    """(path, text) of the human's standing preferences, AGENTKEEL_HOME/profile.md. The text is
+    None when the file is missing, unreadable or empty. It is session context only: it grants no
+    permission and changes no guard."""
+    path = os.path.join(home(environ), "profile.md")
+    text = read(path)
+    return path, (text if text and text.strip() else None)
+
+
 def nearest_host(pid=None):
     """'claude' or 'codex': the closest agent process above `pid` (default: this process)."""
     import subprocess
