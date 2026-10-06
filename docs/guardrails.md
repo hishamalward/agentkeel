@@ -44,7 +44,7 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | The same protections on Codex (`apply_patch`, shell, subagents) | prevents | SameDecision, CapturedShapes |
 | A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: it is refused with a reason | ConfiguredRoute |
 | One review round per scope (G3) | guidance only |  |
-| Cursor, Copilot and other hosts | guidance only: they read `AGENTS.md` |  |
+| Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
 | Shell writes that are not git, commands inside scripts, MCP tools | unsupported |  |
 
 ## Blind spots

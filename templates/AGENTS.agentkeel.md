@@ -1,4 +1,4 @@
-## agentkeel (installed by install.py between its markers; full text: github.com/hishamalward/agentkeel)
+## agentkeel (kept between its markers by task.py init or install.py; full text: github.com/hishamalward/agentkeel)
 
 Three rules sit above every other rule here. A rule that serves none of them is deleted.
 1. Every write is bounded before it happens. Do the literal ask. Mention an adjacent problem in
@@ -9,7 +9,9 @@ Three rules sit above every other rule here. A rule that serves none of them is 
    per scope, one verification pass per claim.
 
 **Declare the task before the first write. The guards read the record, not this text.**
-    .claude/hooks/task.py start <task-id> --size <size> --allow <permissions> [--write-root DIR]
+    task.py start <task-id> --size <size> --allow <permissions> [--write-root DIR]
+`task.py` is the path the session-start message gives (plugin), or `.claude/hooks/task.py`
+(per-repository install). Run it exactly as shown, with nothing in front of `python3`.
 Read the size and permissions from the human's request, state your reading in your first update,
 and proceed. Ask only when information is missing, the request is unclear, or an action would go
 past it. Size and permissions are separate: changing one never changes the other.

@@ -40,7 +40,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, hostcheck, pages, record, starters  # noqa: E402
+from agentkeel_core import gitops, hostcheck, instructions, pages, record, starters  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -370,6 +370,22 @@ def init(args, environ):
         keys = ", ".join(sorted(data)) or "none set, so the defaults apply"
         rows.append(("policy", f"kept the existing agentkeel.json (keys: {keys})"
                      + ("; it is a symbolic link, which init reads and never writes through" if link else "")))
+    status, detail = instructions.ensure(top)
+    rows.append(("agents", {
+        "created": "created AGENTS.md with the agentkeel block: the shared instructions for Claude Code and Codex",
+        "added": "added the agentkeel block to AGENTS.md; nothing outside the block changed",
+        "updated": "updated the agentkeel block in AGENTS.md to this version; nothing outside it changed",
+        "current": "AGENTS.md has this version's agentkeel block",
+        "edited": "the agentkeel block in AGENTS.md was written by install.py or edited by hand, so init left\n"
+                  "it as it is. To take this version's text, delete the block (both markers) and run init again",
+        "broken": "AGENTS.md has one agentkeel marker without the other, or out of order; init left it. Fix\n"
+                  "the markers by hand, then run init again",
+    }.get(status, detail)))
+    conflicts = instructions.claude_conflicts(top)
+    if conflicts:
+        rows.append(("conflict", ", ".join(conflicts) + " exists: Claude Code loads it instead of AGENTS.md, so the\n"
+                     "shared instructions are hidden from Claude. Move its content into AGENTS.md and delete it, or\n"
+                     "add the line @AGENTS.md to it. init does not touch it"))
     common = gitops.common_dir(top) or top
     reg_path = os.path.join(record.home(environ), "opted-in.json")
     os.makedirs(os.path.dirname(reg_path), exist_ok=True)
@@ -433,9 +449,9 @@ def init(args, environ):
     if x["project_install"]:
         state += "; a project install is in .codex/hooks.json"
     rows.append(("codex", state))
-    if created:
-        rows.append(("next", "share the policy through your normal workflow when you choose, for example:\n"
-                     "git add agentkeel.json && git commit -m \"Opt in to AgentKeel\" -- agentkeel.json"))
+    if created or status in ("created", "added", "updated"):
+        rows.append(("next", "share the policy and instructions through your normal workflow, for example:\n"
+                     "git add agentkeel.json AGENTS.md && git commit -m \"Opt in to AgentKeel\" -- agentkeel.json AGENTS.md"))
     width = max(len(k) for k, _ in rows)
     rows = [(k, v.replace("\n", "\n" + " " * (width + 4))) for k, v in rows]
     print(f"agentkeel init: {top}")

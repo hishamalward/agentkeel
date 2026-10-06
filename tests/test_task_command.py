@@ -462,5 +462,95 @@ class SessionBanner(RepoCase):
         self.assertNotIn(f"  {self.repo}  ", out)
 
 
+class SharedInstructions(RepoCase):
+    """init keeps one agentkeel block in AGENTS.md for both hosts; nothing outside it changes."""
+    task = TaskCommand.task
+
+    def setUp(self):
+        super().setUp()
+        self.bin = os.path.join(self.tmp, "bin"); os.makedirs(self.bin)
+        self.env.update({"CODEX_HOME": os.path.join(self.tmp, "codex"),
+                         "PATH": os.pathsep.join([self.bin, os.path.dirname(shutil.which("git")), "/usr/bin", "/bin"])})
+        self.agents = os.path.join(self.primary, "AGENTS.md")
+
+    def init(self):
+        out = self.task("init", cwd=self.primary)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout
+
+    def read(self):
+        with open(self.agents, encoding="utf-8", newline="") as fh:
+            return fh.read()
+
+    def write(self, text):
+        with open(self.agents, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+
+    def test_first_init_creates_the_block_and_never_a_claude_file(self):
+        out = self.init()
+        self.assertIn("created AGENTS.md with the agentkeel block", out)
+        text = self.read()
+        self.assertTrue(text.startswith("<!-- agentkeel:start -->\n<!-- agentkeel:sha256="))
+        self.assertIn("task.py start <task-id>", text)
+        self.assertNotIn(".claude/hooks/task.py start", text)
+        for name in ("CLAUDE.md", "CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")):
+            self.assertFalse(os.path.exists(os.path.join(self.primary, name)))
+        self.assertIn("git add agentkeel.json AGENTS.md", out)
+
+    def test_repeating_init_changes_nothing(self):
+        self.init()
+        before = self.read()
+        out = self.init()
+        self.assertEqual(self.read(), before)
+        self.assertIn("AGENTS.md has this version's agentkeel block", out)
+        self.assertNotIn("git add", out)
+
+    def test_the_users_rules_stay_byte_for_byte(self):
+        mine = "# My repo\r\n\nRules the team wrote.\n"
+        self.write(mine)
+        self.assertIn("added the agentkeel block to AGENTS.md", self.init())
+        self.assertTrue(self.read().startswith(mine))
+
+    def test_an_older_block_is_updated_and_its_surroundings_kept(self):
+        from agentkeel_core import instructions
+        before, after = "# Top\n\n", "\n## After the block\nmore rules\n"
+        self.write(before + instructions.block_for("old text\n") + after)
+        self.assertIn("updated the agentkeel block", self.init())
+        text = self.read()
+        self.assertTrue(text.startswith(before)); self.assertTrue(text.endswith(after))
+        self.assertNotIn("old text", text)
+
+    def test_an_edited_or_install_py_block_is_left_and_reported(self):
+        from agentkeel_core import instructions
+        edited = "# Top\n" + instructions.block_for("shipped text\n").replace("shipped text", "my own text")
+        legacy = "# Top\n<!-- agentkeel:start -->\nwritten by install.py\n<!-- agentkeel:end -->\n"
+        for text in (edited, legacy):
+            self.write(text)
+            self.assertIn("written by install.py or edited by hand, so init left", self.init())
+            self.assertEqual(self.read(), text)
+
+    def test_broken_markers_and_a_symlink_are_left(self):
+        broken = "<!-- agentkeel:start -->\nno end marker\n"
+        self.write(broken)
+        self.assertIn("one agentkeel marker without the other", self.init())
+        self.assertEqual(self.read(), broken)
+        os.remove(self.agents)
+        target = os.path.join(self.tmp, "elsewhere.md")
+        with open(target, "w") as fh:
+            fh.write("shared rules\n")
+        os.symlink(target, self.agents)
+        self.assertIn("symbolic link; init does not write through it", self.init())
+        with open(target) as fh:
+            self.assertEqual(fh.read(), "shared rules\n")
+
+    def test_a_claude_file_is_reported_and_left(self):
+        with open(os.path.join(self.primary, "CLAUDE.md"), "w") as fh:
+            fh.write("old rules\n")
+        out = self.init()
+        self.assertIn("CLAUDE.md exists: Claude Code loads it instead of AGENTS.md", out)
+        with open(os.path.join(self.primary, "CLAUDE.md")) as fh:
+            self.assertEqual(fh.read(), "old rules\n")
+
+
 if __name__ == "__main__":
     unittest.main()

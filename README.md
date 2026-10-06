@@ -86,11 +86,16 @@ Installing the plugin makes AgentKeel available; opting a repository in turns it
 
 ```bash
 cd path/to/your-repo
-python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py init   # Claude Code
-python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py init    # Codex
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py init    # Codex
 ```
 
 `init` creates `agentkeel.json` only when it is missing, and never changes an existing one. It
+keeps one agentkeel block in `AGENTS.md`, the instruction file that Claude Code and Codex both
+load: it adds the block, or updates its own earlier text, and never changes a byte outside it. A
+block that someone edited, or that `install.py` wrote, is left as it is and reported. It never
+creates a `CLAUDE.md`, and it reports one that exists, because Claude Code then loads that file
+instead of `AGENTS.md`. It
 registers the opt-in in `~/.agentkeel/opted-in.json`, so the guards act in this repository and all
 its worktrees at once, before any commit, and a shell command that deletes the file does not
 switch them off. It then reports three things apart: what the policy turns on, whether each host
@@ -104,7 +109,7 @@ see [the policy file](docs/task-record.md#the-repository-policy-file). `init` do
 Share the policy through your normal workflow when you choose:
 
 ```bash
-git add agentkeel.json && git commit -m "Opt in to AgentKeel" -- agentkeel.json
+git add agentkeel.json AGENTS.md && git commit -m "Opt in to AgentKeel" -- agentkeel.json AGENTS.md
 ```
 
 ### Prove it works
@@ -130,8 +135,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.5.1/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.6.0/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it. The same message says where the session is (the
 checkout, its branch, its task) and lists the repository's other worktrees with the task that
 holds each.
@@ -213,7 +218,9 @@ ready to push.
 - An approval digest detects a change to an approved boundary. It does not prove who approved.
 - Hooks guard the agent, not the branch. Tests before `main` moves need a required CI check:
   see [required checks](docs/required-checks.md).
-- Other hosts (Cursor, Copilot) read `AGENTS.md` only. For them, AgentKeel is guidance.
+- AgentKeel enforces supported actions in Claude Code and Codex. Other hosts are unsupported until
+  an adapter is implemented and tested. Where a host loads `AGENTS.md`, it receives the shared
+  instructions only.
 
 ## Read next
 

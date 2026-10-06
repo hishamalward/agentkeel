@@ -61,4 +61,4 @@ Run on 2026-10-04 with Claude Code 2.1.289 (`claude -p`, Sonnet) and Codex CLI 0
 
 ## Other hosts
 
-Cursor, Copilot and others read `AGENTS.md`, so they get the instructions. They have no adapter here, so for them AgentKeel is guidance only. An adapter is a function in `host.py` that turns the host's payload into the same events, plus captured fixtures and a parity test.
+Cursor, Copilot and others are unsupported until an adapter is implemented and tested. Where one loads `AGENTS.md`, it receives the shared instructions only; no action of theirs is checked. An adapter is a function in `host.py` that turns the host's payload into the same events, plus captured fixtures and a parity test.
