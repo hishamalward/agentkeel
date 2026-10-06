@@ -92,7 +92,9 @@ python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.4.0/hooks/task.py init    #
 registers the opt-in in `~/.agentkeel/opted-in.json`, so the guards act in this repository and all
 its worktrees at once, before any commit, and a shell command that deletes the file does not
 switch them off. It then reports three things apart: what the policy turns on, whether each host
-has the plugin installed and enabled, and (Codex) how many of its hooks you have trusted.
+has the plugin installed and enabled (from the host's own `plugin list`), and (Codex) how many of
+its hooks you have trusted. Reading Codex trust needs a TOML parser (Python 3.11 or newer); when
+`init` cannot read a fact reliably, it reports it as unknown.
 
 An empty policy, `{}`, protects `main` and `master` and needs a task for every write. It does not
 turn on HTML work records (`"docs": "html"`) or the push gate (`"require_check_before_push"`);

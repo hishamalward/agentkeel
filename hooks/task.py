@@ -340,7 +340,24 @@ def init(args, environ):
     top = os.path.realpath(top)
     path = os.path.join(top, "agentkeel.json")
     rows = []
-    if os.path.exists(path):
+    # One exclusive create: an entry that appears at any moment before it, a dangling symbolic
+    # link included, makes it fail, so nothing that exists is ever replaced or written through.
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    except FileExistsError:
+        fd = None
+    except OSError as e:
+        return fail(f"could not create agentkeel.json ({e}); nothing was written")
+    if fd is not None:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("{}\n")
+        data, created = {}, True
+        rows.append(("policy", "created agentkeel.json with {}: the defaults below"))
+    else:
+        link = os.path.islink(path)
+        if link and not os.path.exists(path):
+            return fail("agentkeel.json is a symbolic link to a missing file. It was left as it is, and\n"
+                        "nothing was created at its target; replace it with a real file by hand.")
         try:
             with open(path) as fh:
                 data = json.load(fh)
@@ -349,15 +366,10 @@ def init(args, environ):
         except Exception as e:
             return fail(f"agentkeel.json exists but is not a JSON object ({e}). It was left as it is;\n"
                         "fix it by hand, then run init again.")
-        keys = ", ".join(sorted(data)) or "none set, so the defaults apply"
-        rows.append(("policy", f"kept the existing agentkeel.json (keys: {keys})"))
         created = False
-    else:
-        data = {}
-        with open(path, "w") as fh:
-            fh.write("{}\n")
-        rows.append(("policy", "created agentkeel.json with {}: the defaults below"))
-        created = True
+        keys = ", ".join(sorted(data)) or "none set, so the defaults apply"
+        rows.append(("policy", f"kept the existing agentkeel.json (keys: {keys})"
+                     + ("; it is a symbolic link, which init reads and never writes through" if link else "")))
     common = gitops.common_dir(top) or top
     reg_path = os.path.join(record.home(environ), "opted-in.json")
     os.makedirs(os.path.dirname(reg_path), exist_ok=True)
@@ -385,26 +397,36 @@ def init(args, environ):
         rows.append(("not on", "; ".join(off)))
     hooks_dir = os.path.dirname(os.path.abspath(__file__))
     c = hostcheck.claude(top, environ)
-    if c["installed"]:
-        state = f"plugin installed ({', '.join(c['installed'])} scope), " + ("enabled" if c["enabled"] else
-                "not enabled: claude plugin enable agentkeel@agentkeel")
-    else:
+    if not c["cli"]:
+        state = "unknown: the claude command was not found or did not answer"
+    elif not c["installed"]:
         state = "plugin not installed: claude plugin install agentkeel@agentkeel"
+    else:
+        state = f"plugin {c['version']} installed ({c['scope']} scope), " + (
+            "enabled" if c["enabled"] else "not enabled: claude plugin enable agentkeel@agentkeel")
     if c["project_install"]:
         state += "; a project install is in .claude/settings.json" + (
             ": use one way per repository, not both" if c["installed"] and c["enabled"] else "")
     rows.append(("claude", state))
     x = hostcheck.codex(top, environ)
     want = hostcheck.plugin_hook_count(hooks_dir)
-    if not x["readable"]:
-        state = "plugin not installed (no Codex configuration found): codex plugin add agentkeel@agentkeel"
-    elif x["installed"]:
-        state = "plugin installed, " + ("enabled" if x["enabled"] else "disabled")
-        state += f"; {x['trusted']}" + (f" of {want}" if want else "") + " hooks trusted (hashes not re-verified)"
-        if not want or x["trusted"] < want:
-            state += ": open codex in this repository and trust the agentkeel hooks in /hooks"
-    else:
+    if not x["cli"]:
+        state = "install state unknown: the codex command was not found or did not answer"
+    elif x["installed"] is False:
         state = "plugin not installed: codex plugin add agentkeel@agentkeel"
+    elif x["installed"] is None:
+        state = "install state unknown: codex plugin list did not show agentkeel@agentkeel clearly"
+    else:
+        state = f"plugin {x['version'] or '(version unknown)'} installed, " + {
+            True: "enabled", False: "disabled"}.get(x["enabled"], "enabled state unknown")
+    if x["installed"] is not False:
+        if x["trusted"] is None:
+            state += ("; trust unknown: reading ~/.codex/config.toml needs Python 3.11 or newer (tomllib),"
+                      " so check /hooks in codex")
+        else:
+            state += f"; {x['trusted']}" + (f" of {want}" if want else "") + " hooks trusted (hashes not re-verified)"
+            if not want or x["trusted"] < want:
+                state += ": open codex in this repository and trust the agentkeel hooks in /hooks"
     if x["project_install"]:
         state += "; a project install is in .codex/hooks.json"
     rows.append(("codex", state))

@@ -1,6 +1,7 @@
 """task.py: the record is bound to one session, size and permissions are separate."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -261,29 +262,131 @@ class Init(RepoCase):
         with open(self.policy) as fh:
             self.assertEqual(fh.read(), "{not json")
 
-    def test_hosts_report_install_enable_and_trust_separately(self):
-        with open(os.path.join(self.claude_dir, "plugins", "installed_plugins.json"), "w") as fh:
-            json.dump({"version": 2, "plugins": {"agentkeel@agentkeel": [{"scope": "user"}]}}, fh)
-        with open(os.path.join(self.claude_dir, "settings.json"), "w") as fh:
-            json.dump({"enabledPlugins": {"agentkeel@agentkeel": True}}, fh)
-        trust = lambda n: "".join(f'[hooks.state."agentkeel@agentkeel:hook_{i}:0:0"]\ntrusted_hash = "sha256:x"\n\n'
-                                  for i in range(n))
-        config = os.path.join(self.codex_dir, "config.toml")
-        with open(config, "w") as fh:
-            fh.write('[plugins."agentkeel@agentkeel"]\nenabled = true\n\n[hooks.state]\n\n' + trust(2))
+    def fake_cli(self, name, stdout, code=0):
+        """A host command on PATH that prints canned output."""
+        os.makedirs(self.bin, exist_ok=True)
+        path = os.path.join(self.bin, name)
+        with open(os.path.join(self.bin, name + ".out"), "w") as fh:
+            fh.write(stdout)
+        with open(path, "w") as fh:
+            fh.write(f'#!/bin/sh\n/bin/cat "{path}.out"\nexit {code}\n')
+        os.chmod(path, 0o755)
+
+    def with_bin(self):
+        self.bin = os.path.join(self.tmp, "bin")
+        os.makedirs(self.bin, exist_ok=True)
+        self.env["PATH"] = self.bin + os.pathsep + os.environ.get("PATH", "")
+
+    def test_a_policy_created_after_an_absence_check_is_kept_byte_for_byte(self):
+        """Regression: init checked exists() and then opened with "w", so a policy written in
+        between was replaced with {}. The exclusive create cannot replace anything."""
+        text = '{"docs": "html", "require_check_before_push": "agentkeel-required"}\n'
+        with open(self.policy, "w") as fh:
+            fh.write(text)
+        probe = ("import os, runpy, sys\n"
+                 "real = os.path.exists\n"
+                 "os.path.exists = lambda p: False if str(p).endswith('agentkeel.json') else real(p)\n"
+                 f"sys.argv = [{T!r}, 'init']\n"
+                 f"runpy.run_path({T!r}, run_name='__main__')\n")
+        env = {**os.environ, **self.env}
+        out = subprocess.run([sys.executable, "-c", probe], cwd=self.primary, capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        with open(self.policy) as fh:
+            self.assertEqual(fh.read(), text)
+        self.assertIn("kept the existing agentkeel.json", out.stdout)
+
+    def test_a_dangling_symlink_is_left_and_its_target_never_created(self):
+        target = os.path.join(self.tmp, "outside", "policy.json")
+        os.symlink(target, self.policy)
         out = self.init()
-        self.assertIn("plugin installed (user scope), enabled", out.stdout)
-        self.assertIn("2 of 5 hooks trusted", out.stdout)
-        self.assertIn("trust the agentkeel hooks in /hooks", out.stdout)
-        with open(config, "w") as fh:
-            fh.write('[plugins."agentkeel@agentkeel"]\nenabled = true\n\n' + trust(5))
+        self.assertEqual(out.returncode, 2); self.assertIn("symbolic link to a missing file", out.stderr)
+        self.assertTrue(os.path.islink(self.policy)); self.assertEqual(os.readlink(self.policy), target)
+        self.assertFalse(os.path.exists(os.path.dirname(target)))
+
+    def test_a_symlink_to_a_real_policy_is_read_and_never_written(self):
+        target = os.path.join(self.tmp, "policy.json")
+        with open(target, "w") as fh:
+            fh.write('{"protected_branches": ["release"]}')
+        os.symlink(target, self.policy)
         out = self.init()
-        self.assertIn("5 of 5 hooks trusted", out.stdout)
-        self.assertNotIn("/hooks", out.stdout)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("symbolic link, which init reads and never writes through", out.stdout)
+        with open(target) as fh:
+            self.assertEqual(fh.read(), '{"protected_branches": ["release"]}')
+
+    def test_hosts_report_their_own_install_enable_and_version(self):
+        self.with_bin()
+        install = os.path.join(self.tmp, "cache", "0.4.0"); os.makedirs(install)
+        self.fake_cli("claude", json.dumps([{"id": "agentkeel@agentkeel", "version": "0.4.0", "scope": "user",
+                                             "enabled": False, "installPath": install}]))
+        self.fake_cli("codex", "PLUGIN               STATUS               VERSION  SOURCE\n"
+                               "agentkeel@agentkeel  installed, disabled  0.4.0    ./\n")
+        out = self.init()
+        self.assertIn("plugin 0.4.0 installed (user scope), not enabled: claude plugin enable", out.stdout)
+        self.assertIn("plugin 0.4.0 installed, disabled", out.stdout)
+
+    def test_a_missing_or_silent_host_is_unknown_not_absent(self):
+        self.with_bin()
+        self.env["PATH"] = self.bin + os.pathsep + os.path.dirname(shutil.which("git"))
+        out = self.init()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("claude    unknown: the claude command was not found", out.stdout)
+        self.assertIn("install state unknown: the codex command was not found", out.stdout)
+        self.fake_cli("codex", "unexpected output\n")
+        self.assertIn("install state unknown: codex plugin list did not show", self.init().stdout)
+        self.fake_cli("codex", "No plugins found in marketplace `agentkeel`.\n")
+        self.assertIn("codex     plugin not installed: codex plugin add", self.init().stdout)
+
 
     def test_init_outside_a_repository_is_refused(self):
         out = self.task("init", cwd=self.tmp)
         self.assertEqual(out.returncode, 2); self.assertIn("not inside a git repository", out.stderr)
+
+
+class CodexTrust(unittest.TestCase):
+    """Codex trust is read from config.toml with a real TOML parser, never a pattern."""
+
+    CONFIG = (
+        '[plugins."agentkeel@agentkeel"] # installed by hand\n'
+        'enabled = true\n\n'
+        '[hooks.state]\n\n'
+        '[hooks.state."agentkeel@agentkeel:session_start:0:0"]\n'
+        'note = ["a", "[not a table]"]\n'
+        'trusted_hash = "sha256:a"\n\n'
+        '[hooks.state."agentkeel@agentkeel:pre_tool_use:0:0"]   # a comment\n'
+        'trusted_hash = "sha256:b"\n\n'
+        '[hooks.state."agentkeel@agentkeel:pre_tool_use:1:0"]\n'
+        'enabled = false\n\n'
+        '[hooks.state."other@other:pre_tool_use:0:0"]\n'
+        'trusted_hash = "sha256:c"\n')
+
+    def trust(self, text, environ=None):
+        from agentkeel_core import hostcheck
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            with open(os.path.join(home, "config.toml"), "w") as fh:
+                fh.write(text)
+            env = {"CODEX_HOME": home, "PATH": home}
+            env.update(environ or {})
+            return hostcheck.codex(home, env)["trusted"]
+
+    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib needs Python 3.11+")
+    def test_comments_arrays_and_order_do_not_change_the_count(self):
+        self.assertEqual(self.trust(self.CONFIG), 2)
+        reordered = self.CONFIG.replace('note = ["a", "[not a table]"]\ntrusted_hash = "sha256:a"',
+                                        'trusted_hash = "sha256:a"\nnote = ["a", "[not a table]"]')
+        self.assertEqual(self.trust(reordered), 2)
+
+    def test_without_a_toml_parser_trust_is_unknown(self):
+        saved = sys.modules.get("tomllib")
+        sys.modules["tomllib"] = None
+        try:
+            self.assertIsNone(self.trust(self.CONFIG))
+        finally:
+            if saved is None:
+                sys.modules.pop("tomllib", None)
+            else:
+                sys.modules["tomllib"] = saved
 
 
 if __name__ == "__main__":

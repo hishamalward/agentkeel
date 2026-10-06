@@ -1,24 +1,36 @@
-"""What each host has of agentkeel: the plugin installed and enabled, a project install, and (Codex)
-how many plugin hooks the human has trusted. Read only; it never changes a host's configuration.
+"""What each host has of agentkeel, read from the host's own answer. Read only: it never changes a
+host's configuration, and when it cannot read a fact reliably it says "unknown", never a guess.
 
-Claude Code keeps installs in <config>/plugins/installed_plugins.json and the on/off switch in
-enabledPlugins of a settings file (user, project or local scope). Codex keeps both in
-<CODEX_HOME>/config.toml: [plugins."agentkeel@agentkeel"] and one [hooks.state."agentkeel@agentkeel:..."]
-table, with a trusted_hash, for each hook the human trusted in /hooks.
+- Installed, enabled and version come from the host's CLI: `claude plugin list --json`, and the
+  STATUS and VERSION columns of `codex plugin list -m agentkeel`. Each fact is a separate field;
+  a configuration entry alone never counts as installed.
+- Codex trust (one [hooks.state."agentkeel@agentkeel:..."] table with a trusted_hash per hook the
+  human trusted in /hooks) exists only in config.toml. It is read with a real TOML parser:
+  tomllib (Python 3.11+), here or in a newer python3.x on PATH. Without one, trust is unknown.
+- A project install (install.py) is found by its settings file calling task-guard.py.
 """
 import json
 import os
-import re
+import shutil
+import subprocess
 
 PLUGIN_ID = "agentkeel@agentkeel"
+UNKNOWN = None
+TOML_TO_JSON = ("import json,sys,tomllib\n"
+                "with open(sys.argv[1],'rb') as f: d=tomllib.load(f)\n"
+                "print(json.dumps(d, default=str))")
 
 
-def _json(path):
+def _run(argv, cwd, environ, timeout=60):
+    exe = shutil.which(argv[0], path=environ.get("PATH"))
+    if not exe:
+        return None
     try:
-        with open(path) as fh:
-            return json.load(fh) or {}
+        out = subprocess.run([exe, *argv[1:]], cwd=cwd, env=dict(environ), capture_output=True,
+                             text=True, timeout=timeout)
     except Exception:
         return None
+    return out if out.returncode == 0 else None
 
 
 def _text(path):
@@ -29,53 +41,98 @@ def _text(path):
         return None
 
 
-def claude_dir(environ):
-    return environ.get("CLAUDE_CONFIG_DIR") or os.path.join(environ.get("HOME") or os.path.expanduser("~"), ".claude")
-
-
 def codex_dir(environ):
     return environ.get("CODEX_HOME") or os.path.join(environ.get("HOME") or os.path.expanduser("~"), ".codex")
 
 
-def _project_install(repo, rel):
-    """install.py copies the hooks into the repository; its settings call task-guard.py there."""
+def project_install(repo, rel):
     return "task-guard.py" in (_text(os.path.join(repo, rel)) or "")
 
 
 def claude(repo, environ=os.environ):
-    """{'installed': [scopes], 'enabled': bool, 'project_install': bool}"""
-    base = claude_dir(environ)
-    installed = (_json(os.path.join(base, "plugins", "installed_plugins.json")) or {}).get("plugins", {})
-    scopes = [e.get("scope", "user") for e in installed.get(PLUGIN_ID, []) if isinstance(e, dict)]
-    enabled = False
-    for path in (os.path.join(base, "settings.json"), os.path.join(repo, ".claude", "settings.json"),
-                 os.path.join(repo, ".claude", "settings.local.json")):
-        value = ((_json(path) or {}).get("enabledPlugins") or {}).get(PLUGIN_ID)
-        if value is not None:
-            enabled = bool(value)
-    return {"installed": scopes, "enabled": enabled,
-            "project_install": _project_install(repo, os.path.join(".claude", "settings.json"))}
+    """{'cli': bool, 'installed': bool|None, 'enabled': bool|None, 'version', 'scope', 'project_install'}"""
+    out = {"cli": False, "installed": UNKNOWN, "enabled": UNKNOWN, "version": None, "scope": None,
+           "project_install": project_install(repo, os.path.join(".claude", "settings.json"))}
+    res = _run(["claude", "plugin", "list", "--json"], repo, environ)
+    if res is None:
+        return out
+    try:
+        entries = json.loads(res.stdout)
+    except Exception:
+        return out
+    out["cli"] = True
+    mine = [e for e in entries if isinstance(e, dict) and e.get("id") == PLUGIN_ID]
+    out["installed"] = bool(mine) and all(os.path.isdir(e.get("installPath") or "") for e in mine)
+    if mine:
+        e = next((x for x in mine if x.get("enabled") or x.get("projectEnabled")), mine[0])
+        out["enabled"] = bool(e.get("enabled") or e.get("projectEnabled"))
+        out["version"], out["scope"] = e.get("version"), e.get("scope")
+    return out
+
+
+def _codex_row(text):
+    """The STATUS and VERSION of agentkeel@agentkeel in `codex plugin list` output, or None."""
+    lines = text.splitlines()
+    header = next((ln for ln in lines if ln.split()[:1] == ["PLUGIN"] and "STATUS" in ln), None)
+    if header is None:
+        return None
+    cols = [header.index(name) for name in ("PLUGIN", "STATUS", "VERSION", "SOURCE") if name in header]
+    for ln in lines:
+        if ln.startswith(PLUGIN_ID + " ") and len(cols) == 4:
+            return ln[cols[1]:cols[2]].strip(), ln[cols[2]:cols[3]].strip()
+    return None
+
+
+def _toml(path, environ):
+    """The parsed file as a dict, or None when no TOML parser is available or it does not parse."""
+    if not os.path.exists(path):
+        return None
+    try:
+        import tomllib
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+    except ImportError:
+        pass
+    except Exception:
+        return None
+    for name in ("python3.14", "python3.13", "python3.12", "python3.11"):
+        res = _run([name, "-c", TOML_TO_JSON, path], None, environ, timeout=20)
+        if res is not None:
+            try:
+                return json.loads(res.stdout)
+            except Exception:
+                return None
+    return None
 
 
 def codex(repo, environ=os.environ):
-    """{'installed': bool, 'enabled': bool, 'trusted': int, 'readable': bool, 'project_install': bool}"""
-    text = _text(os.path.join(codex_dir(environ), "config.toml"))
-    out = {"installed": False, "enabled": False, "trusted": 0, "readable": text is not None,
-           "project_install": _project_install(repo, os.path.join(".codex", "hooks.json"))}
-    if text is None:
-        return out
-    m = re.search(r'^\[plugins\."' + re.escape(PLUGIN_ID) + r'"\]\s*$([^\[]*)', text, re.M)
-    if m:
-        out["installed"] = True
-        out["enabled"] = not re.search(r"^\s*enabled\s*=\s*false\b", m.group(1), re.M)
-    out["trusted"] = len(re.findall(r'^\[hooks\.state\."' + re.escape(PLUGIN_ID) + r':[^"]*"\]\s*\n\s*trusted_hash\s*=',
-                                    text, re.M))
+    """{'cli': bool, 'installed', 'enabled', 'version', 'trusted': int|None, 'project_install'}"""
+    out = {"cli": False, "installed": UNKNOWN, "enabled": UNKNOWN, "version": None, "trusted": UNKNOWN,
+           "project_install": project_install(repo, os.path.join(".codex", "hooks.json"))}
+    res = _run(["codex", "plugin", "list", "-m", "agentkeel"], repo, environ)
+    if res is not None:
+        out["cli"] = True
+        row = _codex_row(res.stdout)
+        if row is None:
+            out["installed"] = False if "No plugins found" in res.stdout else UNKNOWN
+        else:
+            status = [w.strip() for w in row[0].split(",")]
+            out["installed"] = "installed" in status
+            out["enabled"] = True if "enabled" in status else False if "disabled" in status else UNKNOWN
+            out["version"] = row[1] or None
+    data = _toml(os.path.join(codex_dir(environ), "config.toml"), environ)
+    if data is not None:
+        state = ((data.get("hooks") or {}).get("state") or {})
+        out["trusted"] = sum(1 for k, v in state.items()
+                             if k.startswith(PLUGIN_ID + ":") and isinstance(v, dict) and v.get("trusted_hash"))
     return out
 
 
 def plugin_hook_count(hooks_dir):
     """How many hooks the plugin declares (each needs its own trust in Codex), or None."""
-    data = _json(os.path.join(hooks_dir, "hooks.json"))
-    if not data:
+    try:
+        with open(os.path.join(hooks_dir, "hooks.json")) as fh:
+            data = json.load(fh)
+    except Exception:
         return None
     return sum(len(group.get("hooks") or []) for groups in (data.get("hooks") or {}).values() for group in groups)
