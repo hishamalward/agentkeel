@@ -21,13 +21,14 @@ On the founder's machine today: Claude Code has no `sandbox` settings in any sco
 with five credential paths denied, so a Codex shell can write almost anywhere. Neither host limits a
 shell write to the task.
 
+
 ## Part 2: shell and script isolation
 
 The OS sandbox of each host is the enforcement. AgentKeel sets its write boundary to the task, keeps
 its own control state out of reach, and proves the boundary on each host. A longer list of command
 patterns is not isolation and is not claimed as such.
 
-### A task works in its own clone, not a linked worktree
+### A task works in its own independent clone
 
 A commit in a linked worktree writes the shared `.git/objects`. Write access to that folder is also
 the power to delete or overwrite any object in it, which damages every branch. Measured:
@@ -38,71 +39,112 @@ the power to delete or overwrite any object in it, which damages every branch. M
 - Claude Code documents that in a linked worktree its sandbox allows writes to the whole shared `.git`
   except `hooks/` and `config`, so the objects are writable there by default.
 
-So the task's working copy is a clone made with `git clone --shared`: the clone's own `.git` is
-writable, and it borrows the shared objects read-only through `objects/info/alternates`. A new object
-lands in the clone. The shared repository, its objects, its refs and every other task's folders stay
-outside the boundary.
+So each task works in a clone with its own object store, made with `git clone --no-local`: no
+alternates file, and no object file hard-linked to the source (measured: link count 1). A clone made
+with `--shared` is not used. It borrows the source's objects, so a branch deletion and a prune in the
+source can break the task's history. Measured: after the source deleted a branch, expired its reflog
+and pruned, a `--shared` clone of that branch could not read its own `HEAD`, and a `--no-local` clone
+could. Cost on the pilot repository: 5 seconds and 161 MB for the clone's `.git` (the source `.git`
+is 225 MB), before the checkout and the dependency install that a worktree also needs.
 
-The work returns to the shared repository through one judged step outside the sandbox: AgentKeel
-fetches the task branch from the clone with `git -c core.hooksPath=/dev/null fetch`. The clone's
-config and hooks are the agent's to edit, so the fetch must not run them. Measured: a clone with a
-planted `core.fsmonitor`, `core.hooksPath`, `uploadpack.packObjectsHook`, `core.sshCommand` and
-three hooks (`pre-upload-pack`, `post-checkout`, `reference-transaction`); the fetch brought the
-commit and none of the seven ran.
+The task's commits land in the clone. The shared repository, its objects, its refs and every other
+task's folders stay outside the boundary.
 
-What a clone changes: `git worktree list` no longer shows the task, so the session banner and the
-ownership checks read AgentKeel's own task records instead. Merge and push stay judged git commands,
-now run from the shared repository against the fetched branch.
+### Every task size gets a clone, and the ownership records follow it
+
+Isolation does not depend on task size: a small task also works in its own clone. Because a clone
+does not appear in `git worktree list`, the ownership, resume and cleanup behavior change together:
+
+- **Ownership**: the task record names the clone's path, its branch and the full SHA of its base.
+  The session banner and the ownership checks read the task records, not `git worktree list`.
+- **Resume**: a resumed or new session for the same task opens the same clone from the record.
+- **Cleanup**: `task.py release` (P4) removes a clone only when its branch is imported or the human
+  says to drop it, the clone is clean, and the record still names this task.
+
+### The import into the shared repository
+
+The work returns through one trusted operation, `task.py import`, run outside the sandbox. It accepts
+nothing from the task's own files:
+
+1. **The source comes from the task record**: the clone's path and branch as `task.py open`
+   recorded them. No path, remote, `upload-pack` command, refspec, destination or option comes from
+   the agent.
+2. **The expected commit is a full SHA** that the human approved or that the evidence names.
+3. **A fixed execution**: `/usr/bin/git` with an empty environment (`PATH=/usr/bin:/bin`, `HOME`,
+   `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`), `core.hooksPath=/dev/null`, `--no-tags`,
+   `--no-recurse-submodules`.
+4. **Into a staging ref only**: `refs/agentkeel/import/<task>`. Nothing else moves.
+5. **The staged commit must equal the expected SHA**, or the staging ref is deleted and the import is
+   refused.
+6. **Moving `main` and shipping stay separate**, separately authorized operations.
+
+Measured: the import of the expected SHA succeeded. After the clone's branch moved by one commit,
+the same import was refused with "SHA mismatch", and `main` and the task branch did not change. A
+clone with seven planted routes (`core.fsmonitor`, `core.hooksPath`, `uploadpack.packObjectsHook`,
+`core.sshCommand` and three hooks) ran none of them during the fetch. These results are regression
+tests for this command, not a proof that any fetch from agent-controlled Git state is safe. Still to
+test: a replaced clone path or branch in the record, an unauthorized destination, and injected
+execution config; each must fail or leave the accepted commit unchanged.
 
 ### The write boundary of a task
 
 | Writable | Why |
 |---|---|
 | the task's clone, including its `.git` | the work and its commits |
-| the task's scratch folder | test and build output |
+| the task's scratch folder, which is also its `TMPDIR` | test and build output, temporary files |
 | declared caches (for example `~/.npm`) | listed in `agentkeel.json` under `"writable"`; nothing by default |
 
 | Not writable | Why |
 |---|---|
-| the shared checkout, its `.git` (objects, refs, worktree metadata, config, hooks) | other agents' work and the merge target |
+| the shared checkout and its `.git` (objects, refs, config, hooks) | other agents' work and the merge target |
 | other tasks' clones and scratch folders | isolation between tasks |
-| `AGENTKEEL_HOME` (task records, approvals, opt-in registry) and the session's settings file | a record, approval or boundary the agent could write proves nothing |
+| `AGENTKEEL_HOME` (task records, approvals, opt-in registry, session settings) | a record, approval or boundary the agent could write proves nothing |
+| host settings (`.claude/`, `.codex/`, `~/.codex/config.toml`) | the boundary must not edit itself |
 
 ### The boundary belongs to the session, set before its first command
 
 One repository-local settings file is read by every session in that checkout, so changing it for task
-B would widen or narrow task A's running boundary. The boundary is set per session instead, before
-the session starts: `task.py open <task> --host claude|codex`, run by the human, creates the clone and
-the scratch folder, writes the task record, writes the session's settings into `AGENTKEEL_HOME`, and
-starts the host in the clone with them.
+B would change task A's running boundary. The boundary is set per session instead, before the session
+starts: `task.py open <task> --host claude|codex`, run by the human, creates the clone and the
+scratch folder, writes the task record, and starts the host in the clone with that session's
+boundary. Nothing changes in user or project settings on either host.
 
 - **Claude Code**: `claude --settings <AGENTKEEL_HOME>/sessions/<task>.json`, holding
   `sandbox.enabled`, `failIfUnavailable: true`, `allowUnsandboxedCommands: false` and
   `filesystem.allowWrite` for the scratch folder. The working folder (the clone) is writable by
-  default. Nothing changes in user or project settings.
-- **Codex**: a named permission profile that extends `:workspace`, adds the scratch folder, sets the
-  clone's `.git` to `write` (a specific rule overrides the built-in `.git` protection; measured), and
-  sets `":tmpdir"` and `":slash_tmp"` to `read`. It is selected with `-P` and the session starts with
-  `-C <clone>`. Open: whether the profile can be passed for one session only (`-c` or a `-p` layer
-  file) instead of being written into the user's `config.toml`.
+  default.
+- **Codex**: command-line overrides only, measured with no entry in `config.toml`:
+  `-c permissions.<task>.extends=":workspace"`, `-c permissions.<task>.filesystem={...}` as one
+  inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the scratch folder set to
+  `write`, `":tmpdir"` and `":slash_tmp"` set to `read`), `-c shell_environment_policy.set.TMPDIR=
+  "<scratch>"`, `-P <task>` and `-C <clone>`. Dotted keys fail for paths that contain a dot, so the
+  table form is required.
 
-Measured on both hosts, from inside one task's clone: a write to the clone and to its scratch
-folder, `git add` and a signed `git commit` succeed. A shell write to another task's folder, to
-another task's scratch, to the shared checkout, to a shared object and to the shared `main` ref, a
-`git push` to the shared `main`, and a symlink that points out of the clone all fail before the file
-changes. Measured on Claude Code only, still to repeat on Codex: a Python write and a Node write to
-another task's clone, and a write to the session's settings file or to `.claude/settings.local.json`,
-fail the same way.
+Measured on both hosts, two sessions for two tasks at the same time: each wrote its own scratch
+folder and was refused at the other's.
+
+Measured on both hosts, from inside one task's clone: a write to the clone and to its scratch folder,
+`git add` and a signed `git commit` succeed. These fail before the file changes:
+
+- a shell, Python and Node write to another task's clone
+- a write to another task's scratch, to the shared checkout, to a shared object and to the shared
+  `main` ref, and a `git push` to the shared `main`
+- a symlink that points out of the clone
+- a write to the host's settings (`.claude/settings.local.json` and the session settings file on
+  Claude Code; the clone's `.codex/` and `~/.codex/config.toml` on Codex)
+- on Codex, a test script and a `python3` placed first on `PATH` inside the clone, both aimed at
+  another task's clone (still to repeat on Claude Code)
 
 ### Temporary folders
 
-- **Codex**: the profile closes `/tmp` and `$TMPDIR` (measured). Tools then write temporary files in
-  the task's scratch folder; the session sets `TMPDIR` to it.
+- **Codex**: the session closes `/tmp` and `$TMPDIR` and points `TMPDIR` at the task's scratch
+  folder. A signed commit works this way (measured); with the temp folders closed and `TMPDIR` not
+  moved, the SSH signer fails with `failed to write commit object`.
 - **Claude Code**: limit. Sandboxed commands write to a per-user temp folder (`/tmp/claude-501`)
   that every Claude Code session of the same user shares. Denying it breaks signed commits and Claude
   Code's own working-folder tracking (measured). `CLAUDE_CODE_TMPDIR` set at launch did not change it
-  in the test. Until a per-session temp folder is proven, AgentKeel reports this shared allowance
-  instead of claiming isolation of temporary files between Claude Code sessions.
+  in the test. AgentKeel reports this shared allowance instead of claiming isolation of temporary
+  files between Claude Code sessions.
 
 ### task.py is not exempted from the sandbox
 
@@ -110,19 +152,29 @@ fail the same way.
 would let any test script run outside the boundary. Instead:
 
 - **Commands stay sandboxed.** `verify` runs its command inside the sandbox like any other command.
-- **Control state is written only by trusted code outside the sandbox**: `task.py open` (run by the
-  human before the session) and the hooks, which both hosts run outside the sandbox from the
-  installed plugin, a folder the session cannot write. No session command is exempted.
-- **Evidence is recorded by the PostToolUse hook**, which sees the command that ran and its result, not
-  by the command itself. Open: confirm that both hosts give the hook the exit status; if one does not,
-  evidence on that host is reported as unrecorded.
+- **Control state is written only by trusted code outside the sandbox**: `task.py open` and
+  `task.py import` (run by the human) and the hooks, which both hosts run outside the sandbox from the
+  installed plugin. No session command is exempted.
 - **The interpreter and the helper come from outside the task's reach.** The hook commands name the
-  plugin's own files; a task's clone, `PATH` entries or `PYTHONPATH` inside the clone cannot replace
-  them.
+  plugin's own files and a fixed interpreter path; a task's clone, `PATH` entries or `PYTHONPATH`
+  inside the clone cannot replace them.
 
-Acceptance adds: a `verify` command that writes into another task's clone fails before the file
-changes; a normal test run passes and its evidence is recorded; a replaced `task.py` or `python3` in
-the clone, and a `PYTHONPATH` that points into the clone, change nothing that a hook writes.
+### Test evidence is bound to the completed run and the exact code
+
+A hook writes the evidence, and it records "passed" only when all of these hold:
+
+- **Start and completion are paired.** The PreToolUse event records the command, `HEAD` and a hash of
+  the working tree; the completion event for the same call closes it.
+- **The exit status is the real one.** Measured on Claude Code: a foreground success arrives as
+  `PostToolUse` with no exit field, and a failure as `PostToolUseFailure` with "Exit code 1". A
+  background command returns at once with only a `backgroundTaskId`, and its later `exit 3` reached
+  no hook. So a background or still-running command is recorded as unrecorded, never passed. Codex:
+  to measure in the trusted-hook run.
+- **The code did not move.** If `HEAD` or the working-tree hash differs between start and completion,
+  the run is recorded as stale.
+- **Shipping accepts only clean, current evidence**: a passed run whose `HEAD` is the candidate's full
+  SHA, with a clean tree. Missing completion, a missing exit status, a dirty tree or another commit
+  means no evidence. A resumed shell process follows the same rule.
 
 ## Part 3: MCP calls with consequences
 
@@ -137,6 +189,7 @@ the clone, and a `PYTHONPATH` that points into the clone, change nothing that a 
 | dataforseo (Codex) | 17 | seven `api_request` calls, four to `/live` endpoints that bill per request (2026-10-01) |
 | mobbin, expo, others | small | reads (`expo` listed builds; none started) |
 
+
 ### Interception comes first
 
 An adapter has value only if every call it guards passes through it before the server receives it.
@@ -147,12 +200,13 @@ An adapter has value only if every call it guards passes through it before the s
 - **Codex, partly measured.** Codex 0.160.0 offered the test server's tools only inside the
   JavaScript `exec` tool. A direct call, a call by a name built at run time
   (`["mcp","akprobe","write_thing"].join("__")`) and two parallel calls each appeared as a separate MCP
-  dispatch with the resolved tool name and arguments, and Codex applied its own approval check to each
-  one (all four refused under `approval_policy = "never"`; the server received nothing). So the
-  dispatch layer sees each nested call individually. Codex documents that PreToolUse supports
-  code-mode nested calls. Open: a run with a hook the founder has trusted, to show that the hook itself
-  receives each nested call and that its refusal stops it. Codex skips any hook a person has not
-  reviewed and trusted, so this test needs one trust step by the founder.
+  dispatch with the resolved tool name and arguments. In that run Codex's own approval check refused
+  all four first, so the run does not show what the hook does. Codex documents that PreToolUse
+  supports code-mode nested calls.
+- **Still to measure on Codex**, with a test hook the founder has trusted and the test server's tools
+  set to `approve` so that the hook, not the host's approval check, is the layer that refuses: a
+  permitted read reaches both the hook and the server; the forbidden direct, built-name and parallel
+  calls reach the hook, return its refusal, and reach the server zero times.
 - **If the Codex hook does not see nested calls**, matching the `exec` source text is not a boundary
   (aliases and built names pass it). The options are Codex's own per-tool `approval_mode`, which is
   static and not task-aware, a gateway process in front of the guarded servers, or refusing `exec` in
@@ -187,21 +241,28 @@ JavaScript, so guarding only forms and scripts would be incomplete. In this vers
 remote browser activity is explicitly unsupported, and AgentKeel claims no browser enforcement. Local
 visual QA against a local or disposable target stays available.
 
+
 ### Acceptance
 
 The synthetic recording server stands in for each guarded server, on both hosts and through every
 supported dispatch path (direct, nested, built name, parallel): reads pass; a permitted remote write
 to the owned target passes; a remote write under a review task, a write to another target, a paid call
 without `paid-job`, a deploy without its grant, a publish under `store-submission` alone and an unknown
-action are refused, and the server's record shows zero calls for each refusal. A batch with one
-refused part is refused whole. No real service is called and nothing is charged.
+action are refused, and the server's record shows zero calls for each refusal.
+
+A batch means one tool call that carries several actions: the hook sees it whole before dispatch, and
+one refused part refuses the whole batch. Separate parallel calls are not a batch: each forbidden call
+must reach the server zero times, and its permitted siblings may run.
 
 ## Build order
 
-1. Finish the two open feasibility checks: the Codex trusted-hook run for nested MCP calls, and the
-   PostToolUse exit status for evidence on both hosts.
-2. Shell isolation for both hosts: `task.py open`, task clones, session settings, the judged fetch,
-   evidence by hook.
+1. Finish the feasibility checks:
+   - the Codex trusted-hook run: nested MCP calls, and completion events with their exit status
+   - the import contract's hostile cases (replaced path or branch, unauthorized destination,
+     injected config)
+   - on Claude Code, the test-script and `PATH` substitution probes
+2. Shell isolation for both hosts: `task.py open`, independent clones, session-only boundaries,
+   `task.py import`, evidence by hook, and the ownership, resume and cleanup changes.
 3. The four adapters, after step 1 shows an interception path on each host.
 
 This is integration work across both hosts, not a hook patch. An estimate in days waits for step 1.
@@ -211,10 +272,10 @@ This is integration work across both hosts, not a hook patch. An estimate in day
 1. **`remote-write`**, scoped to service and target, separate from `push`, with paid, deploy and
    publish still granted separately.
 2. **Browser automation**: explicitly unsupported for remote changes in this version; local QA stays.
-3. **Commits**: in a task-owned clone, with the shared `.git` read-only. No writable shared `.git`,
-   no prompt per commit.
-4. **Settings**: per session, written by `task.py open`. No user-scope change on Claude Code. On Codex,
-   a user-scope profile only if a per-session one proves impossible, shown as an exact diff first.
+3. **Commits**: in an independent task clone, with the shared `.git` read-only. No writable shared
+   `.git`, no prompt per commit.
+4. **Settings**: per session on both hosts, written by `task.py open`; measured without a user-scope
+   change.
 
 ## Not in this design
 
