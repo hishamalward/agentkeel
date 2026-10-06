@@ -6,6 +6,12 @@
   task.py open <task-id> --host claude|codex --size S --allow P [--base B] [--branch BR] [--path DIR]
                [--print]           HUMAN ONLY: make the task's own clone and scratch folder, and
                                    start the host in the clone with this session's sandbox boundary
+  task.py import <task-id> --sha <full id>
+                                   HUMAN ONLY: bring the clone's branch into the shared repository as
+                                   refs/agentkeel/accepted/<task-id>, only if it is exactly that commit
+  task.py release <task-id> [--discard]
+                                   HUMAN ONLY: delete the clone, scratch and records once nothing in the
+                                   clone is unpreserved (--discard deletes it anyway)
   task.py start <task-id> --size small|medium|large --allow <permissions>
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
@@ -157,6 +163,29 @@ def open_cmd(args, environ):
     sys.stdout.flush()
     os.chdir(rec["clone"])
     os.execvp(argv[0], argv)
+
+
+def import_cmd(args, environ):
+    try:
+        sha = isolation.import_task(args.task, args.sha.strip().lower(), environ)
+    except isolation.OpenError as exc:
+        return fail(str(exc))
+    rec = isolation.load_opened(args.task, environ)
+    print(f"agentkeel: accepted {sha} as {isolation.accepted_ref(args.task)} in {rec['repo']}")
+    print("  main has not moved. To bring it in, in the shared checkout:")
+    print(f"    git merge --ff-only {sha}")
+    return 0
+
+
+def release_cmd(args, environ):
+    try:
+        dropped = isolation.release_task(args.task, discard=args.discard, environ=environ)
+    except isolation.OpenError as exc:
+        return fail(str(exc))
+    print(f"agentkeel: released task '{args.task}': clone, scratch folder and records deleted")
+    for d in dropped:
+        print(f"  discarded: {d}")
+    return 0
 
 
 def show(args, environ):
@@ -549,6 +578,12 @@ def main(argv=None, environ=os.environ):
     o.add_argument("--branch")
     o.add_argument("--path")
     o.add_argument("--print", dest="print_only", action="store_true")
+    im = sub.add_parser("import")
+    im.add_argument("task")
+    im.add_argument("--sha", required=True)
+    rl = sub.add_parser("release")
+    rl.add_argument("task")
+    rl.add_argument("--discard", action="store_true")
     sub.add_parser("show")
     sub.add_parser("init")
     v = sub.add_parser("verify")
@@ -573,7 +608,7 @@ def main(argv=None, environ=os.environ):
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"init": init, "open": open_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
+    handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
                 "context": context, "finish": finish, "check": check, "index": index}
     if args.action not in handlers:
         p.print_help()

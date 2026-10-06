@@ -193,3 +193,130 @@ def bind(session_id, cwd, environ=os.environ):
                 record.atomic_write_json(opened_path(rec["task"], environ), fresh)
         return rec
     return None
+
+
+# ---- import and release (the human's commands) ------------------------------------------------
+
+SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+def staging_ref(task):
+    return f"refs/agentkeel/import/{task}"
+
+
+def accepted_ref(task):
+    return f"refs/agentkeel/accepted/{task}"
+
+
+def _fixed_git(repo, *args):
+    """git in the shared repository with a fixed program, an emptied environment and no hooks:
+    nothing from the task's clone or the session's environment chooses what runs."""
+    env = {"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": os.path.expanduser("~"),
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    return subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false",
+                           "-c", "protocol.file.allow=always", *args], capture_output=True, text=True, env=env)
+
+
+def import_task(task, sha, environ=os.environ):
+    """Fetch the task's branch from its recorded clone into a staging ref of the shared
+    repository, and accept it only if it is exactly `sha`. Returns the accepted SHA."""
+    rec = load_opened(task, environ)
+    if not rec:
+        raise OpenError(f"no opened task '{task}'")
+    if not SHA_RE.match(sha or ""):
+        raise OpenError("--sha needs the full commit id (40 or 64 hex characters)")
+    branch = rec["branch"]
+    if branch.startswith(("-", "refs/")) or ":" in branch or ".." in branch:
+        raise OpenError(f"the recorded branch '{branch}' is not a plain branch name")
+    repo, stage = rec["repo"], staging_ref(task)
+    fetch = _fixed_git(repo, "fetch", "-q", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+                       rec["clone"], f"+refs/heads/{branch}:{stage}")
+    if fetch.returncode != 0:
+        raise OpenError(f"the fetch from {rec['clone']} failed: {(fetch.stderr or '').strip()[:300]}")
+    got = _fixed_git(repo, "rev-parse", "--verify", f"{stage}^{{commit}}").stdout.strip()
+    if got != sha:
+        _fixed_git(repo, "update-ref", "-d", stage)
+        raise OpenError(f"the clone's {branch} is at {got[:12] or '?'}, not {sha[:12]}: nothing accepted.\n"
+                        "Import the commit that was reviewed and tested, by its full id.")
+    _fixed_git(repo, "update-ref", accepted_ref(task), sha)
+    _fixed_git(repo, "update-ref", "-d", stage)
+    return sha
+
+
+def _reachable_in_repo(repo, sha):
+    if _fixed_git(repo, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
+        return False
+    out = _fixed_git(repo, "for-each-ref", "--contains", sha, "--format=%(refname)",
+                     "refs/heads", "refs/agentkeel/accepted").stdout
+    return bool(out.strip())
+
+
+def active_processes(clone):
+    """Process ids whose working folder is inside the clone (a session or its tools still run)."""
+    p = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpn"], capture_output=True, text=True)
+    pids, pid = [], None
+    for line in p.stdout.splitlines():
+        if line.startswith("p"):
+            pid = line[1:]
+        elif line.startswith("n") and pid and pid != str(os.getpid()):
+            path = os.path.realpath(line[1:])
+            if path == clone or path.startswith(clone + os.sep):
+                pids.append(pid)
+    return sorted(set(pids))
+
+
+def release_problems(rec):
+    """What is not preserved: an empty list means the clone holds nothing the shared repository
+    lacks. Checked at the moment of release, under the release lock."""
+    repo, clone = rec["repo"], rec["clone"]
+    problems = []
+    tip = subprocess.run(["git", "-C", clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if tip and not _reachable_in_repo(repo, tip):
+        problems.append(f"the clone's tip {tip[:12]} is not in the shared repository (task.py import it first)")
+    refs = subprocess.run(["git", "-C", clone, "for-each-ref", "--format=%(objectname) %(refname)",
+                           "refs/heads", "refs/stash"], capture_output=True, text=True).stdout.split("\n")
+    for line in filter(None, refs):
+        sha, name = line.split(" ", 1)
+        if not _reachable_in_repo(repo, sha):
+            problems.append(f"{name} at {sha[:12]} is not in the shared repository")
+    status = subprocess.run(["git", "-C", clone, "status", "--porcelain"], capture_output=True, text=True).stdout
+    if status.strip():
+        problems.append(f"the clone has {len(status.strip().splitlines())} changed or untracked file(s)")
+    return problems
+
+
+def release_task(task, discard=False, environ=os.environ):
+    """Delete the task's clone, scratch folder and records. Refused while a process works in the
+    clone, and, unless the human discards, while any of the clone's work is not preserved."""
+    import shutil
+    path = opened_path(task, environ)
+    with record.locked(path):
+        rec = load_opened(task, environ)
+        if not rec:
+            raise OpenError(f"no opened task '{task}'")
+        clone = rec["clone"]
+        if os.path.isdir(clone):
+            busy = active_processes(clone)
+            if busy:
+                raise OpenError(f"processes still work in {clone} (pid {', '.join(busy)}): end the session first")
+            problems = release_problems(rec)
+            if problems and not discard:
+                raise OpenError("not released, so no work is lost:\n  " + "\n  ".join(problems)
+                                + f"\nTo delete it anyway: task.py release {task} --discard")
+        else:
+            problems = []
+        repo = rec["repo"]
+        _fixed_git(repo, "update-ref", "-d", staging_ref(task))
+        acc = _fixed_git(repo, "rev-parse", "--verify", "-q", accepted_ref(task)).stdout.strip()
+        if acc and _fixed_git(repo, "for-each-ref", "--contains", acc, "--format=x", "refs/heads").stdout.strip():
+            _fixed_git(repo, "update-ref", "-d", accepted_ref(task))  # a branch keeps it now
+        shutil.rmtree(clone, ignore_errors=True)
+        shutil.rmtree(rec["scratch"], ignore_errors=True)
+        for sid in rec.get("sessions") or []:
+            bound = record.load(sid, environ)
+            if bound and bound.get("task") == task and bound.get("clone") == clone:
+                os.remove(record.record_path(sid, environ))
+        for p in (session_settings_path(task, environ), path):
+            if os.path.exists(p):
+                os.remove(p)
+        return problems

@@ -297,7 +297,7 @@ def human_task_command(argv):
     """'approve' or 'open' when the line runs one of task.py's human-only commands, else None."""
     for i, tok in enumerate(argv):
         if os.path.basename(tok) == "task.py":
-            for word in ("approve", "open"):
+            for word in ("approve", "open", "import", "release"):
                 if word in argv[i + 1:i + 4]:
                     return word
     return None
@@ -559,6 +559,11 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             raise Block(
                 "`task.py open` is the human's command: it sets the write boundary of a new session,\n"
                 "and a boundary the agent chooses for itself proves nothing. Ask the human to run it.")
+        if human in ("import", "release"):
+            raise Block(
+                f"`task.py {human}` is the human's command: it moves work into the shared repository or\n"
+                "deletes a task's clone. Tell the human the full commit id to import, or that the task\n"
+                "is ready to release.")
         if argv[0] == "git" or "--dry-run" in argv:
             if argv[0] == "git":
                 judge_git(sc, rec, environ, session, line)

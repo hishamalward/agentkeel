@@ -280,3 +280,117 @@ class HookLauncher(RepoCase):
         for c in commands:
             self.assertTrue(c.startswith('/bin/sh "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh" '), c)
             self.assertTrue(os.path.exists(os.path.join(HOOKS, c.split()[2])), c)
+
+
+class ImportAndRelease(RepoCase):
+    """task.py import and release: the measured feasibility cases, as regression tests."""
+    task = test_task_command.TaskCommand.task
+
+    def setUp(self):
+        super().setUp()
+        self.env["AGENTKEEL_SCRATCH"] = os.path.join(self.tmp, "scratch")
+        self.clone = os.path.join(self.tmp, "primary-t")
+        out = self.human("open", "t", "--host", "codex", "--size", "small", "--allow", "implement", "--print")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def human(self, *args):
+        return self.task(*args, session=None, cwd=self.primary)
+
+    def commit(self, msg):
+        git(self.clone, "commit", "-q", "--allow-empty", "-m", msg)
+        return subprocess.run(["git", "-C", self.clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+    def ref(self, name):
+        p = subprocess.run(["git", "-C", self.primary, "rev-parse", "-q", "--verify", name], capture_output=True, text=True)
+        return p.stdout.strip() or None
+
+    def test_import_accepts_exactly_the_named_commit(self):
+        a = self.commit("A")
+        base = self.ref("base")
+        out = self.human("import", "t", "--sha", a)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(self.ref("refs/agentkeel/accepted/t"), a)
+        self.assertIsNone(self.ref("refs/agentkeel/import/t"))
+        self.assertEqual(self.ref("base"), base, "import never moves a branch")
+
+    def test_import_refuses_a_moved_branch_and_short_ids(self):
+        a = self.commit("A")
+        self.commit("B")
+        out = self.human("import", "t", "--sha", a)
+        self.assertEqual(out.returncode, 2); self.assertIn("nothing accepted", out.stderr)
+        self.assertIsNone(self.ref("refs/agentkeel/accepted/t"))
+        self.assertEqual(self.human("import", "t", "--sha", a[:12]).returncode, 2)
+        self.assertEqual(self.human("import", "t", "--sha", "a:refs/heads/main").returncode, 2)
+
+    def test_import_runs_nothing_from_the_clone(self):
+        marker = os.path.join(self.tmp, "RAN")
+        hooks = os.path.join(self.clone, ".git", "evil-hooks"); os.makedirs(hooks)
+        for h in ("pre-upload-pack", "reference-transaction", "post-checkout"):
+            with open(os.path.join(hooks, h), "w") as fh:
+                fh.write(f"#!/bin/sh\ntouch {marker}\n")
+            os.chmod(os.path.join(hooks, h), 0o755)
+        a = self.commit("A")
+        for key, value in (("core.hooksPath", hooks), ("core.fsmonitor", f"touch {marker}"),
+                           ("uploadpack.packObjectsHook", f"touch {marker}"), ("core.sshCommand", f"touch {marker}")):
+            git(self.clone, "config", key, value)
+        out = self.human("import", "t", "--sha", a)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(os.path.exists(marker), "the import ran something planted in the clone")
+
+    def test_release_preserves_the_current_tip(self):
+        a = self.commit("A")
+        self.assertEqual(self.human("import", "t", "--sha", a).returncode, 0)
+        self.commit("B")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("not in the shared repository", out.stderr)
+        self.assertTrue(os.path.isdir(self.clone))
+        self.assertEqual(self.human("import", "t", "--sha", a).returncode, 2)  # stale: refused
+        self.assertEqual(self.ref("refs/agentkeel/accepted/t"), a, "a failed import keeps accepted work")
+
+    def test_release_refuses_loose_files_and_unpreserved_branches(self):
+        a = self.commit("A")
+        self.assertEqual(self.human("import", "t", "--sha", a).returncode, 0)
+        with open(os.path.join(self.clone, "loose.txt"), "w") as fh:
+            fh.write("x")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("changed or untracked", out.stderr)
+        os.remove(os.path.join(self.clone, "loose.txt"))
+        git(self.clone, "branch", "side", "HEAD")
+        git(self.clone, "checkout", "-q", "side"); self.commit("side work"); git(self.clone, "checkout", "-q", "feat/t")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("refs/heads/side", out.stderr)
+
+    def test_release_after_import_deletes_everything(self):
+        self.human("open", "u", "--host", "claude", "--size", "small", "--allow", "implement", "--print")
+        u_clone = os.path.join(self.tmp, "primary-u")
+        git(u_clone, "commit", "-q", "--allow-empty", "-m", "U")
+        u = subprocess.run(["git", "-C", u_clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.assertEqual(self.human("import", "u", "--sha", u).returncode, 0)
+        git(self.primary, "branch", "feat/u", u)
+        out = self.human("release", "u")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(os.path.exists(u_clone))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "opened", "u.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "sessions", "u.claude.json")))
+        self.assertIsNone(self.ref("refs/agentkeel/accepted/u"), "a branch keeps the work, so the ref goes")
+
+    def test_release_refuses_while_a_process_works_in_the_clone(self):
+        proc = subprocess.Popen(["sleep", "30"], cwd=self.clone)
+        try:
+            out = self.human("release", "t", "--discard")
+            self.assertEqual(out.returncode, 2); self.assertIn("end the session first", out.stderr)
+        finally:
+            proc.kill(); proc.wait()
+
+    def test_discard_is_explicit(self):
+        self.commit("unpreserved")
+        out = self.human("release", "t", "--discard")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("discarded:", out.stdout)
+        self.assertFalse(os.path.exists(self.clone))
+
+    def test_import_and_release_are_the_humans_commands(self):
+        self.declare()
+        for cmd in ("import t --sha " + "a" * 40, "release t"):
+            code, err = self.hook(self.bash(f"python3 {os.path.join(HOOKS, 'task.py')} {cmd}"))
+            self.assertEqual(code, 2); self.assertIn("human's command", err)
