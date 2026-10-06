@@ -394,3 +394,21 @@ class ImportAndRelease(RepoCase):
         for cmd in ("import t --sha " + "a" * 40, "release t"):
             code, err = self.hook(self.bash(f"python3 {os.path.join(HOOKS, 'task.py')} {cmd}"))
             self.assertEqual(code, 2); self.assertIn("human's command", err)
+
+
+class BannerNamesClones(RepoCase):
+    task = test_task_command.TaskCommand.task
+
+    def test_the_shared_checkout_and_a_clone_see_the_opened_tasks(self):
+        self.env["AGENTKEEL_SCRATCH"] = os.path.join(self.tmp, "scratch")
+        for t in ("one", "two"):
+            out = self.task("open", t, "--host", "codex", "--size", "small", "--allow", "implement", "--print",
+                            session=None, cwd=self.primary)
+            self.assertEqual(out.returncode, 0, out.stderr)
+        banner = Open.banner(self, self.primary)
+        self.assertIn("Tasks opened in their own clones (task.py open):", banner)
+        self.assertIn(f"  {os.path.join(self.tmp, 'primary-one')}  branch feat/one  task one", banner)
+        inside = Open.banner(self, os.path.join(self.tmp, "primary-one"), session="session-z")
+        self.assertIn("task two", inside)
+        self.assertNotIn("primary-one  branch feat/one", inside)
+        self.assertIn(f"(task one's own clone of {self.primary})", inside)

@@ -65,7 +65,10 @@ def where(cwd, session_id, environ=os.environ):
     top = os.path.realpath(top)
     branch = gitops.current_branch(top) or "(detached)"
     protected = branch in record.policy(top)["protected"]
-    kind = "the repository's shared checkout" if gitops.is_primary(top) else "a linked worktree"
+    opened = isolation.all_opened(environ)
+    own = next((r for r in opened if r.get("clone") == top), None)
+    kind = (f"task {own['task']}'s own clone of {own['repo']}" if own else
+            "the repository's shared checkout" if gitops.is_primary(top) else "a linked worktree")
     lines = [f"Where you are: {top} ({kind}), on branch {branch}" + (" (protected)" if protected else "") + "."]
     rec = record.load(session_id, environ)
     if rec:
@@ -82,6 +85,12 @@ def where(cwd, session_id, environ=os.environ):
             lines.append(f"  ... and {len(others) - MAX_OTHERS} more (git worktree list)")
     else:
         lines.append("Other worktrees of this repository: none.")
+    shared = own["repo"] if own else top
+    clones = [r for r in opened if r.get("clone") != top and r.get("repo") == shared]
+    if clones:
+        lines.append("Tasks opened in their own clones (task.py open):")
+        for r in clones[:MAX_OTHERS]:
+            lines.append(f"  {r['clone']}  branch {r.get('branch')}  task {r['task']}")
     return lines
 
 
