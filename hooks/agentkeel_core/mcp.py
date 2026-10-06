@@ -3,13 +3,16 @@
 Both hosts send each MCP call to PreToolUse as `mcp__<server>__<tool>` with its arguments,
 including the calls Codex makes inside its JavaScript `exec` tool (measured; see
 docs/enforcement-design.md). An adapter reads only the tool name and the arguments, never a tool's
-description. It sorts a call into a class:
+description. Each operation is listed by its exact name in mcp_catalog.py; the adapter never infers
+a class from a name's shape. It sorts a call into a class:
 
   read          passes
   remote-write  creates, updates, archives, deletes, resolves or changes settings on the service:
                 needs `remote-write`, and a target listed for the server in agentkeel.json
-  paid          bills per call: needs `paid-job`
-  unknown       anything the adapter does not know: refused, never assumed to be a read
+  paid          bills per call: needs `paid-job`, and a listed target too when the call names one
+                (a Sentry organization); a paid call with no target at all (DataForSEO) needs only
+                `paid-job`
+  unknown       a name the catalog does not list, however it is spelled: refused
 
 agentkeel.json, for example:
   "mcp": {"revenuecat": {"targets": ["proj1a2b3c"]}, "posthog": {"targets": ["12345"]},
@@ -22,7 +25,10 @@ a shell or a browser.
 import json
 import re
 
+from . import mcp_catalog as cat
+
 READ, WRITE, PAID, UNKNOWN = "read", "remote-write", "paid", "unknown"
+NO_TARGET = object()
 
 # server names each service is known by on Claude Code and Codex installs
 SERVERS = {
@@ -31,14 +37,6 @@ SERVERS = {
     "sentry": {"sentry", "plugin_sentry_sentry"},
     "dataforseo": {"dataforseo", "dfs-mcp", "dfs_mcp"},
 }
-
-READ_NAME = re.compile(r"^(list|get|search|find|query|describe|fetch|retrieve|read|count|docs)[_-]")
-WRITE_NAME = re.compile(r"^(create|update|set|attach|detach|archive|unarchive|delete|remove|add|"
-                        r"resolve|enable|disable|replace|patch|rename|move|import|bulk)[_-]")
-READ_SUFFIX = re.compile(r"[_-](get|get-all|list|retrieve|search|query|count|summary)$")
-WRITE_SUFFIX = re.compile(r"[_-](create|update|partial-update|delete|bulk-delete|add|remove|set|"
-                          r"archive|enable|disable|resolve)$")
-
 
 class Call:
     def __init__(self, service, server, tool, args):
@@ -57,12 +55,22 @@ def match(tool_name, extra_servers=None):
     return None
 
 
-def _by_name(name):
-    if READ_NAME.match(name) or READ_SUFFIX.search(name):
+def _listed(name, read, write, paid=frozenset()):
+    if name in read:
         return READ
-    if WRITE_NAME.match(name) or WRITE_SUFFIX.search(name):
+    if name in paid:
+        return PAID
+    if name in write:
         return WRITE
     return UNKNOWN
+
+
+def _sentry_org(args):
+    """The organization a Sentry call names: organizationSlug, or the subdomain of an issueUrl."""
+    if args.get("organizationSlug"):
+        return str(args["organizationSlug"])
+    m = re.match(r"^https://([a-z0-9-]+)\.sentry\.io/", str(args.get("issueUrl") or ""))
+    return m.group(1) if m else None
 
 
 def _json_tail(text):
@@ -77,43 +85,44 @@ def _json_tail(text):
 
 
 def classify(call):
-    """(class, target or None, what) for one guarded call."""
+    """(class, target, what) for one guarded call. target is None when the call names none that
+    agentkeel can read, or NO_TARGET for an operation that has no target at all."""
     a, svc = call.args, call.service
     if svc == "revenuecat":
-        return _by_name(call.tool), a.get("project_id"), call.tool
+        return _listed(call.tool, cat.REVENUECAT_READ, cat.REVENUECAT_WRITE), a.get("project_id"), call.tool
     if svc == "sentry":
-        if call.tool == "analyze_issue_with_seer":
-            return PAID, a.get("organizationSlug"), call.tool  # an AI analysis run on the account
+        name, args = call.tool, a
         if call.tool == "execute_sentry_tool":
-            inner = str(a.get("name") or "")
-            inner_args = a.get("arguments") if isinstance(a.get("arguments"), dict) else {}
-            return _by_name(inner), inner_args.get("organizationSlug") or a.get("organizationSlug"), inner
-        return _by_name(call.tool), a.get("organizationSlug"), call.tool
+            name = str(a.get("name") or "")
+            args = {**a, **(a.get("arguments") if isinstance(a.get("arguments"), dict) else {})}
+        return _listed(name, cat.SENTRY_READ, cat.SENTRY_WRITE, cat.SENTRY_PAID), _sentry_org(args), name
     if svc == "posthog":
         if call.tool != "exec":
-            return _by_name(call.tool), None, call.tool
+            return UNKNOWN, None, call.tool
         words = str(a.get("command") or "").split()
         verb = words[0] if words else ""
-        if verb in ("tools", "search", "info", "learn", "switch"):
+        if verb in cat.POSTHOG_VERBS_READ:
             return READ, None, verb  # switch only picks the project later calls use
-        if verb == "call" and len(words) > 1:
-            target_tool = words[1]
+        if verb == "call":
+            rest = [w for w in words[1:] if w not in ("--json", "--confirm")]
+            if not rest or rest[0].startswith("-"):
+                return UNKNOWN, None, "call"
+            target_tool = rest[0]
             body = _json_tail(str(a.get("command")))
             target = body.get("project_id") or (body.get("id") if target_tool.startswith("project") else None)
-            if target_tool in ("execute-sql", "query", "docs-search", "read-data-schema"):
-                return READ, None, target_tool
-            return _by_name(target_tool), None if target is None else str(target), target_tool
+            return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE),
+                    None if target is None else str(target), target_tool)
         return UNKNOWN, None, verb or "exec"
     if svc == "dataforseo":
-        if call.tool.startswith("docs_"):
+        if call.tool in cat.DATAFORSEO_READ:
             return READ, None, call.tool
         if call.tool == "api_request":
             path = str(a.get("path") or a.get("url") or "")
             method = str(a.get("method") or "GET").upper()
-            if "/live" in path or "task_post" in path:
-                return PAID, None, f"{method} {path}"
-            if method == "GET" and re.search(r"(appendix|user_data|locations|languages|task_get|tasks_ready|"
-                                             r"id_list|errors)", path):
+            segments = set(re.split(r"[/?#]", path))
+            if segments & cat.DATAFORSEO_PAID_SEGMENTS:
+                return PAID, NO_TARGET, f"{method} {path}"  # billed to the account; no project to name
+            if method == "GET" and segments & cat.DATAFORSEO_READ_SEGMENTS:
                 return READ, None, f"{method} {path}"
             return UNKNOWN, None, f"{method} {path}"
         return UNKNOWN, None, call.tool
@@ -138,8 +147,9 @@ def judge(call, rec, policy_mcp):
         if "paid-job" not in perms:
             return (f"{label} bills per call and needs the 'paid-job' permission; task '{rec.get('task')}' has "
                     f"{', '.join(sorted(perms)) or 'none'}.")
-        return None
-    if "remote-write" not in perms:
+        if target is NO_TARGET:
+            return None
+    elif "remote-write" not in perms:
         return (f"{label} changes the remote service and needs the 'remote-write' permission; task "
                 f"'{rec.get('task')}' has {', '.join(sorted(perms)) or 'none'}.\n"
                 "A git push permission does not cover changes to other services.")
@@ -147,7 +157,7 @@ def judge(call, rec, policy_mcp):
     if "*" in allowed:
         return None
     if target is None:
-        return (f"{label} changes the remote service, and agentkeel cannot tell which "
+        return (f"{label} acts on the remote service, and agentkeel cannot tell which "
                 f"{call.service} target it changes.\nIt is refused. agentkeel.json can allow every target for "
                 f'this server with "mcp": {{"{call.service}": {{"targets": ["*"]}}}}.')
     if str(target) not in allowed:

@@ -218,6 +218,40 @@ class Evidence(RepoCase):
         self.assertEqual(self.record()["evidence"], [])
 
 
+class EvidenceRunsNothing(RepoCase):
+    """The real hook path (run.sh, the guard, verify-record) reads the code state without running
+    anything the repository's config names."""
+    RUN = os.path.join(HOOKS, "run.sh")
+
+    def launch(self, hook, payload):
+        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")}
+        return subprocess.run(["/bin/sh", self.RUN, hook], input=json.dumps(payload), text=True,
+                              capture_output=True, cwd=self.repo, env={**clean, **self.env})
+
+    def test_a_planted_filter_and_fsmonitor_never_run(self):
+        self.declare()
+        marker = ImportAndRelease.plant_programs(self, self.repo)
+        with open(os.path.join(self.repo, ".gitattributes"), "w") as fh:
+            fh.write("* filter=planted\n")
+        cmd = f"python3 {os.path.join(HOOKS, 'task.py')} verify -- true"
+        out = self.launch("task-guard.py", {**self.bash(cmd), "tool_use_id": "t1"})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        out = self.launch("verify-record.py", {
+            "tool_name": "Bash", "cwd": self.repo, "session_id": SESSION, "tool_use_id": "t1",
+            "hook_event_name": "PostToolUse", "tool_input": {"command": cmd},
+            "tool_response": {"stdout": "", "stderr": "", "interrupted": False}})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(os.path.exists(marker), "a hook ran a program the repository's config names")
+        self.assertEqual(self.record()["evidence"][-1]["result"], "passed")
+
+    def test_an_unreadable_state_is_never_passed(self):
+        sys.path.insert(0, HOOKS)
+        from agentkeel_core import evidence
+        result, _ = evidence.judge({"head": None, "tree": None}, {"tool_response": {"interrupted": False}},
+                                   (None, None))
+        self.assertEqual(result, "unrecorded")
+
+
 class HookLauncher(RepoCase):
     """hooks/run.sh: a verified interpreter, isolated mode, an emptied environment."""
     RUN = os.path.join(HOOKS, "run.sh")
@@ -390,6 +424,106 @@ class ImportAndRelease(RepoCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("discarded:", out.stdout)
         self.assertFalse(os.path.exists(self.clone))
+
+    def plant_programs(self, repo):
+        """A clean filter and an fsmonitor command in the repository's own config. Each one, if
+        git ever runs it, leaves a marker outside the repository."""
+        marker = os.path.join(self.tmp, "PLANTED-RAN")
+        script = os.path.join(self.tmp, "planted.sh")
+        with open(script, "w") as fh:
+            fh.write(f"#!/bin/sh\ntouch {marker}\ncat\n")
+        os.chmod(script, 0o755)
+        git(repo, "config", "filter.planted.clean", script)
+        git(repo, "config", "filter.planted.required", "true")
+        git(repo, "config", "core.fsmonitor", script)
+        return marker
+
+    def test_release_runs_nothing_from_the_clone(self):
+        with open(os.path.join(self.clone, ".gitattributes"), "w") as fh:
+            fh.write("* filter=planted\n")
+        git(self.clone, "add", ".gitattributes")
+        a = self.commit("attributes")
+        self.assertEqual(self.human("import", "t", "--sha", a).returncode, 0)
+        git(self.primary, "branch", "feat/t", a)
+        marker = self.plant_programs(self.clone)
+        with open(os.path.join(self.clone, "loose.txt"), "w") as fh:
+            fh.write("x")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("1 changed or untracked", out.stderr)
+        os.remove(os.path.join(self.clone, "loose.txt"))
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(os.path.exists(marker), "release ran a program the clone's config names")
+
+    def test_release_keeps_a_clone_it_cannot_read(self):
+        import shutil
+        shutil.rmtree(os.path.join(self.clone, ".git"))
+        with open(os.path.join(self.clone, "work.txt"), "w") as fh:
+            fh.write("unsaved")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("could not be inspected", out.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.clone, "work.txt")))
+        self.assertTrue(os.path.exists(os.path.join(self.home, "opened", "t.json")))
+
+    def test_release_keeps_a_clone_with_a_corrupt_head(self):
+        with open(os.path.join(self.clone, ".git", "HEAD"), "w") as fh:
+            fh.write("not a ref\n")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2); self.assertIn("could not be inspected", out.stderr)
+        self.assertTrue(os.path.isdir(self.clone))
+
+    def test_an_older_stash_entry_is_kept(self):
+        a = self.commit("A")
+        self.assertEqual(self.human("import", "t", "--sha", a).returncode, 0)
+        git(self.primary, "branch", "feat/t", a)
+        for name in ("older.txt", "newer.txt"):
+            with open(os.path.join(self.clone, name), "w") as fh:
+                fh.write(name)
+            git(self.clone, "stash", "push", "-q", "-u", "-m", name)
+        git(self.primary, "fetch", "-q", self.clone, "refs/stash:refs/heads/kept-newest-stash")
+        out = self.human("release", "t")
+        self.assertEqual(out.returncode, 2, "release deleted an unpreserved older stash entry")
+        self.assertIn("stash entry", out.stderr)
+        self.assertTrue(os.path.isdir(self.clone))
+
+    def test_another_folder_at_the_path_is_never_deleted(self):
+        import shutil
+        shutil.rmtree(self.clone)
+        os.makedirs(self.clone)
+        with open(os.path.join(self.clone, "someone-elses.txt"), "w") as fh:
+            fh.write("x")
+        out = self.human("release", "t", "--discard")
+        self.assertEqual(out.returncode, 2); self.assertIn("not the folder task.py open made", out.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.clone, "someone-elses.txt")))
+
+    def test_import_waits_for_the_release_lock(self):
+        import fcntl, time
+        a = self.commit("A")
+        lock = open(os.path.join(self.home, "opened", "t.json.lock"), "w")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            proc = subprocess.Popen([sys.executable, os.path.join(HOOKS, "task.py"), "import", "t", "--sha", a],
+                                    cwd=self.primary, env={**os.environ, **self.env},
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(1.5)
+            self.assertIsNone(proc.poll(), "import ran while release held the lock")
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN); lock.close()
+        proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(self.ref("refs/agentkeel/accepted/t"), a)
+
+    def test_process_listing_failures_stop_the_release(self):
+        sys.path.insert(0, HOOKS)
+        from agentkeel_core import isolation
+        saved = getattr(isolation, "LSOF", None)
+        try:
+            for program in ("/nonexistent/lsof", "/usr/bin/false"):
+                isolation.LSOF = program
+                with self.assertRaises(isolation.OpenError):
+                    isolation.active_processes(self.clone)
+        finally:
+            isolation.LSOF = saved
 
     def test_import_and_release_are_the_humans_commands(self):
         self.declare()

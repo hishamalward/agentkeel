@@ -70,11 +70,11 @@ class Adapters(RepoCase):
 
     def test_a_write_with_no_readable_target_is_refused_unless_every_target_is_allowed(self):
         self.declare(allow=("implement", "remote-write"))
-        self.refused("mcp__plugin_posthog_posthog__exec", {"command": 'call feature-flag-create {"key": "x"}'},
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": 'call create-feature-flag {"key": "x"}'},
                      "cannot tell which")
         with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
             json.dump({"mcp": {"posthog": {"targets": ["*"]}}}, fh)
-        self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call feature-flag-create {"key": "x"}'})
+        self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call create-feature-flag {"key": "x"}'})
 
     def test_paid_calls_need_paid_job(self):
         live = ("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/serp/google/organic/live/advanced"})
@@ -95,6 +95,42 @@ class Adapters(RepoCase):
         self.refused("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/something/new"}, "not an action")
         self.refused("mcp__plugin_sentry_sentry__execute_sentry_tool", {"name": "mystery", "arguments": {}},
                      "not an action")
+
+    def test_paid_calls_need_a_listed_target_when_they_name_one(self):
+        self.declare(allow=("implement", "paid-job"))
+        seer = "mcp__plugin_sentry_sentry__analyze_issue_with_seer"
+        self.refused(seer, {"organizationSlug": "outside-org", "issueId": "X-1"}, "targets 'outside-org'")
+        self.refused(seer, {"issueUrl": "https://outside-org.sentry.io/issues/X-1/"}, "targets 'outside-org'")
+        self.refused(seer, {"issueId": "X-1"}, "cannot tell which")
+        self.refused("mcp__plugin_sentry_sentry__execute_sentry_tool",
+                     {"name": "analyze_issue_with_seer", "arguments": {"organizationSlug": "outside-org"}},
+                     "targets 'outside-org'")
+        self.ok(seer, {"organizationSlug": "my-org", "issueId": "X-1"})
+        self.ok("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/serp/google/organic/live/advanced"})
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            json.dump({"mcp": {}}, fh)
+        self.refused(seer, {"organizationSlug": "my-org", "issueId": "X-1"}, "allowed: none")
+
+    def test_unknown_names_are_refused_however_they_are_spelled(self):
+        shaped = [("mcp__revenuecat__get_unrecognized_action", {"project_id": "proj_ok"}),
+                  ("mcp__revenuecat__list_everything_and_delete", {"project_id": "proj_ok"}),
+                  ("mcp__plugin_sentry_sentry__search_and_resolve", {"organizationSlug": "my-org"}),
+                  ("mcp__plugin_sentry_sentry__execute_sentry_tool", {"name": "get_unrecognized", "arguments": {}}),
+                  ("mcp__plugin_posthog_posthog__exec", {"command": 'call widgets-get-all {}'}),
+                  ("mcp__plugin_posthog_posthog__exec", {"command": 'call --json query-unknown {}'}),
+                  ("mcp__dfs-mcp__api_request", {"method": "GET", "path": "/v3/serp/google/locations_and_more"}),
+                  ("mcp__dfs-mcp__docs_rewrite", {})]
+        for tool, args in shaped:
+            self.refused(tool, args, "no task")
+        self.declare(allow=("implement", "remote-write", "paid-job"))
+        for tool, args in shaped:
+            self.refused(tool, args, "not an action")
+
+    def test_call_flags_do_not_hide_the_tool(self):
+        self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call --json insight-get {"id": 4}'})
+        self.declare(allow=("implement",))
+        self.refused("mcp__plugin_posthog_posthog__exec",
+                     {"command": 'call --confirm project-settings-update {"id": 111}'}, "remote-write")
 
     def test_no_task_refuses_writes_and_paid_calls(self):
         self.refused("mcp__revenuecat__create_product", {"project_id": "proj_ok"}, "no task")

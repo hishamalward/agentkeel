@@ -16,10 +16,11 @@ every other task's folders unwritable to the session's commands; see docs/enforc
 import json
 import os
 import re
+import stat
 import subprocess
 import time
 
-from . import gitops, record
+from . import gitops, record, repostate
 
 TASK_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOSTS = ("claude", "codex")
@@ -121,10 +122,11 @@ def open_task(repo, task, host, size, permissions, base=None, branch=None, path=
     _git(clone, "switch", "-q", "-c", branch)
     scratch = os.path.join(scratch_root(environ), f"{os.path.basename(top)}-{task}")
     os.makedirs(scratch, exist_ok=True)
+    st = os.lstat(clone)
     rec = {"version": 1, "task": task, "host": host, "size": size,
            "permissions": sorted(set(permissions)), "repo": top,
            "repo_common_dir": gitops.common_dir(top), "clone": clone, "branch": branch,
-           "base": base, "base_sha": base_sha, "scratch": scratch,
+           "base": base, "base_sha": base_sha, "scratch": scratch, "clone_id": [st.st_dev, st.st_ino],
            "writable": _policy_writable(top), "opened_at": int(time.time()), "sessions": []}
     record.atomic_write_json(opened_path(task, environ), rec)
     if host == "claude":
@@ -219,12 +221,18 @@ def _fixed_git(repo, *args):
 
 def import_task(task, sha, environ=os.environ):
     """Fetch the task's branch from its recorded clone into a staging ref of the shared
-    repository, and accept it only if it is exactly `sha`. Returns the accepted SHA."""
+    repository, and accept it only if it is exactly `sha`. Returns the accepted SHA. Holds the
+    lock release takes, so a release never runs between the fetch and the accept."""
+    if not SHA_RE.match(sha or ""):
+        raise OpenError("--sha needs the full commit id (40 or 64 hex characters)")
+    with record.locked(opened_path(task, environ)):
+        return _import_locked(task, sha, environ)
+
+
+def _import_locked(task, sha, environ):
     rec = load_opened(task, environ)
     if not rec:
         raise OpenError(f"no opened task '{task}'")
-    if not SHA_RE.match(sha or ""):
-        raise OpenError("--sha needs the full commit id (40 or 64 hex characters)")
     branch = rec["branch"]
     if branch.startswith(("-", "refs/")) or ":" in branch or ".." in branch:
         raise OpenError(f"the recorded branch '{branch}' is not a plain branch name")
@@ -251,9 +259,18 @@ def _reachable_in_repo(repo, sha):
     return bool(out.strip())
 
 
+LSOF = "/usr/sbin/lsof"
+
+
 def active_processes(clone):
-    """Process ids whose working folder is inside the clone (a session or its tools still run)."""
-    p = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpn"], capture_output=True, text=True)
+    """Process ids whose working folder is inside the clone (a session or its tools still run).
+    Raises OpenError when the processes cannot be listed: unknown is not "none"."""
+    try:
+        p = subprocess.run([LSOF, "-w", "-a", "-d", "cwd", "-Fpn"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise OpenError(f"the processes could not be listed ({e}), so nothing is deleted") from e
+    if p.returncode != 0 or not p.stdout.strip():
+        raise OpenError(f"lsof could not list the processes (exit {p.returncode}), so nothing is deleted")
     pids, pid = [], None
     for line in p.stdout.splitlines():
         if line.startswith("p"):
@@ -267,22 +284,48 @@ def active_processes(clone):
 
 def release_problems(rec):
     """What is not preserved: an empty list means the clone holds nothing the shared repository
-    lacks. Checked at the moment of release, under the release lock."""
+    lacks. Checked at the moment of release, under the release lock. The clone is read without its
+    own config (repostate.py), and a clone that cannot be read is a problem, never "clean"."""
     repo, clone = rec["repo"], rec["clone"]
+    try:
+        st = repostate.inspect(clone)
+    except repostate.InspectError as e:
+        return [f"the clone could not be inspected ({e}), so its work is not known to be preserved"]
+    if st["top"] != clone:
+        return [f"{clone} is not the top of its own repository, so its work is not known to be preserved"]
     problems = []
-    tip = subprocess.run(["git", "-C", clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    tip = st["head"]
     if tip and not _reachable_in_repo(repo, tip):
         problems.append(f"the clone's tip {tip[:12]} is not in the shared repository (task.py import it first)")
-    refs = subprocess.run(["git", "-C", clone, "for-each-ref", "--format=%(objectname) %(refname)",
-                           "refs/heads", "refs/stash"], capture_output=True, text=True).stdout.split("\n")
-    for line in filter(None, refs):
-        sha, name = line.split(" ", 1)
+    for name, sha in sorted(st["branches"].items()):
         if not _reachable_in_repo(repo, sha):
             problems.append(f"{name} at {sha[:12]} is not in the shared repository")
-    status = subprocess.run(["git", "-C", clone, "status", "--porcelain"], capture_output=True, text=True).stdout
-    if status.strip():
-        problems.append(f"the clone has {len(status.strip().splitlines())} changed or untracked file(s)")
+    for sha in st["stashes"]:
+        if not _reachable_in_repo(repo, sha):
+            problems.append(f"stash entry {sha[:12]} is not in the shared repository")
+    if st["changed"]:
+        problems.append(f"the clone has {len(st['changed'])} changed or untracked file(s)")
     return problems
+
+
+def identity_problem(rec):
+    """None when the folder at the recorded path is the clone `open` made, else why it is not.
+    A folder that is not the clone is never deleted, even with --discard."""
+    clone = rec.get("clone") or ""
+    home = os.path.realpath(os.path.expanduser("~"))
+    repo = os.path.realpath(rec.get("repo") or "/")
+    if not os.path.isabs(clone) or os.path.realpath(clone) != clone or clone in ("/", home) \
+            or clone == repo or repo.startswith(clone + os.sep):
+        return f"the recorded clone path {clone!r} is not a separate folder beside the repository"
+    if not os.path.lexists(clone):
+        return None
+    st = os.lstat(clone)
+    if not stat.S_ISDIR(st.st_mode):
+        return f"{clone} is not a folder"
+    want = rec.get("clone_id")
+    if want and [st.st_dev, st.st_ino] != list(want):
+        return f"{clone} is not the folder task.py open made (another folder now has its name)"
+    return None
 
 
 def release_task(task, discard=False, environ=os.environ):
@@ -295,16 +338,21 @@ def release_task(task, discard=False, environ=os.environ):
         if not rec:
             raise OpenError(f"no opened task '{task}'")
         clone = rec["clone"]
-        if os.path.isdir(clone):
+        wrong = identity_problem(rec)
+        if wrong:
+            raise OpenError(f"{wrong}.\nNothing is deleted, not even with --discard; remove it yourself if it must go.")
+        problems = []
+        if os.path.lexists(clone):
             busy = active_processes(clone)
             if busy:
                 raise OpenError(f"processes still work in {clone} (pid {', '.join(busy)}): end the session first")
-            problems = release_problems(rec)
+            if not rec.get("clone_id"):
+                problems.append("the task record predates clone identity checks, so the folder is not proven "
+                                "to be the clone")
+            problems += release_problems(rec)
             if problems and not discard:
                 raise OpenError("not released, so no work is lost:\n  " + "\n  ".join(problems)
                                 + f"\nTo delete it anyway: task.py release {task} --discard")
-        else:
-            problems = []
         repo = rec["repo"]
         _fixed_git(repo, "update-ref", "-d", staging_ref(task))
         acc = _fixed_git(repo, "rev-parse", "--verify", "-q", accepted_ref(task)).stdout.strip()

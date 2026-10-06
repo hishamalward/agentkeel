@@ -1,8 +1,8 @@
 """agentkeel evidence: a test run's result, recorded by the hooks, bound to the code it ran on.
 
 `task.py verify -- <command>` only runs the command. The PreToolUse guard records the start of the
-call (its id, the command, HEAD and a tree id that covers uncommitted and untracked files); the
-PostToolUse hook closes it. A result is "passed" only for a completion the host reports
+call (its id, the command, HEAD and a tree id that covers uncommitted and untracked files, read
+without running anything the repository's config names); the PostToolUse hook closes it. A result is "passed" only for a completion the host reports
 unambiguously and only if HEAD and the tree did not move during the run. Everything else is
 "unrecorded" or "stale", never passed. A run with no completion stays pending, which counts as
 unrecorded. Shipping itself is gated by the repository's CI required check (checks.py); this
@@ -15,11 +15,9 @@ Host facts (measured, docs/enforcement-design.md):
 """
 import os
 import re
-import subprocess
-import tempfile
 import time
 
-from . import record
+from . import record, repostate
 
 VERIFY_RE = re.compile(r"(^|[\s/\"'])task\.py[\"']?\s+verify(\s|$)")
 KEEP = 20
@@ -29,26 +27,13 @@ def is_verify(command):
     return bool(command) and bool(VERIFY_RE.search(command))
 
 
-def _git(cwd, *args, env=None):
-    p = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True,
-                       env={**os.environ, **(env or {})})
-    return p.stdout.strip() if p.returncode == 0 else None
-
-
 def code_state(cwd):
-    """(HEAD, tree id of the working folder as it is, untracked files included)."""
-    head = _git(cwd, "rev-parse", "HEAD")
-    fd, index = tempfile.mkstemp(prefix="agentkeel-index-")
-    os.close(fd)
+    """(HEAD, tree id of the working folder as it is, untracked files included), read without the
+    repository's config (repostate.py). (None, None) when it cannot be read."""
     try:
-        env = {"GIT_INDEX_FILE": index}
-        if head:
-            _git(cwd, "read-tree", "HEAD", env=env)
-        _git(cwd, "add", "-A", env=env)
-        tree = _git(cwd, "write-tree", env=env)
-    finally:
-        os.remove(index)
-    return head, tree
+        return repostate.state(cwd)
+    except repostate.InspectError:
+        return None, None
 
 
 def host_of(payload):
@@ -79,6 +64,8 @@ def judge(pending, payload, now_state):
         return "unrecorded", "the command ran in the background; its exit reached no hook"
     if resp.get("interrupted") is not False:
         return "unrecorded", "the command was interrupted, or the host did not say it was not"
+    if not pending.get("tree") or not now_state[1]:
+        return "unrecorded", "the state of the code could not be read"
     if (pending.get("head"), pending.get("tree")) != now_state:
         return "stale", "HEAD or the working tree changed while the command ran"
     return "passed", "exit 0, in the foreground, on unchanged code"
