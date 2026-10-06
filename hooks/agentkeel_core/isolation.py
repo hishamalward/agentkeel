@@ -319,4 +319,6 @@ def release_task(task, discard=False, environ=os.environ):
         for p in (session_settings_path(task, environ), path):
             if os.path.exists(p):
                 os.remove(p)
-        return problems
+    if os.path.exists(path + ".lock"):
+        os.remove(path + ".lock")
+    return problems

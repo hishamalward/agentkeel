@@ -372,6 +372,7 @@ class ImportAndRelease(RepoCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertFalse(os.path.exists(u_clone))
         self.assertFalse(os.path.exists(os.path.join(self.home, "opened", "u.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "opened", "u.json.lock")))
         self.assertFalse(os.path.exists(os.path.join(self.home, "sessions", "u.claude.json")))
         self.assertIsNone(self.ref("refs/agentkeel/accepted/u"), "a branch keeps the work, so the ref goes")
 
