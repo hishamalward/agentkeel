@@ -4,7 +4,7 @@ What each hook refuses, what it cannot see, and the test that proves each protec
 
 ## Hooks
 
-Six hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A guard reads the tool call as JSON on stdin ([captured payloads](hook-payloads.md)), then allows it (exit 0) or blocks it with a reason the model reads (exit 2). The session-start and stop hooks only report.
+Seven hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A guard reads the tool call as JSON on stdin ([captured payloads](hook-payloads.md)), then allows it (exit 0) or blocks it with a reason the model reads (exit 2). The session-start and stop hooks only report.
 
 1. **Tool call**: the host sends the call to the hook as JSON.
 2. **Events**: `host.py` turns it into file edits, shell commands or dispatches.
@@ -49,7 +49,7 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
 | In a session started with `task.py open`: a shell write outside the task's clone, scratch folder and declared caches, from any command, script or child process | prevents, by the host's OS sandbox (Claude Code `--settings`, Codex permission profile) | Open, ImportAndRelease; live on both hosts |
 | `task.py open`, `import` and `release` are the human's commands | prevents | Open, ImportAndRelease |
-| A guarded MCP server (RevenueCat, PostHog, Sentry, DataForSEO): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job` and a listed target when it names one, a tool not listed by name is refused | prevents, also for Codex calls inside `exec` | Adapters; live on both hosts |
+| A guarded MCP server (RevenueCat, PostHog, Sentry, DataForSEO): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job` and a listed target when it names one, a call that publishes to end users needs `publish`, a call that changes or submits store products needs `store-submission`, a tool not listed by name is refused | prevents, also for Codex calls inside `exec` | Adapters; live on both hosts |
 | A plugin hook's interpreter or imports redirected by the environment | prevents: the hooks run through `run.sh` (recorded interpreter, `-I`, emptied environment) | HookLauncher |
 | A test run's result is recorded by the hooks, bound to `HEAD` and the tree; only an unambiguous foreground success on unchanged code is "passed" | records; Codex runs stay unrecorded | Evidence |
 | Shell writes that are not git and commands inside scripts, in a session not started with `task.py open`; other MCP servers; browser automation | unsupported |  |

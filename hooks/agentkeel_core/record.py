@@ -4,7 +4,7 @@ A task record answers three separate questions (project canon, #task-record):
 
   size         small | medium | large      how much process the task buys
   permissions  review, implement, merge, push, distribution-build, store-submission, paid-job,
-               remote-write
+               remote-write, publish
   resources    the worktrees and report folders the task owns
 
 It is bound to one agent session (the host's session id), so a second session cannot inherit

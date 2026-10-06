@@ -103,7 +103,7 @@ NO_TASK = (
     "Declare it in one command, from your reading of the human's request, then retry:\n"
     f"  {TASK_CMD} start <task-id> --size small|medium|large --allow <permissions>\n\n"
     "Permissions: review (write only --write-root folders), implement, merge, push,\n"
-    "distribution-build, store-submission, paid-job. Size never grants a permission.\n"
+    "distribution-build, store-submission, paid-job, remote-write, publish. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
 )
 

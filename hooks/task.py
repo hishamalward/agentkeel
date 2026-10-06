@@ -34,7 +34,8 @@ Documentation (repositories with "docs": "html" in agentkeel.json; see docs/ in 
 
 Permissions (comma separated, any combination): review, implement, merge, push,
 distribution-build, store-submission, paid-job, remote-write (changes on a guarded MCP service,
-within the targets agentkeel.json lists). Size never grants a permission: they are
+within the targets agentkeel.json lists), publish (an MCP call that makes something live for end
+users or sends to them; store-submission covers the app stores). Size never grants a permission: they are
 separate answers to separate questions. "merge and push" in the human's request means
 --allow implement,merge,push; a distribution build is never implied by shipping.
 

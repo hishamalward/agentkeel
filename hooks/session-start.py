@@ -154,7 +154,7 @@ def main():
           "your reading of the request, state that reading in your first update, and proceed:\n"
           f'  python3 "{task}" start <task-id> --size small|medium|large --allow <permissions>\n'
           "Permissions: review, implement, merge, push, distribution-build, store-submission, paid-job,\n"
-          "remote-write.\n"
+          "remote-write, publish.\n"
           "Code changes happen in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>).\n"
           f'Docs pages (where agentkeel.json sets "docs": "html"): read with python3 "{task}" context <page>,\n'
           "start one with task.py new; plan and progress go in the page's Working section."

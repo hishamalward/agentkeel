@@ -18,7 +18,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 | Question | Values | Rule |
 |---|---|---|
 | Size | `small`, `medium`, `large` | how much process the task buys; it grants no action |
-| Permissions | `review`, `implement`, `merge`, `push`, `distribution-build`, `store-submission`, `paid-job`, `remote-write` | each action needs its own; "merge and push" means `implement,merge,push` |
+| Permissions | `review`, `implement`, `merge`, `push`, `distribution-build`, `store-submission`, `paid-job`, `remote-write`, `publish` | each action needs its own; "merge and push" means `implement,merge,push` |
 | Resources | worktrees, write roots, named resources | where the task may write; everything else belongs to someone else |
 
 | Size | Process | The hooks require |
@@ -34,9 +34,10 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 | `merge` | `gh pr merge` (together with `push`); moving a protected branch locally: a commit on it, `merge`, `merge --ff-only`, `reset`, `rebase`, `update-ref`, `fetch . x:main`, `branch -f` |
 | `push` | every push to a remote, the task's own branch included; deploy commands (`railway up`, `vercel --prod`, `fly deploy`, `netlify deploy --prod`) |
 | `distribution-build` | `eas build`, `xcodebuild archive`, `fastlane gym` and similar |
-| `store-submission` | `eas submit`, `eas update`, `npm publish`, `fastlane deliver/pilot/supply` |
+| `store-submission` | `eas submit`, `eas update`, `npm publish`, `fastlane deliver/pilot/supply`; MCP calls that change or submit products in the app stores (RevenueCat `submit_products_to_store` and its product store state operations), on a listed target |
 | `paid-job` | the command patterns a repository lists in `agentkeel.json`; MCP calls that bill per call (DataForSEO `/live` and `task_post`, Sentry Seer analysis, which also needs its organization listed under `mcp`) |
-| `remote-write` | MCP calls that change a guarded service (RevenueCat, PostHog, Sentry), only on a target `agentkeel.json` lists for it; a git push permission does not cover them |
+| `remote-write` | MCP calls that change a guarded service (RevenueCat, PostHog, Sentry), only on a target `agentkeel.json` lists for it; a git push permission does not cover them, and `remote-write` never publishes or submits |
+| `publish` | MCP calls that make something live for end users at once or send to them: a RevenueCat paywall published or unpublished, an experiment started or resumed; PostHog's publish, launch, ship, enable, roll-out and batch-run tools; on a listed target |
 
 ## Rules
 
