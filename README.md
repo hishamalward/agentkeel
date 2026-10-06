@@ -233,6 +233,7 @@ ready to push.
 | [Required checks](docs/required-checks.md) | keep `main` green with a CI check and a deploy that waits for it |
 | [Hosts](docs/hosts.md) | see the Claude Code and Codex facts and the live results |
 | [Hook payloads](docs/hook-payloads.md) | read the captured JSON that the hooks parse |
+| [Enforcement design](docs/enforcement-design.md) | see what each host and AgentKeel enforce, and the planned shell and MCP controls (not built) |
 
 Related work: [agent-slots](https://github.com/hishamalward/agent-slots) isolates the database,
 ports and queues of several agents on one machine. AgentKeel is the process side; agent-slots is
