@@ -451,8 +451,16 @@ old installed AgentKeel plugin was disabled only for that test session to avoid 
 guard versions. The test fixture and its task records were removed; no persistent host settings
 changed during acceptance. The two turns cost at most $0.34 in total.
 
-Not shown live: the stop report's message in the hosts' interactive views (`claude -p` and
-`codex exec` print no system messages), and `import` and `release` of these clones (the guard
+The Stop report was shown live in Claude Code 2.1.292's interactive terminal on 2026-10-07,
+against candidate `c7f7589`. One review task held a disposable worktree; after the reply, the UI
+printed `Stop says: agentkeel: task 'stop-ui-probe' still holds` and the resource details, then
+returned to an idle prompt without another model turn. The session used candidate hooks through
+session-only settings, private task state and no MCP servers or hook bypass. Its displayed
+estimated cost was $0.14. The session exited and its fixtures were removed. This proves text
+visibility, not pixel layout, and does not count toward the five real-session observation.
+
+Not shown live: the Stop report in Codex's interactive view (it needs trust for the new hook;
+`codex exec` prints no system messages), and `import` and `release` of these clones (the guard
 refuses them from an agent session, as designed; the unit tests run them through the real commands).
 
 **Open: shipping from an isolated session.** Inside the sandbox the agent cannot move the shared
