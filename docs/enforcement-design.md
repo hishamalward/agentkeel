@@ -350,14 +350,23 @@ tool name and the arguments, never the tool's description or annotations.
   PostHog documents the pin ([connection pinning](https://posthog.com/docs/model-context-protocol/faq#advanced-configuration)):
   the header `x-posthog-project-id: <id>` or `?project_id=<id>` on the server's URL, and a pinned
   connection no longer offers `switch-project`. The guard reads the pin from the host's entry for
-  the exact server the call came from (`hooks/agentkeel_core/mcp_connection.py`): on Claude Code
-  the project's entry in `~/.claude.json`, then the project's `.mcp.json`, then the user's entry,
-  and a plugin's own `.mcp.json` for `mcp__plugin_<plugin>_<server>__*`; on Codex
-  `[mcp_servers.<server>]` in `~/.codex/config.toml` with `http_headers` and `env_http_headers`.
-  A pin counts only on a `posthog.com` URL. A write passes when the pin is a listed project; it
-  is refused with the reason when the connection is pinned to another project or not pinned at
-  all (the refusal says how to pin). Reads pass either way, and `"*"` allows every project.
-  Listing a project in `agentkeel.json` alone enables nothing: the pin must exist on the host.
+  the exact server the call came from (`hooks/agentkeel_core/mcp_connection.py`), never from a
+  file the session could have written: on Claude Code, for the host's project directory
+  (`CLAUDE_PROJECT_DIR`; the hook's cwd follows `cd` and is not it), the project's entry in
+  `~/.claude.json`, then the project's `.mcp.json` and that one only for a server the human
+  approved for the project (`enabledMcpjsonServers`), then the user's entry, and a plugin's own
+  `.mcp.json` for `mcp__plugin_<plugin>_<server>__*`; on Codex `[mcp_servers.<server>]` in
+  `~/.codex/config.toml` with `http_headers` and `env_http_headers`. `.mcp.json` joins the
+  configuration files the session cannot write. A pin counts only on a `posthog.com` URL, and
+  only when every pin the entry carries names the same project; a configuration file that exists
+  and does not parse, a missing project directory, or plugin installs that disagree mean "not
+  pinned". A write passes when the pin is a listed project; it is refused with the reason when the
+  connection is pinned to another project or not pinned at all (the refusal says how to pin), and
+  an explicit project id that differs from the pin is refused too. `switch <id>`, `switch-project`
+  and `switch-organization` change the connection's active project, so they are remote writes to
+  the target they name. Reads pass either way, and `"*"` allows every project. Listing a project
+  in `agentkeel.json` alone enables nothing: the pin must exist on the host, and the host reads it
+  at launch, so a pin added mid-session takes effect at the next session.
 - **Generic tools**: PostHog's `exec` is classified by its command verb and the listed tool that
   `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
   segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment
@@ -429,7 +438,7 @@ project:
 
 | Check | Claude Code | Codex |
 |---|---|---|
-| `project-get` names the pinned project; `switch` is not offered | guard allows (hook run against the real entries); the call waits for the human's sign-in to the pinned entry | yes, live |
+| `project-get` names the pinned project; `switch 999` is refused by the guard (a write to an unlisted project), and the pinned server does not offer it | guard run against the real entries; the call waits for the human's sign-in to the pinned entry | yes, live (the server answered "Unknown command: switch" before the guard treated it as a write) |
 | A write on the active project under the pin | allowed | allowed, live: one disposable annotation created and deleted at once |
 | The same write through the host's unpinned entry (the plugin's) | refused, says how to pin | (one entry, pinned) |
 | `project-settings-update` naming another project; an unknown tool name | refused | refused, live, 0 calls |
