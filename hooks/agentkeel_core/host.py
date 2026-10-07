@@ -30,7 +30,7 @@ NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWri
                  "ScheduleWakeup", "Monitor", "PushNotification", "EnterWorktree", "ExitWorktree",
                  "Artifact", "ArtifactComments", "ArtifactData", "SendFeedback", "ReportFindings",
                  "ListMcpResourcesTool", "ReadMcpResourceTool", "BashOutput", "KillShell",
-                 "view_image", "update_plan", "read_file", "list_dir", "web_search", "wait_agent",
+                 "view_image", "update_plan", "read_file", "list_dir", "web_search", "wait_agent", "collaborationwait_agent",
                  "list_agents", "collaborationlist_agents", "close_agent", "send_input", "SubagentHandback",
                  # Codex's hosted web tool, including its normalized hook name. Exact aliases
                  # only: browser script execution and unknown *run* tools remain judged below.

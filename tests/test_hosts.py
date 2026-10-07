@@ -68,6 +68,14 @@ class CapturedShapes(unittest.TestCase):
             "task_name": "probe"}}, "/r")[0].kind, "dispatch")
         self.assertEqual(host.events({"tool_name": "collaborationlist_agents_and_edit", "tool_input": {}}, "/r")[0].kind, "gap")
 
+    def test_codex_normalized_agent_wait_is_read_only(self):
+        from agentkeel_core import host
+        for tool in ("wait_agent", "collaborationwait_agent"):
+            self.assertEqual(host.events({"tool_name": tool, "tool_input": {"timeout_ms": 10000}}, "/r"), [])
+        self.assertEqual(host.events({"tool_name": "collaborationspawn_agent", "tool_input": {
+            "task_name": "probe"}}, "/r")[0].kind, "dispatch")
+        self.assertEqual(host.events({"tool_name": "collaborationwait_agent_and_edit", "tool_input": {}}, "/r")[0].kind, "gap")
+
     def test_codex_events(self):
         import helpers  # noqa: F401
         from agentkeel_core import host
