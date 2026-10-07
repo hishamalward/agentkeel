@@ -6,7 +6,8 @@ host's configuration, and when it cannot read a fact reliably it says "unknown",
   a configuration entry alone never counts as installed.
 - Codex trust (one [hooks.state."agentkeel@agentkeel:..."] table with a trusted_hash per hook the
   human trusted in /hooks) exists only in config.toml. It is read with a real TOML parser:
-  tomllib (Python 3.11+), here or in a newer python3.x on PATH. Without one, trust is unknown.
+  tomllib (Python 3.11+) or its package form tomli (pip carries a copy), here or in a newer
+  python3.x on PATH. Without one, trust is unknown.
 - A project install (install.py) is found by its settings file calling task-guard.py.
 """
 import json
@@ -95,16 +96,25 @@ def _codex_row(text):
     return None
 
 
+def _tomllib():
+    """tomllib (Python 3.11+), or tomli, the same parser as a package (pip carries a copy)."""
+    for name in ("tomllib", "tomli", "pip._vendor.tomli"):
+        try:
+            return __import__(name, fromlist=["load"])
+        except ImportError:
+            continue
+    return None
+
+
 def _toml(path, environ):
     """(the parsed file as a dict, None) or (None, why it could not be read)."""
-    try:
-        import tomllib
-        with open(path, "rb") as fh:
-            return tomllib.load(fh), None
-    except ImportError:
-        pass
-    except Exception as e:
-        return None, f"~/.codex/config.toml did not parse ({type(e).__name__})"
+    tomllib = _tomllib()
+    if tomllib is not None:
+        try:
+            with open(path, "rb") as fh:
+                return tomllib.load(fh), None
+        except Exception as e:
+            return None, f"~/.codex/config.toml did not parse ({type(e).__name__})"
     for name in ("python3.14", "python3.13", "python3.12", "python3.11"):
         res = _run([name, "-c", TOML_TO_JSON, path], None, environ, timeout=20)
         if res is not None:
