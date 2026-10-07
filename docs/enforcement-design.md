@@ -423,6 +423,17 @@ branch's hooks and synthetic recording servers:
 | The human's profile reaches the session | yes | yes |
 | The stop report runs at the end of the turn | yes (its state file) | yes (its state file) |
 
+The PostHog connection pin (2026-10-07), against the real server pinned to one project in the
+host's own configuration, the task allowing `remote-write` and `agentkeel.json` listing that
+project:
+
+| Check | Claude Code | Codex |
+|---|---|---|
+| `project-get` names the pinned project; `switch` is not offered | guard allows (hook run against the real entries); the call waits for the human's sign-in to the pinned entry | yes, live |
+| A write on the active project under the pin | allowed | allowed, live: one disposable annotation created and deleted at once |
+| The same write through the host's unpinned entry (the plugin's) | refused, says how to pin | (one entry, pinned) |
+| `project-settings-update` naming another project; an unknown tool name | refused | refused, live, 0 calls |
+
 Not shown live: the stop report's message in the hosts' interactive views (`claude -p` and
 `codex exec` print no system messages), and `import` and `release` of these clones (the guard
 refuses them from an agent session, as designed; the unit tests run them through the real commands).
