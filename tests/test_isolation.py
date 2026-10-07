@@ -80,7 +80,7 @@ class Open(OpenCase):
         self.assertEqual(sandbox["filesystem"]["allowWrite"][0], self.opened()["scratch"])
         self.assertEqual(sandbox["filesystem"]["denyWrite"],
                          [os.path.join(self.clone, p) for p in
-                          (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules")])
+                          (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules", "HEAD")])
         self.assertIn(f"claude --settings {settings_path}", out.stdout)
 
     def test_codex_session_arguments(self):
@@ -94,7 +94,8 @@ class Open(OpenCase):
         self.assertNotIn("-P", args)  # codex exec rejects -P
         table = next(a for a in args if a.startswith("permissions.agentkeel-json-flag.filesystem="))
         self.assertIn('":workspace_roots"={"."="write",".git"="write",".claude"="read",".git/config"="read",'
-                      '".git/hooks"="read",".git/commondir"="read",".git/info/exclude"="read",".gitmodules"="read"}',
+                      '".git/hooks"="read",".git/commondir"="read",".git/info/exclude"="read",".gitmodules"="read",'
+                      '"HEAD"="read"}',
                       table)
         self.assertIn('":tmpdir"="read"', table)
         self.assertIn('":slash_tmp"="read"', table)
@@ -233,6 +234,33 @@ class HostGitRunsNothing(OpenCase):
         marker = self.nested(self.clone, "lib")
         self.host_status(self.clone)
         self.assertFalse(os.path.exists(marker), "a submodule the repository names ran its program")
+
+    def test_the_clone_root_passes_for_a_git_directory_only_with_a_head(self):
+        """A session can break .git and lay out HEAD, objects, refs and a config at the clone's root;
+        git discovery then reads that config. The sandbox keeps the root HEAD unwritable, and
+        without it the root is never a git directory: a plain `git status` (no safe.bareRepository
+        flag) runs nothing. With a HEAD it would run the planted program, so HEAD is the guard."""
+        self.assertEqual(self.open(host="codex").returncode, 0)
+        marker = os.path.join(self.tmp, "root-ran")
+        script = os.path.join(self.tmp, "root-fsmonitor.sh")
+        with open(script, "w") as fh:
+            fh.write(f"#!/bin/sh\necho ran >> {marker}\n")
+        os.chmod(script, 0o755)
+        os.rename(os.path.join(self.clone, ".git", "HEAD"), os.path.join(self.clone, ".git", "HEAD-gone"))
+        for d in ("objects", "index"):
+            subprocess.run(["cp", "-R", os.path.join(self.clone, ".git", d), os.path.join(self.clone, d)], check=True)
+        os.makedirs(os.path.join(self.clone, "refs"))
+        with open(os.path.join(self.clone, "config"), "w") as fh:
+            fh.write(f"[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = {self.clone}\n"
+                     f"\tfsmonitor = {script}\n")
+        plain = subprocess.run(["git", "-C", self.clone, "status", "--porcelain"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, timeout=60)
+        self.assertFalse(os.path.exists(marker), f"the root passed for a git directory without HEAD: {plain.stderr}")
+        with open(os.path.join(self.clone, "HEAD"), "w") as fh:
+            fh.write("ref: refs/heads/main\n")
+        subprocess.run(["git", "-C", self.clone, "status", "--porcelain"], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=60)
+        self.assertTrue(os.path.exists(marker), "with a root HEAD the route no longer runs anything: HEAD is not the guard")
 
     def test_the_added_gitmodules_is_empty_and_hidden(self):
         self.assertEqual(self.open().returncode, 0)

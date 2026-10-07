@@ -56,11 +56,11 @@ In a State now line, text of the form `merged <full-sha> into <ref>` (a 40 or 64
 
 | Result | When | Effect |
 |---|---|---|
-| proven | the commit is an ancestor of `<ref>` (`refs/heads/<ref>`, else `refs/remotes/origin/<ref>`), or of the candidate commit being checked (the page lands only with the candidate, so the claim is true once it lands); with no `--rev`, the candidate is `HEAD` | none |
-| contradiction | the commit exists here and is an ancestor of neither | the docs check fails |
+| proven | the commit is an ancestor of `<ref>` (`refs/heads/<ref>` or `refs/remotes/origin/<ref>`, either one), or, when `<ref>` is one of the repository's protected branches, of the candidate commit being checked (the page lands on that branch only with the candidate, so the claim is true once it lands); with no `--rev`, the candidate is `HEAD` | none |
+| contradiction | the commit exists here and is an ancestor of none of them | the docs check fails |
 | unknown | the commit is not in the object store (a shallow clone), the ref does not resolve and the candidate does not hold the commit, the history is shallow, or the text names a branch or a short id instead of a full commit id (`merged feat/x into main`) | a warning; it never fails |
 
-A branch name is never evidence: a branch moves and can be deleted, a commit id cannot. A merged commit stays proven after its branch gains commits or is deleted. Any other text, an authored outside fact such as "App Store review pending", is not a claim and is never touched.
+The id's case, a trailing comma and the `origin/` or `refs/heads/` form of the ref do not change the judgement. A branch name is never evidence: a branch moves and can be deleted, a commit id cannot. A merged commit stays proven after its branch gains commits or is deleted. Any other text, an authored outside fact such as "App Store review pending", is not a claim and is never touched.
 
 ### The docs check
 

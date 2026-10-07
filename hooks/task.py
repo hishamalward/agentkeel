@@ -569,7 +569,7 @@ def _worktree_facts(path, protected):
                 ahead = int(sh.git("rev-list", "--count", st["head"], "^" + base))
             facts.update(ahead=ahead, merged=ahead == 0)
         return facts
-    except (repostate.InspectError, ValueError) as e:
+    except Exception as e:  # read-only: an unreadable worktree is a fact to report, never a crash
         return {"path": path, "error": f"cannot be read ({e}); not known to be clean"}
 
 

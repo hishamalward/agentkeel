@@ -472,7 +472,10 @@ def claims(text):
     out = []
     for label, value in state_now(text):
         for m in CLAIM_RE.finditer(value):
-            commit, ref = m.group(1), m.group(2).rstrip(".")
+            commit, ref = m.group(1).rstrip(",;:.").lower(), m.group(2).rstrip(".")
+            for prefix in ("refs/heads/", "refs/remotes/origin/", "origin/"):
+                if ref.startswith(prefix):
+                    ref = ref[len(prefix):]
             out.append((label, f"merged {commit} into {ref}", commit, ref))
     return out
 
@@ -493,48 +496,56 @@ def _git_out(root, *args):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def judge(root, commit, ref, candidate="HEAD"):
+def judge(root, commit, ref, candidate="HEAD", targets=None):
     """('proven' | 'contradiction' | 'unknown', why) for the claim `merged <commit> into <ref>`.
-    Proven: the commit is in <ref> (refs/heads, then refs/remotes/origin) or in the candidate,
-    which carries the page onto the branch. A branch name is never evidence. Only cat-file,
-    rev-parse and merge-base --is-ancestor run: nothing refreshes the index or runs a filter."""
+    Proven: the commit is in <ref> (refs/heads or refs/remotes/origin, either one), or in the
+    candidate when <ref> is a branch the candidate lands on (`targets`; every ref when None),
+    because the candidate carries the page onto that branch. A branch name is never evidence. Only
+    cat-file, rev-parse and merge-base --is-ancestor run: nothing refreshes the index or runs a
+    filter."""
     if not FULL_SHA_RE.match(commit):
         return "unknown", f"'{commit}' is not a full commit id (40 or 64 hex characters), so it cannot be checked"
     if _git_ok(root, "cat-file", "-e", commit + "^{commit}") != 0:
         return "unknown", f"{commit[:12]} is not in this repository's objects (a shallow clone?)"
-    tip = None
+    tips = {}
     for full in (f"refs/heads/{ref}", f"refs/remotes/origin/{ref}"):
         tip = _git_out(root, "rev-parse", "--verify", "-q", full + "^{commit}")
         if tip:
-            break
-    if tip and _git_ok(root, "merge-base", "--is-ancestor", commit, tip) == 0:
-        return "proven", f"{commit[:12]} is in {ref}"
-    cand = _git_out(root, "rev-parse", "--verify", "-q", candidate + "^{commit}") if candidate else None
+            tips[full] = tip
+    for full, tip in tips.items():
+        if _git_ok(root, "merge-base", "--is-ancestor", commit, tip) == 0:
+            return "proven", f"{commit[:12]} is in {full}"
+    lands = targets is None or ref in targets
+    cand = _git_out(root, "rev-parse", "--verify", "-q", candidate + "^{commit}") if candidate and lands else None
     if cand and _git_ok(root, "merge-base", "--is-ancestor", commit, cand) == 0:
         return "proven", f"{commit[:12]} is in the candidate {cand[:12]}, which carries this page onto {ref}"
-    if not tip:
+    if not tips:
         return "unknown", f"'{ref}' is not a branch here (neither refs/heads/{ref} nor refs/remotes/origin/{ref})"
-    if not cand:
+    if lands and not cand:
         return "unknown", "the candidate commit cannot be read"
     if _git_out(root, "rev-parse", "--is-shallow-repository") != "false":
         return "unknown", "the history is shallow, so the commit's absence cannot be proven"
-    return "contradiction", f"{commit[:12]} is in neither {ref} ({tip[:12]}) nor the candidate ({cand[:12]})"
+    held = " nor ".join(f"{k} ({v[:12]})" for k, v in tips.items())
+    return "contradiction", f"{commit[:12]} is in neither {held}" + (f" nor the candidate ({cand[:12]})" if cand else "")
 
 
 def claim_results(tree):
     """[(page, label, claim, result, why)] for the State now claims of every state page in the tree.
-    A tree with no repository behind it (no root) has nothing to judge against."""
+    A tree with no repository behind it (no root) has nothing to judge against. The candidate
+    counts as evidence only for the repository's protected branches, which it lands on."""
     root = getattr(tree, "root", None)
     if not root:
         return []
     candidate = getattr(tree, "rev", None) or "HEAD"
+    targets = config(tree).get("protected_branches") or ["main", "master"]
+    targets = set(str(t) for t in targets) if isinstance(targets, list) else {"main", "master"}
     out = []
     for p in sorted(tree.paths):
         m = NAME_RE.match(p[len("docs/"):]) if p.startswith("docs/") else None
         if not (m and m.group(3) == "state"):
             continue
         for label, claim, commit, ref in claims(tree.read(p) or ""):
-            result, why = judge(root, commit, ref, candidate)
+            result, why = judge(root, commit, ref, candidate, targets)
             out.append((p, label, claim, result, why))
     return out
 
@@ -570,6 +581,8 @@ class FsTree:
         for d, dirs, files in os.walk(os.path.join(root, under)):
             dirs[:] = [x for x in dirs if x not in (".git", "node_modules", "__pycache__")]
             for f in files:
+                if os.path.islink(os.path.join(d, f)):
+                    continue  # a link's target may be anywhere; the check never reads through one
                 self.paths.add(os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/"))
         # a file git ignores never reaches a commit, so the working-folder check skips it too
         try:
@@ -825,6 +838,8 @@ def write_index(root, full=False):
         return 2
     groups, legacy = build_index(root)
     out = os.path.join(docs, "index.html")
+    if os.path.islink(out):
+        os.remove(out)  # never write through a link someone left at the index's name
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(index_html(groups, legacy))
     try:

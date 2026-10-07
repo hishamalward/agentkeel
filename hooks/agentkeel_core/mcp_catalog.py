@@ -192,49 +192,47 @@ POSTHOG_WRITE = frozenset("""
     alert-destinations-create alert-destinations-delete alert-simulate alert-update
     annotation-create annotation-delete annotations-partial-update batch-export-create
     batch-export-delete batch-export-update broadcasts-create canvas-create canvas-draft-create
-    canvas-edit-create canvas-layout-patch canvas-move canvas-promote-create
-    canvas-publish-current-version canvas-state-set canvas-validate-create cdp-functions-create
-    cdp-functions-delete cdp-functions-discard-draft cdp-functions-invocations-create
-    cdp-functions-list-revisions cdp-functions-partial-update
+    canvas-edit-create canvas-layout-patch canvas-move canvas-state-set canvas-validate-create
+    cdp-functions-create cdp-functions-delete cdp-functions-discard-draft
+    cdp-functions-invocations-create cdp-functions-list-revisions cdp-functions-partial-update
     cdp-functions-rearrange-partial-update cdp-functions-restore-revision channel-create
     channel-instructions-update cohorts-add-persons-to-static-cohort-partial-update
     cohorts-create cohorts-partial-update cohorts-rm-person-from-static-cohort-partial-update
     comments-create conversations-tickets-notes-destroy
-    conversations-tickets-notes-partial-update conversations-tickets-reply-create
-    conversations-tickets-update conversations-views-create conversations-views-update
-    create-feature-flag custom-property-sources-backfill custom-property-sources-sync
-    dashboard-create dashboard-create-tile dashboard-delete dashboard-delete-tile
-    dashboard-reorder-tiles dashboard-tile-copy dashboard-transfer-tile dashboard-update
-    dashboard-update-text-tile data-catalog-certification-certify-execute
-    data-catalog-certification-certify-prepare data-catalog-certification-deprecate-execute
-    data-catalog-certification-deprecate-prepare data-catalog-certification-propose
-    data-catalog-metric-approve-execute data-catalog-metric-approve-prepare
-    data-catalog-metric-create data-catalog-metric-delete-execute
-    data-catalog-metric-delete-prepare data-catalog-metric-update
-    data-catalog-metrics-refresh-from-insight-create data-catalog-relationship-accept-execute
-    data-catalog-relationship-accept-prepare data-catalog-relationship-propose
-    data-catalog-relationship-reject-execute data-catalog-relationship-reject-prepare
-    data-warehouse-source-connect-link data-warehouse-source-setup debug-mcp-ui-apps
-    delete-feature-flag early-access-feature-create early-access-feature-destroy
-    early-access-feature-partial-update endpoint-create endpoint-delete endpoint-run
-    endpoint-update endpoints-materialization-preview error-tracking-alerts-create
-    error-tracking-alerts-delete error-tracking-alerts-partial-update
-    error-tracking-assignment-rules-create error-tracking-bypass-rules-create
-    error-tracking-bypass-rules-update error-tracking-external-references-create
-    error-tracking-grouping-rules-create error-tracking-grouping-rules-update
-    error-tracking-issues-assign-partial-update error-tracking-issues-merge-create
-    error-tracking-issues-partial-update error-tracking-issues-split-create
-    error-tracking-settings-update error-tracking-severity-rules-create
-    error-tracking-severity-rules-update error-tracking-suppression-rules-create
-    error-tracking-suppression-rules-update event-definition-create event-definition-update
-    experiment-archive experiment-cleanup-task experiment-copy-to-project experiment-create
-    experiment-create-from-prompt experiment-delete experiment-duplicate experiment-end
-    experiment-freeze-exposure experiment-holdouts-create experiment-holdouts-destroy
-    experiment-holdouts-partial-update experiment-metrics-recalculation-create
-    experiment-migrate experiment-pause experiment-reset experiment-saved-metrics-create
-    experiment-saved-metrics-destroy experiment-saved-metrics-partial-update
-    experiment-unarchive experiment-unfreeze-exposure experiment-update
-    experiments-bulk-update-tags-create external-data-schemas-cancel
+    conversations-tickets-notes-partial-update conversations-tickets-update
+    conversations-views-create conversations-views-update create-feature-flag
+    custom-property-sources-backfill custom-property-sources-sync dashboard-create
+    dashboard-create-tile dashboard-delete dashboard-delete-tile dashboard-reorder-tiles
+    dashboard-tile-copy dashboard-transfer-tile dashboard-update dashboard-update-text-tile
+    data-catalog-certification-certify-execute data-catalog-certification-certify-prepare
+    data-catalog-certification-deprecate-execute data-catalog-certification-deprecate-prepare
+    data-catalog-certification-propose data-catalog-metric-approve-execute
+    data-catalog-metric-approve-prepare data-catalog-metric-create
+    data-catalog-metric-delete-execute data-catalog-metric-delete-prepare
+    data-catalog-metric-update data-catalog-metrics-refresh-from-insight-create
+    data-catalog-relationship-accept-execute data-catalog-relationship-accept-prepare
+    data-catalog-relationship-propose data-catalog-relationship-reject-execute
+    data-catalog-relationship-reject-prepare data-warehouse-source-connect-link
+    data-warehouse-source-setup debug-mcp-ui-apps delete-feature-flag
+    early-access-feature-create early-access-feature-destroy early-access-feature-partial-update
+    endpoint-create endpoint-delete endpoint-run endpoint-update
+    endpoints-materialization-preview error-tracking-alerts-create error-tracking-alerts-delete
+    error-tracking-alerts-partial-update error-tracking-assignment-rules-create
+    error-tracking-bypass-rules-create error-tracking-bypass-rules-update
+    error-tracking-external-references-create error-tracking-grouping-rules-create
+    error-tracking-grouping-rules-update error-tracking-issues-assign-partial-update
+    error-tracking-issues-merge-create error-tracking-issues-partial-update
+    error-tracking-issues-split-create error-tracking-settings-update
+    error-tracking-severity-rules-create error-tracking-severity-rules-update
+    error-tracking-suppression-rules-create error-tracking-suppression-rules-update
+    event-definition-create event-definition-update experiment-archive experiment-cleanup-task
+    experiment-copy-to-project experiment-create experiment-create-from-prompt experiment-delete
+    experiment-duplicate experiment-end experiment-freeze-exposure experiment-holdouts-create
+    experiment-holdouts-destroy experiment-holdouts-partial-update
+    experiment-metrics-recalculation-create experiment-migrate experiment-pause experiment-reset
+    experiment-saved-metrics-create experiment-saved-metrics-destroy
+    experiment-saved-metrics-partial-update experiment-unarchive experiment-unfreeze-exposure
+    experiment-update experiments-bulk-update-tags-create external-data-schemas-cancel
     external-data-schemas-delete-data external-data-schemas-incremental-fields-create
     external-data-schemas-partial-update external-data-schemas-reload
     external-data-schemas-resync external-data-sources-bulk-update-schemas
@@ -296,25 +294,25 @@ POSTHOG_WRITE = frozenset("""
     persons-property-delete persons-property-set products-enable project-create
     project-settings-update property-definition-update proxy-create proxy-delete proxy-diagnose
     proxy-retry reminder-create reminder-delete reminder-update
-    saved-query-column-annotations-create scheduled-changes-create scheduled-changes-delete
-    scheduled-changes-update scout-config-create scout-config-delete scout-config-sync
-    scout-config-update scout-create scout-notes-create scout-notes-delete scout-run-now
-    scout-runs-emission-reports scout-runs-recent-emissions session-recording-bulk-delete
-    session-recording-delete session-recording-playlist-create session-recording-playlist-update
-    signals-scout-config-create signals-scout-config-delete signals-scout-config-sync
-    signals-scout-config-update signals-scout-run-now signals-scout-runs-emission-reports
-    signals-scout-runs-recent-emissions skill-archive skill-create skill-duplicate
-    skill-file-create skill-file-delete skill-file-rename skill-rename
-    skill-store-install-command skill-update sql-variables-create sql-variables-delete
-    sql-variables-update subscriptions-create subscriptions-delete subscriptions-partial-update
-    subscriptions-test-delivery-create survey-create survey-delete survey-stop survey-update
-    surveys-summarize-responses-create update-feature-flag usage-metrics-create
-    usage-metrics-destroy usage-metrics-partial-update user-home-settings-update
-    user-settings-update view-create view-delete view-materialize view-run view-run-history
-    view-unmaterialize view-update vision-alerts-create vision-alerts-delete
-    vision-alerts-destinations-create vision-alerts-destinations-delete vision-alerts-reset
-    vision-alerts-update vision-observations-create-task vision-observations-label-create
-    vision-observations-label-delete vision-observations-label-destroy vision-observations-retry
+    saved-query-column-annotations-create scheduled-changes-delete scout-config-create
+    scout-config-delete scout-config-sync scout-config-update scout-create scout-notes-create
+    scout-notes-delete scout-run-now scout-runs-emission-reports scout-runs-recent-emissions
+    session-recording-bulk-delete session-recording-delete session-recording-playlist-create
+    session-recording-playlist-update signals-scout-config-create signals-scout-config-delete
+    signals-scout-config-sync signals-scout-config-update signals-scout-run-now
+    signals-scout-runs-emission-reports signals-scout-runs-recent-emissions skill-archive
+    skill-create skill-duplicate skill-file-create skill-file-delete skill-file-rename
+    skill-rename skill-store-install-command skill-update sql-variables-create
+    sql-variables-delete sql-variables-update subscriptions-create subscriptions-delete
+    subscriptions-partial-update subscriptions-test-delivery-create survey-create survey-delete
+    survey-stop survey-update surveys-summarize-responses-create update-feature-flag
+    usage-metrics-create usage-metrics-destroy usage-metrics-partial-update
+    user-home-settings-update user-settings-update view-create view-delete view-materialize
+    view-run view-run-history view-unmaterialize view-update vision-alerts-create
+    vision-alerts-delete vision-alerts-destinations-create vision-alerts-destinations-delete
+    vision-alerts-reset vision-alerts-update vision-observations-create-task
+    vision-observations-label-create vision-observations-label-delete
+    vision-observations-label-destroy vision-observations-retry
     vision-scanners-affected-cohort-create vision-scanners-backfills-cancel
     vision-scanners-backfills-create vision-scanners-backfills-estimate
     vision-scanners-backfills-resume vision-scanners-create vision-scanners-delete
@@ -330,17 +328,19 @@ POSTHOG_WRITE = frozenset("""
     workflows-get-email-template workflows-list-batch-jobs workflows-list-email-templates
     workflows-list-invocations workflows-list-revisions workflows-list-versions
     workflows-patch-action-email workflows-patch-email-template workflows-patch-graph
-    workflows-restore-revision workflows-schedule-create workflows-update
-    workflows-update-email-template workflows-update-schedule
+    workflows-restore-revision workflows-update workflows-update-email-template
 """.split())
 
-# Makes something live for end users or sends to them: a published workflow or function, a
-# launched survey or experiment, a flag turned on or rolled out, a batch run. Needs `publish`.
+# Makes something live for end users or sends to them: a published workflow, function or canvas, a
+# launched survey or experiment, a flag turned on or rolled out (now or at a scheduled time), a
+# batch or scheduled run, a reply to a customer. Needs `publish`.
 POSTHOG_PUBLISH = frozenset("""
-    canvas-layout-publish canvas-publish-create cdp-functions-publish experiment-launch
-    experiment-resume experiment-ship-variant feature-flag-enable feature-flag-roll-out-to-everyone
-    feature-flag-set-release-condition-rollout survey-launch workflows-enable workflows-publish
-    workflows-run-batch workflows-test-run
+    canvas-layout-publish canvas-promote-create canvas-publish-create canvas-publish-current-version
+    cdp-functions-publish conversations-tickets-reply-create experiment-launch experiment-resume
+    experiment-ship-variant feature-flag-enable feature-flag-roll-out-to-everyone
+    feature-flag-set-release-condition-rollout scheduled-changes-create scheduled-changes-update
+    survey-launch workflows-enable workflows-publish workflows-run-batch workflows-schedule-create
+    workflows-test-run workflows-update-schedule
 """.split())
 
 POSTHOG_VERBS_READ = frozenset({"help", "tools", "search", "info", "schema", "learn", "switch"})

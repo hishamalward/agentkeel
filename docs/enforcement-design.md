@@ -133,7 +133,7 @@ safe.
 | Not writable | Why |
 |---|---|
 | the shared checkout and its `.git` (objects, refs, config, hooks) | other agents' work and the merge target |
-| in the clone: `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude`, `.gitmodules` | the hosts run their own git in the clone, outside the sandbox (below) |
+| in the clone: `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude`, `.gitmodules`, a root `HEAD` | the hosts run their own git in the clone, outside the sandbox (below) |
 | other tasks' clones and scratch folders | isolation between tasks |
 | `AGENTKEEL_HOME` (task records, approvals, opt-in registry, session settings) | a record, approval or boundary the agent could write proves nothing |
 | host settings (`.claude/`, `.codex/`, `~/.codex/config.toml`) | the boundary must not edit itself |
@@ -148,11 +148,11 @@ boundary. Nothing changes in user or project settings on either host.
 
 - **Claude Code**: `claude --settings <AGENTKEEL_HOME>/sessions/<task>.json`, holding
   `sandbox.enabled`, `failIfUnavailable: true`, `allowUnsandboxedCommands: false`,
-  `filesystem.allowWrite` for the scratch folder and `filesystem.denyWrite` for the five guarded
+  `filesystem.allowWrite` for the scratch folder and `filesystem.denyWrite` for the six guarded
   paths in the clone. The working folder (the clone) is writable by default.
 - **Codex**: command-line overrides only, measured with no entry in `config.toml`:
   `-c permissions.<task>.extends=":workspace"`, `-c permissions.<task>.filesystem={...}` as one
-  inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the five guarded paths
+  inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the six guarded paths
   set to `read`, the scratch folder set to `write`, `":tmpdir"` and `":slash_tmp"` set to `read`),
   `-c shell_environment_policy.set.TMPDIR="<scratch>"`, `-P <task>` and `-C <clone>`. Dotted keys
   fail for paths that contain a dot, so the table form is required. A glob in this table accepts
@@ -186,16 +186,21 @@ before the session starts and stay out of the session's reach:
   for every submodule the repository names, so the host's git never runs inside a nested repository
   that the index lists. It makes `.gitmodules` exist in the work tree (empty and excluded when the
   repository has none), because git reads submodule settings from the work tree file first.
-- The sandbox keeps `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude` and
-  `.gitmodules` read-only to the session, on both hosts. The host itself already refuses to rename
-  or replace the `.git` folder.
+- The sandbox keeps `.git/config`, `.git/hooks`, `.git/commondir`, `.git/info/exclude`,
+  `.gitmodules` and a `HEAD` at the clone's root read-only to the session, on both hosts. Without a
+  root `HEAD` the clone's root can never pass for a git directory of its own, whatever the session
+  does to `.git`, so git never reads a config beside it (the one route the review found after the
+  lab; Codex's own git also passes `safe.bareRepository=explicit`, which refuses that layout). The
+  host itself already refuses to rename or replace the `.git` folder.
 
 Measured with `codex sandbox` (the same sandbox a session gets, no model) through the candidate's
 own `open` and profile: 27 ways a session could have put a program into what the host's git reads,
 by editing, renaming, linking, redirecting or nesting, each ended with "Operation not permitted" or
 with git ignoring the nested repository, and the host-side `git status` ran nothing. Commits,
 branches, merges, stash, rebase, cherry-pick, fetch and reset work as before, and commits stay
-signed. The regression tests (`HostGitRunsNothing`) fail on 0.7.1. What the session cannot do any
+signed. The regression tests (`HostGitRunsNothing`) fail on 0.7.1. The stop report costs about a
+second per worktree at the end of each turn on a 2,400-file repository (it reads the tree again
+without the repository's config); a 60 s timeout ends it without blocking. What the session cannot do any
 more: change its clone's git config (`git push -u` and `git branch -D` print a warning), add a hook,
 or edit `.gitmodules` and `.git/info/exclude`. A repository whose `.gitmodules` differs between
 branches cannot switch between them inside an isolated task.

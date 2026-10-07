@@ -26,10 +26,11 @@ from . import gitops, record, repostate
 CLONE_ID_FILE = "agentkeel-clone-id"
 # Read-only to the task's session, inside its clone: what git runs programs from (config, hooks),
 # what redirects where git reads config (commondir), and what sets git's submodule rules
-# (.gitmodules, and the exclude file that hides the one harden_clone adds). A host runs its own git
-# in the clone outside the sandbox, so the session must not be able to change what that git
-# executes. See harden_clone.
-GUARDED = (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules")
+# (.gitmodules, and the exclude file that hides the one harden_clone adds), and a HEAD at the clone's
+# root, without which the root can never pass for a git directory of its own (git would then read
+# a config beside it). A host runs its own git in the clone outside the sandbox, so the session
+# must not be able to change what that git executes. See harden_clone.
+GUARDED = (".git/config", ".git/hooks", ".git/commondir", ".git/info/exclude", ".gitmodules", "HEAD")
 TASK_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOSTS = ("claude", "codex")
 
@@ -120,10 +121,13 @@ def harden_clone(clone):
     if os.path.lexists(modules):
         p = subprocess.run(["git", "config", "-z", "-f", modules, "--name-only", "--get-regexp", r"^submodule\..*\.path$"],
                            capture_output=True, text=True)
+        if p.returncode not in (0, 1):  # 1: no submodule names a path
+            raise OpenError(f"the repository's .gitmodules cannot be read: {(p.stderr or '').strip()[:200]}")
         for key in filter(None, p.stdout.split("\0")):
             _git(clone, "config", key[:-len(".path")] + ".ignore", "all")
     else:
         open(modules, "w").close()
+        os.makedirs(os.path.join(clone, ".git", "info"), exist_ok=True)
         with open(os.path.join(clone, ".git", "info", "exclude"), "a") as fh:
             fh.write("# agentkeel: an empty .gitmodules pins where git reads submodule settings (isolation.py)\n/.gitmodules\n")
 

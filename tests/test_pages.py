@@ -325,13 +325,36 @@ class Claims(unittest.TestCase):
         self.page(f"merged feat/x into main; merged {self.merged[:7]} into main; merged {'f' * 40} into main;"
                   f" merged {self.merged} into nowhere")
         found, problems, warnings = self.results()
-        self.assertEqual(found, ["unknown"] * 3 + ["proven"])  # the candidate holds it, whatever the ref
+        self.assertEqual(found, ["unknown"] * 4)  # 'nowhere' is no branch, and the candidate lands on main only
         self.assertEqual(problems, [])
-        self.assertEqual(len(warnings), 3, warnings)
+        self.assertEqual(len(warnings), 4, warnings)
         code, out = self.run_check()
-        self.assertEqual(code, 0, out); self.assertEqual(out.count("WARN"), 3, out)
+        self.assertEqual(code, 0, out); self.assertEqual(out.count("WARN"), 4, out)
         self.page(f"merged {self.unmerged} into nowhere")
         self.assertEqual(self.results()[0], ["unknown"])      # an unresolvable ref is no contradiction
+
+    def test_the_candidate_is_evidence_only_for_the_branch_it_lands_on(self):
+        git(self.repo, "branch", "release", "main~1")
+        git(self.repo, "checkout", "-q", "side")
+        self.page(f"merged {self.unmerged} into release")
+        cand = self.sha("page claims the side work is in release")
+        found, problems, _ = self.results(pages.GitTree(self.repo, cand))
+        self.assertEqual(found, ["contradiction"], "the candidate lands on main, not on release")
+        self.assertEqual(len(problems), 1)
+
+    def test_a_remote_ref_proves_what_a_stale_local_branch_lacks(self):
+        git(self.repo, "branch", "release", "main~1")                      # local release is behind
+        git(self.repo, "update-ref", "refs/remotes/origin/release", "main")  # origin/release holds the work
+        self.page(f"merged {self.merged} into release")
+        self.assertEqual(self.results()[:2], (["proven"], []))
+
+    def test_spelling_does_not_hide_a_claim_from_the_check(self):
+        self.page(f"merged {self.unmerged.upper()}, into origin/main")
+        found, problems, _ = self.results()
+        self.assertEqual(found, ["contradiction"])
+        self.assertEqual(len(problems), 1)
+        self.page(f"merged `{self.merged.upper()}` into refs/heads/main.")
+        self.assertEqual(self.results()[:2], (["proven"], []))
 
     def test_a_real_contradiction_fails_the_check(self):
         self.page(f"merged {self.unmerged} into main")
