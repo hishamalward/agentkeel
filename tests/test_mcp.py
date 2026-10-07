@@ -76,6 +76,19 @@ class Adapters(RepoCase):
             json.dump({"mcp": {"posthog": {"targets": ["*"]}}}, fh)
         self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call create-feature-flag {"key": "x"}'})
 
+    def test_posthog_ignores_invented_project_fields_on_active_project_tools(self):
+        self.declare(allow=("implement", "remote-write", "publish"))
+        for command in (
+            'call create-feature-flag {"key": "x", "project_id": 111}',
+            'call update-feature-flag {"id": 111, "project_id": 111}',
+            'call survey-launch {"id": "s", "project_id": 111}',
+        ):
+            self.refused("mcp__plugin_posthog_posthog__exec", {"command": command}, "active project")
+        # project-settings-update really accepts id. An invented field cannot replace it.
+        self.refused("mcp__plugin_posthog_posthog__exec", {
+            "command": 'call project-settings-update {"id": 222, "project_id": 111}'
+        }, "targets '222'")
+
     def test_paid_calls_need_paid_job(self):
         live = ("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/serp/google/organic/live/advanced"})
         post = ("mcp__dfs-mcp__api_request", {"method": "POST", "path": "/v3/serp/google/organic/task_post"})

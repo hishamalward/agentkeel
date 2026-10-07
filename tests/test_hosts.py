@@ -46,6 +46,14 @@ def claude_bash(repo, command, session=SESSION):
 class CapturedShapes(unittest.TestCase):
     """The fixtures are real captures (Codex 0.160.0 on 2026-10-04; Claude Code 2.1.241)."""
 
+    def test_codex_web_run_is_read_only_but_similar_unknown_tools_are_not(self):
+        from agentkeel_core import host
+        for tool in ("webrun", "web.run", "web__run"):
+            self.assertEqual(host.events({"tool_name": tool, "tool_input": {
+                "open": [{"ref_id": "https://example.com/review"}]}}, "/r"), [])
+        for tool in ("web_run_script", "webrun_delete", "browser_run_code"):
+            self.assertEqual(host.events({"tool_name": tool, "tool_input": {}}, "/r")[0].kind, "gap")
+
     def test_codex_events(self):
         import helpers  # noqa: F401
         from agentkeel_core import host

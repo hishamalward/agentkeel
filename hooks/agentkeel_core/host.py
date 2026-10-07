@@ -31,7 +31,10 @@ NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWri
                  "Artifact", "ArtifactComments", "ArtifactData", "SendFeedback", "ReportFindings",
                  "ListMcpResourcesTool", "ReadMcpResourceTool", "BashOutput", "KillShell",
                  "view_image", "update_plan", "read_file", "list_dir", "web_search", "wait_agent",
-                 "list_agents", "close_agent", "send_input"}
+                 "list_agents", "close_agent", "send_input",
+                 # Codex's hosted web tool, including its normalized hook name. Exact aliases
+                 # only: browser script execution and unknown *run* tools remain judged below.
+                 "webrun", "web.run", "web__run"}
 READ_ONLY = NO_FILE_WRITE
 MAY_WRITE_RE = re.compile(r"write|edit|patch|exec|shell|bash|command|run|spawn|agent|delete|move|create",
                           re.IGNORECASE)

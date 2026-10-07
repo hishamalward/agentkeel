@@ -346,6 +346,12 @@ tool name and the arguments, never the tool's description or annotations.
   target at all (DataForSEO) needs only `paid-job`. PostHog's tools act on the server's active
   project and do not name it (only the project tools carry an id), so with specific projects listed
   a PostHog write is refused with that reason; reads pass, and `"*"` allows every project.
+  Only `project-settings-update` supplies a supported project selector (`id`). An invented
+  `project_id` on another tool never establishes its target or overrides that selector.
+  PostHog supports [connection pinning](https://posthog.com/docs/model-context-protocol/faq#advanced-configuration)
+  with `x-posthog-project-id` or `project_id` in the connection URL. That is a possible path to
+  narrow access for active-project writes, but this adapter does not yet verify a connection's
+  pin. Adding a target to the allowlist alone does not enable those writes.
 - **Generic tools**: PostHog's `exec` is classified by its command verb and the listed tool that
   `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
   segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment

@@ -123,7 +123,9 @@ def classify(call):
                 return UNKNOWN, None, "call"
             target_tool = rest[0]
             body = _json_tail(str(a.get("command")))
-            target = body.get("project_id") or (body.get("id") if target_tool.startswith("project") else None)
+            # Only this write's schema names the affected project. Other tools use
+            # the server's active project; an extra project_id is not a selector.
+            target = body.get("id") if target_tool == "project-settings-update" else None
             return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE, publish=cat.POSTHOG_PUBLISH),
                     None if target is None else str(target), target_tool)
         return UNKNOWN, None, verb or "exec"
