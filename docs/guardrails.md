@@ -65,6 +65,23 @@ Hooks see a tool call, not the filesystem and not the process it starts.
 | `plan-gate-guard.py` | dispatches that name a plan, with the marker or the gate words | a dispatch worded to avoid the heuristic |
 | `plan-size-guard.sh` | the Working section's length after a write | a plan split across pages |
 
+## Where a refusal comes from
+
+Every refusal names what decided it, and the smallest step that resolves it is that decider's. The
+hooks never override a host's decision.
+
+| The message says | Decided by | Resolution |
+|---|---|---|
+| `AGENTKEEL: ... needs the '<permission>' permission; task '<id>' has ...` | the task's own permissions | the human widens the scope; the agent re-declares with `task.py start <task> --size <size> --allow <full set>` |
+| `AGENTKEEL: refusing to write <path>: it belongs to ...` or `... is not one of task '<id>'s worktrees` | ownership of worktrees and write roots | work in the task's worktree, or add one with `--worktree` |
+| `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the adapter's catalog (exact names) | the human runs it, or the catalog learns the name in a release |
+| `AGENTKEEL: ... targets '<x>', which agentkeel.json does not list` or `... connection is not pinned` | `agentkeel.json` targets and the host's own connection entry | list the target, or pin the connection on the host (`x-posthog-project-id`) |
+| `AGENTKEEL: size large needs an approved boundary` | the human's approval of the page | `task.py approve <task>`, run by the human |
+| `AGENTKEEL: agentkeel cannot read the tool '<name>' and it may write` | a tool name the hooks do not know | a release lists the tool; until then use a tool the hooks read |
+| `Operation not permitted`, `EPERM`, a sandbox or trust prompt | the host's sandbox or hook trust | the session's profile from `task.py open`; trust in the host's `/hooks` |
+| "denied by the ... classifier", a permission prompt | the host's own permission system | the host's permission rules or the human's answer; not a hook's to change |
+| HTTP 401 or 403, "needs authentication" | the remote service | sign in on the host (`/mcp`) or fix the credential |
+
 ## Overrides
 
 Two overrides exist, each written as a prefix on the one command it applies to, so it applies once and the transcript shows it. Each use goes to `~/.agentkeel/overrides.jsonl`. A variable set in the host's own environment is not an override. Shipping has no override: it is a permission.
