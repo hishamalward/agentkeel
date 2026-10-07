@@ -1,56 +1,57 @@
 ## agentkeel (kept between its markers by task.py init or install.py; full text: github.com/hishamalward/agentkeel)
 
-Three rules sit above every other rule here. A rule that serves none of them is deleted.
-1. Every write is bounded before it happens. Do the literal ask. Mention an adjacent problem in
-   one line; do not fix it.
-2. Every claim carries its evidence. Run the check, show the output, then say it passes. A failed
-   check stops the work and is reported. Never widen the scope or narrow the check to pass.
-3. Every loop has a cap, and only the human re-opens it: one plan gate per plan, one review round
-   per scope, one verification pass per claim.
+Three rules govern the workflow. A rule that serves none of them is deleted.
+1. Bound each write to the request. Do the literal ask. Mention adjacent problems; do not fix them.
+2. Give evidence for claims. Run the check before claiming success. Report a failed check;
+   never widen the scope or narrow the check to pass.
+3. Cap loops: one plan gate per plan, one review round per scope, one verification pass per
+   claim. Only the human re-opens a loop.
 
-**Declare the task before the first write. The guards read the record, not this text.**
-    task.py start <task-id> --size <size> --allow <permissions> [--write-root DIR]
-`task.py` is the path the session-start message gives (plugin), or `.claude/hooks/task.py`
-(per-repository install). Run it exactly as shown, with nothing in front of `python3`.
-Read the size and permissions from the human's request, state your reading in your first update,
-and proceed. Ask only when information is missing, the request is unclear, or an action would go
-past it. Size and permissions are separate: changing one never changes the other.
-- Size (how much process): small = own branch and worktree, no plan or subagents, one check;
-  medium = tests and one review round; large = an approved boundary, a plan gated once, reviews.
-- Permissions (which actions): review (writes only --write-root report folders, outside the
-  repo), implement (edit, commit with explicit paths, local checks and builds, local pushes
-  between feature branches), merge (move a protected branch), push (any remote push),
-  distribution-build, store-submission, paid-job. "Merge and push" grants both and never a
-  distribution build. Finishing work and shipping it are separate.
-- Worktrees: every code task works in its own worktree, never the shared checkout.
-  `git worktree add ../<repo>-<task> -b feat/<task>` records it. Temp files go in the scratch
-  folder that `task.py start` prints.
-When in doubt, pick the smaller size. A task never grows on its own: stop and say so.
-The main agent declares the task; subagents work under it (a Codex subagent's own shell cannot
-see the record, so run task.py from the main agent).
+**Declare the task before the first write.** The guards read the record, not this text.
+    python3 "<task.py path>" start <task-id> --size <size> --allow <permissions> [--write-root DIR]
+Use the path printed at session start, or .claude/hooks/task.py for a project install.
+Run it as shown, with nothing before python3. Below, task.py abbreviates that command.
+State your reading of the request in the first update and proceed. Ask only for missing
+information, unclear intent or an action beyond the granted scope. Size grants no permission.
+- Small: own workspace, no plan or subagents, one check and a short report.
+- Medium: tests and one review round. Large: approved boundary, plan gated once, reviews.
+- Permissions: review (external report folders); implement (edits, explicit-path commits,
+  local checks/builds and local pushes between feature branches); merge (move a protected
+  branch); push (remote pushes/deploy commands); distribution-build; store-submission;
+  paid-job; remote-write (guarded MCP changes); publish (guarded MCP publishing).
+  MCP actions also require allowed targets where applicable. "Merge and push" grants both,
+  not a distribution build. Finishing work and shipping remain separate decisions.
+- Code belongs in the task's own worktree, or its clone from the human's task.py open.
+  git worktree add ../<repo>-<task> -b feat/<task> records a new worktree automatically.
+  Use the printed task scratch folder for temporary files, never another task's files.
+When in doubt, pick the smaller size. If it grows, stop and let the human re-scope.
+The main agent declares the task; subagents use it. A Codex subagent's shell has its own id,
+so run task.py from the main agent. An opened isolated session is bound automatically.
 
-**Gates** (work stops until the named owner produces the named evidence):
-- G1 Boundary approval, human: the human runs `task.py approve <feature>` in their own terminal.
-  You cannot add, change or remove an approval.
-- G2 Plan gate, AI, once: one plan reviewer and one scope auditor, prompts marked `[plan-gate]`.
-- G3 Review, AI, one round per scope: each task, then the whole branch.
-- G4 Ship, human decides: tests green on the branch, required checks before main moves.
+**Gates**
+- G1 Boundary, human: task.py approve <feature> in the human's terminal. The agent cannot
+  add, change or remove approval data. A changed draft does not widen approved write paths.
+- G2 Plan, AI, once: one plan reviewer and one scope auditor. Claude prompts use [plan-gate]
+  and the page path; Codex dispatch task_name starts with plan_gate.
+- G3 Review, AI: each task, then the whole branch, one round per scope.
+- G4 Ship, human decides: green tests on the candidate, required checks before main moves.
+  Already granted merge/push permission needs no repeated question.
 
-**Docs** (where agentkeel.json has "docs": "html"): one authored HTML page per document, in flat
-docs/, in the present tense: the project canon, one state page per feature, references, audits,
-mockups. `task.py new` starts a page; `task.py context <page>` reads one. Plan and progress go in
-the page's Working section; `task.py finish` removes it before main moves, and unfinished work
-goes in Remaining scope. No decision log, no Markdown twin, no copied facts: link to the owner.
-Move main by the checked commit's full SHA, alone in its call: `git merge --ff-only <full-sha>`.
+**Docs** (agentkeel.json sets "docs": "html"): one authored page per document in flat docs/.
+Use a project canon, one state page per feature, references, audits and mockups.
+task.py new starts a page; task.py context reads it. Plan and progress go in Working.
+task.py finish removes Working before main moves; unfinished outcomes stay in Remaining scope.
+No decision log, Markdown twin or copied facts: link to the current owner.
+A gated move names the full checked SHA, alone in its call: git merge --ff-only <full-sha>.
 
-**The guards refuse** (exit 2, with the reason): a write with no task for this session; a write
-outside the task's worktrees and write roots; code edits on a protected branch; a commit without
-explicit paths; moving or pushing a protected branch without merge or push; builds, submissions
-and paid jobs without their permission; edits to hook config or agentkeel state; destructive git
-(override: prefix that one command with AGENTKEEL_ALLOW_DESTRUCTIVE=1, logged); printing secrets
-(override: AGENTKEEL_SHOW_SECRETS=1, logged); a third plan-gate dispatch.
-`task.py verify -- <cmd>` records a check's result against HEAD.
+**Guards** refuse supported writes outside the task, protected-branch edits, commits without
+paths, unauthorized shipping/builds/paid jobs, edits to hook config or task state, and a third
+plan-gate dispatch. Guarded MCP calls need their permission and target. Destructive git and
+secret printing have logged, single-command overrides: AGENTKEEL_ALLOW_DESTRUCTIVE=1 and
+AGENTKEEL_SHOW_SECRETS=1. They do not grant shipping permission.
+task.py verify runs a check; hooks record evidence. Codex results stay unrecorded; use CI to ship.
 
-**Limits**: the guards see this agent's tool calls, not the filesystem. Shell writes that are not
-git, commands inside scripts, and other tools are not seen. The task record is your declaration,
-not the human's consent. Database, ports and queues are agent-slots' job.
+**Limits**: ordinary hooks do not see shell writes inside scripts or redirects. task.py open
+adds an OS sandbox; Claude's per-user temp folder stays shared. Other MCP servers and browser
+writes are unsupported. The task record declares scope; it is not proof of human consent.
+Database, ports and queues belong to the repository's resource-isolation tooling.

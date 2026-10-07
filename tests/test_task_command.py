@@ -592,7 +592,7 @@ class SharedInstructions(RepoCase):
         self.assertIn("created AGENTS.md with the agentkeel block", out)
         text = self.read()
         self.assertTrue(text.startswith("<!-- agentkeel:start -->\n<!-- agentkeel:sha256="))
-        self.assertIn("task.py start <task-id>", text)
+        self.assertIn('python3 "<task.py path>" start <task-id> --size <size> --allow <permissions>', text)
         self.assertNotIn(".claude/hooks/task.py start", text)
         for name in ("CLAUDE.md", "CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")):
             self.assertFalse(os.path.exists(os.path.join(self.primary, name)))

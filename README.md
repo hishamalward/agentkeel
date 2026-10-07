@@ -13,26 +13,22 @@
   <a href="#codex"><img src="https://img.shields.io/badge/Codex-plugin-2f5bd3" alt="Codex plugin"></a>
 </p>
 
-AgentKeel keeps AI coding agents inside the task you gave them. Each agent declares its task
-before its first write. Hooks then check every tool call against that declaration and refuse what
-falls outside it, with a reason the agent reads. It runs in **Claude Code** and **Codex**, from one
-core, with no dependencies.
+AgentKeel is a guardrail plugin for **Claude Code** and **Codex**. An agent declares its task,
+permissions and workspace before its first write. Hooks check supported edits, commands and MCP
+calls against that scope, and explain refusals. The core uses Python's standard library.
 
 ## The problem
 
-Agents write code faster than anyone can review it. The failures are rarely in the code. They
-are missing gates: a one-file fix that became a refactor, a commit on `main` that nothing
-stopped, a check that could not fail, a build nobody asked for. Rules in an instruction file do
-not hold, because the session that drifts is the session that read them. AgentKeel moves the
-rules that matter into hooks, outside the model's memory.
+An agent can turn a small fix into a refactor, edit another task's checkout or ship before tests
+pass. AgentKeel puts checks around those actions, so following the rules does not depend only
+on the agent remembering them. The [limits](#limits) explain what the hooks cannot enforce.
 
 ## What it does
 
 - **One task record per session.** The agent states the task's size (how much process),
   permissions (which actions) and worktrees (where). Size never grants a permission.
 - **Bounded writes.** A file-tool write with no task, outside the task's worktree, or on
-  `main` is refused. Every code task works in its own git worktree, so agents never share a
-  checkout.
+  `main` is refused. Every code task uses its own worktree or isolated task clone.
 - **Shipping is a permission.** Moving `main` needs `merge`. Any remote push needs `push`.
   Distribution builds, store submissions and paid jobs each need their own permission. Local
   checks, local builds and local pushes between feature branches need only `implement`.
@@ -41,13 +37,10 @@ rules that matter into hooks, outside the model's memory.
   write, from any command or script, stays in the clone, its scratch folder and declared caches.
   `task.py import` brings the result back by exact commit; `task.py release` deletes the clone
   only when nothing in it would be lost.
-- **Remote changes are a permission.** For RevenueCat, PostHog, Sentry and DataForSEO, an MCP call
-  that changes the service needs `remote-write` and a target that `agentkeel.json` lists, a call
-  that bills needs `paid-job` (and a listed target when it names one), a call that publishes to
-  end users needs `publish`, a call that changes or submits store products needs
-  `store-submission`, and a tool the adapter does not list by name is refused. A PostHog write
-  acts on the project your own connection is pinned to, read from your host's configuration; an
-  unpinned connection cannot write.
+- **Scoped MCP access.** Adapters cover RevenueCat, PostHog, Sentry and DataForSEO. Writes need
+  the relevant permission and an allowed target; paid calls need `paid-job`. Publishing and
+  store operations have separate permissions. Unknown tools on those servers are refused.
+  PostHog writes use the project pinned in the host's connection. See [MCP setup](docs/hosts.md).
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
 - **Records with one current owner per fact.** In a repository that opts in, the agents' work
@@ -55,7 +48,8 @@ rules that matter into hooks, outside the model's memory.
   and a local move to a known commit, wait for the docs check; CI runs it for everyone. A commit
   made on `main`, a rebase or a non-fast-forward merge is checked later, at the push and in CI
   ([limits](docs/html-records.md#current-limitations-and-open-decisions)).
-- **Loops have caps.** One plan gate per plan, one review round per scope.
+- **Loops have caps.** The hook refuses a third plan-gate dispatch. One review round per scope
+  is an instruction, not a hook-enforced limit.
 - **What a task leaves behind is reported.** When a turn ends, the stop hook tells you which of
   the task's worktrees or its clone still exist, whether each is merged, and how many files are
   not committed. It reports once per change and removes nothing.
@@ -68,8 +62,7 @@ rules that matter into hooks, outside the model's memory.
 
 ## Install
 
-Install AgentKeel as a plugin in your agent. The plugin acts only in a repository that opts in,
-so it is safe to install once for all your work.
+Install the plugin once in each host you use, then opt repositories in individually.
 
 ### Requirements
 
@@ -111,18 +104,18 @@ python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py init   #
 python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py init    # Codex
 ```
 
-`init` creates `agentkeel.json` only when it is missing, and never changes an existing one. It
-keeps one agentkeel block in `AGENTS.md`, the instruction file that Claude Code and Codex both
-load: it adds the block, or updates its own earlier text, and never changes a byte outside it. A
-block that someone edited, or that `install.py` wrote, is left as it is and reported. It never
-creates a `CLAUDE.md`, and it reports one that exists, because Claude Code then loads that file
-instead of `AGENTS.md`. It
-registers the opt-in in `~/.agentkeel/opted-in.json`, so the guards act in this repository and all
-its worktrees at once, before any commit, and a shell command that deletes the file does not
-switch them off. It then reports three things apart: what the policy turns on, whether each host
-has the plugin installed and enabled (from the host's own `plugin list`), and (Codex) how many of
-its hooks you have trusted. Reading Codex trust needs a TOML parser (Python 3.11 or newer); when
-`init` cannot read a fact reliably, it reports it as unknown.
+`init`:
+
+- Creates `agentkeel.json` if missing; preserves an existing policy.
+- Adds or updates its own unchanged block in `AGENTS.md`; preserves your other text and reports
+  a block someone edited. It never creates `CLAUDE.md` and warns if one overrides `AGENTS.md`.
+- Registers the whole repository, including its worktrees, before any commit. Deleting the
+  policy alone does not disable the guards.
+- Reports the policy, installed/enabled plugins and Codex hook trust separately. Facts it cannot
+  read reliably are **unknown**, including trust when no Python 3.11+ TOML parser is available.
+
+The first plugin hook in a checkout containing `agentkeel.json` also registers the repository.
+Use [the policy guide](docs/task-record.md#the-repository-policy-file) to choose its protections.
 
 An empty policy, `{}`, protects `main` and `master` and needs a task for every write. It does not
 turn on HTML work records (`"docs": "html"`) or the push gate (`"require_check_before_push"`);
@@ -169,7 +162,10 @@ holds each.
 | Update | `claude plugin marketplace update agentkeel`, then `claude plugin update agentkeel@agentkeel` | `codex plugin marketplace upgrade agentkeel`; trust changed hooks again in `/hooks` |
 | Remove | `claude plugin uninstall agentkeel@agentkeel`, then `claude plugin marketplace remove agentkeel` | `codex plugin remove agentkeel@agentkeel`, then `codex plugin marketplace remove agentkeel`; then delete the empty `~/.codex/plugins/cache/agentkeel` folder and any `hooks.state."agentkeel@agentkeel:..."` sections in `~/.codex/config.toml`, which Codex leaves |
 | Opt one repository out | delete its `agentkeel.json` and its entry in `~/.agentkeel/opted-in.json` | the same |
-| Check the setup | run `task.py init` again in the repository: it changes nothing that exists and reports each host | the same |
+| Check the setup | run `task.py init` again: it preserves the policy, may update its own unchanged AGENTS block, and reports each host | the same |
+
+Start a fresh session after updating. A running session can retain older hooks or command rules.
+Trust new or changed Codex hook entries through `/hooks`; restarting alone does not grant trust.
 
 ### Per-repository install (fallback)
 
@@ -228,8 +224,9 @@ What the hooks refuse on the way, and why:
 | `git commit -m x` with no paths | `refusing a commit that does not name its paths` |
 | `git push origin feat/json-flag` | `a push to 'feat/json-flag' needs the 'push' permission; task 'json-flag' has implement, merge` |
 
-"Merge" did not include "push", so the agent stops at step 5 and reports that the work is
-ready to push.
+The agent ends the task after the local merge and reports that nothing was pushed. On Codex,
+`verify` runs the command but cannot record a trusted success; use the
+[required CI check](docs/required-checks.md) for shipping evidence.
 
 ## An isolated task
 

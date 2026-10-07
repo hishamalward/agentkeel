@@ -2,13 +2,8 @@
 
 In a repository that opts in, every work record is one authored HTML page in a flat `docs/` folder, in the present tense. This page is the contract for those records. AgentKeel's own documentation is Markdown and does not use it. A large task's boundary on its state page is what the human approves. The docs check runs before an agent's push to `main` and before a local move to a known commit, and CI runs it for everyone.
 
-## State now
-
-| | |
-|---|---|
-| Implementation | On `main` since `ef79009`; pushed to GitHub on 2026-10-05 (at `fc72847`). |
-| Release | Not in a published release yet; the last release, `v0.1.0`, predates it. AgentKeel's own docs are Markdown (see the [canon](canon.md#documentation-has-one-current-owner-per-fact)). |
-| External checks | Live Claude Code and Codex runs on 2026-10-05 (see Verification). No hosted run of the CI docs job yet. |
+HTML records are included in the published 0.8.0 release. This is a behavior reference;
+an adopting repository keeps its implementation and release status on its own state pages.
 
 ## Current behavior and constraints
 
@@ -44,8 +39,29 @@ The human runs `task.py approve <feature|page>` in their own terminal. It writes
 - The agent may edit anything on the page, the boundary included, as a draft. It cannot add, change or remove the approval, or rename or delete an approved page.
 - A large task's write limits come from the approved boundary. When the draft differs, the kept copy still rules; a widened draft grants nothing.
 - An empty or missing Changes list grants no path outside `docs/`. Wide access is explicit: `*` grants every path.
-- A large task that spans repositories keeps one boundary, on one state page: the page in the repository of the edit when it has one, else the task's page in another of its worktrees (`task.py start ... --worktree`). An entry for another repository of the task is written `<repository>:<path>`, for example `agentkeel:hooks/`. The repository's name comes from its git common directory, which all its worktrees share: the folder that holds `.git`, a bare repository's folder without `.git` (`agentkeel.git` is `agentkeel`), a submodule's own folder. A prefix counts only when it names one of the task's repositories; any other colon is part of the path, so `secrets:prod.yml` is a plain entry. Plain entries apply in the page's own repository only (the one with the same git common directory, never merely the same name); `<repository>:` entries apply in that repository only, under Changes and under Must not change alike. A plain Must-not entry therefore does not protect another repository: a path that must stay unchanged everywhere is listed once plain and once with each prefix. A name shared by two of the task's repositories is ambiguous: its prefixed Changes entries grant nothing, its prefixed Must-not entries apply in both, and the refusal says so. A repository whose folder name contains a colon cannot be named, so its entries never match and the task changes nothing there. In a repository with no entries of its own the task may change nothing outside `docs/`, and the refusal gives the spelling.
-- `main` does not move while any boundary is unapproved, changed since approval, missing its approval, duplicated, malformed, or dropped by renaming or deleting an approved page.
+- The docs gate refuses a checked move or push while a boundary is unapproved, changed,
+  missing its approval, duplicated, malformed or dropped. The limitations below name moves
+  that can only be checked later.
+
+#### One boundary across repositories
+
+A large task may use one state page across its declared worktrees. The guard uses the page in
+the edited repository when present, otherwise the task's page in another declared worktree.
+
+| Path entry | Applies to |
+|---|---|
+| `hooks/` | the page's own repository, identified by its Git common directory |
+| `agentkeel:hooks/` | the declared repository named `agentkeel` |
+| `secrets:prod.yml` | a literal path if `secrets` is not a declared repository name |
+
+The repository name comes from the folder containing its common Git directory. Worktrees
+therefore share one name; a bare repository drops its `.git` suffix. The same scoping applies
+to Changes and Must not change. To protect a path in several repositories, list it for each one.
+
+An ambiguous repository name grants no prefixed Changes paths; its Must-not entries apply in
+both repositories. A repository name containing a colon cannot be addressed. A repository with
+no matching Changes entries grants no writes outside `docs/`. Refusals explain the required
+path spelling.
 
 ### Reading a page
 
@@ -79,18 +95,14 @@ It fails on: a misnamed file or a subfolder in `docs/`; a committed index; two s
 
 ### The index
 
-`task.py index [--full]` writes `docs/index.html` and prints the same index as plain text for an agent to read. Both are derived from the working folder at each run and never stored, so they replace a hand-kept index and status page:
+`task.py index [--full]` writes `docs/index.html` and prints a text index for the agent.
+Both are regenerated from the working folder. The HTML index is a local output, never committed;
+there is no hand-kept index or separate status page:
 
 - Each family under one heading, qualifiers included, the project canon first. Each page shows its kind, title, boundary state and a working tag; each state page shows its State now lines as the page says them now.
 - The legacy files (`"docs_legacy"` globs) grouped by folder. In `index.html` each is a link with its title: the first Markdown heading, or the HTML `<title>`, else the file name. The text lists each folder with its file count; `--full` also lists every file with its title.
 
 The index code lives in `pages.py`, so a repository's clean checkout runs it from its CI copy without the plugin: `python3 .github/agentkeel/pages.py index --root .` (`--full` too).
-
-## Remaining scope
-
-- **Stage 3, music_analytics pilot.** Reconcile CANON, the decision log and the active specs, plans and handovers into a project canon and state pages; repair references; retire the old files at one cutover. Depends on this stage merging.
-- **Retrieval.** Compare plain source search with Graphify on ten real questions before adopting a graph backend. Depends on the pilot's pages.
-- **Diagrams.** Archify as an optional diagram renderer inside a page, only if a page needs one.
 
 ## Current limitations and open decisions
 
@@ -102,10 +114,16 @@ The index code lives in `pages.py`, so a repository's clean checkout runs it fro
 
 ## Verification
 
-- **Unit suite**: 214 tests pass, hook self-tests included (`python3 -m unittest discover -s tests`), on the Stage 2b branch. `test_pages.py` covers names, links, anchors, Working sections, boundary states and digests, base comparison, retired logs and context; `DocsGate`, `LargeAndBoundaryApproval` and the host parity tests cover the guard.
+- **Regression coverage**: `test_pages.py` covers names, links, anchors, Working sections,
+  boundary states and digests, base comparison, retired logs and context. `DocsGate`,
+  `LargeAndBoundaryApproval` and the host parity tests cover the guard.
 - **Claude Code, live** (`claude -p`, throwaway repo, project install, 2026-10-05): an Edit adding a `keel-approval` meta was refused with the G1 reason; a push to `main` of a commit with a Working section was refused; `task.py finish` removed the section; a push of the literal SHA of the finished commit moved `main`; `task.py context` read the page.
 - **Found live and fixed**: `git push origin $(git rev-parse HEAD):main` was read as a push to a branch named `$`, so neither the docs check nor the push gate ran. A command substitution now stays one opaque word, an unknown destination counts as any branch, and the live rerun refused all three forms. The regression test fails against the Stage 2 code.
 - **Codex, live** (`codex exec` 0.160.0, same page, `--dangerously-bypass-hook-trust` for this run only; the normal-trust path was proven in Stage 2): an `apply_patch` adding an approval was refused; a push of a commit with a Working section was refused with the docs-check reason; `context` read the Working section another session wrote. Codex's workspace sandbox refuses writes inside `.git`, so that commit was made outside Codex.
 - **Layout**: on 2026-10-05, pages built on this `keel.css` (AgentKeel's own docs before they became Markdown) were checked at 1280 px and 390 px wide with no horizontal overflow.
 - **Independent review at 5d17846, four findings, fixed**: an HTML asset crashed the check and the guard allowed the move; a call could move a branch after the guard read it; an empty Changes list granted every path; a family's later pages took a new date and index group. Each has a regression test that fails on 5d17846 (`StageTwoBReviewFindings`, `EmptyChangesList`, `test_a_family_keeps_its_first_date_and_one_index_group`), and the reviewer closed all four at 03ff775: 214 tests, the original probes and eight full-SHA move checks.
-- Not run: the CI `docs` job on GitHub.
+- **Hosted CI, 2026-10-07**: the pilot's
+  [docs-only run](https://github.com/hishamalward/music_analytics/actions/runs/37661206770)
+  passed its docs and required checks with app tests skipped. The
+  [merged pilot run](https://github.com/hishamalward/music_analytics/actions/runs/37659383111)
+  passed docs, web and mobile checks. These close the earlier hosted-CI gap.

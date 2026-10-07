@@ -13,7 +13,9 @@ Write one self-contained HTML page for a human reviewer. It states the present, 
   `task.py new audit <family>`. That makes `docs/YYMMDD-<family>-audit.html`.
 - A review task without the `implement` permission writes the page in its `--write-root` folder,
   outside the repository.
-- One file: styles inline, no external scripts, no fetched assets.
+- One authored page: repository records link the shared `keel.css`; standalone reports inline
+  their styles. No external scripts or remotely fetched assets. This replaces the inline-only
+  rule so repository reviews follow the same shared-style contract as other records.
 
 ## What it says, in this order
 

@@ -1,4 +1,4 @@
-# Enforcement beyond tool calls: design
+# Enforcement: boundaries and evidence
 
 This page says what each layer can enforce today, on each host, and how AgentKeel closes its two
 largest gaps: shell and script writes outside a task's boundary, and MCP calls that change, publish,
@@ -7,20 +7,20 @@ evidence hooks and the four MCP adapters), and the live acceptance passed on bot
 feasibility results come from throwaway repositories on macOS with Claude Code 2.1.292 and Codex
 0.160.1 (2026-10-06); each one names what it proves and what it leaves open.
 
-## Who enforces what, today
+## What enforces each boundary
 
 | Layer | Claude Code | Codex | AgentKeel today |
 |---|---|---|---|
 | File tools (Edit, Write, `apply_patch`) | permission rules only; the sandbox does not cover them | `apply_patch` is a tool the hooks see | **prevents**: the task guard checks every path |
-| Shell and its child processes (`>`, `sed -i`, python, node, nested scripts) | the OS sandbox covers them when it is on | the OS sandbox covers them; the permission profile sets the boundary | git commands and named file commands only; a write inside a script or a redirect is **not seen** |
-| MCP calls | PreToolUse sees `mcp__<server>__<tool>` with its arguments and can block it | MCP tools are offered only inside the JavaScript `exec` tool; each nested call is dispatched as its own MCP call | **unsupported**: every MCP call passes |
-| Hosted tools (web search) | not hooked | not hooked | unsupported |
+| Shell and its child processes (`>`, `sed -i`, python, node, nested scripts) | the OS sandbox covers them when enabled | the OS sandbox covers them under the session profile | `task.py open` configures that sandbox; ordinary sessions have command checks only |
+| MCP calls | PreToolUse receives tool names and arguments | measured nested calls inside `exec` reach PreToolUse individually | adapters check RevenueCat, PostHog, Sentry and DataForSEO; other servers pass through without enforcement |
+| Hosted tools (web search) | known read tools pass | exact supported web-tool names pass | read access is allowed; browser writes remain unsupported |
 | Hooks and local MCP servers | run outside the sandbox | hooks run outside the sandbox | not applicable |
 
-On the founder's machine today: Claude Code has no `sandbox` settings in any scope. Codex runs with
-`default_permissions = "ma-dev"`, a profile that extends `:workspace` and adds `":root" = "write"`
-with five credential paths denied, so a Codex shell can write almost anywhere. Neither host limits a
-shell write to the task.
+Installing the plugin does not turn an existing session into an isolated one. Ordinary sessions
+use their host's existing sandbox settings. Use `task.py open` when the task needs the filesystem
+boundary described below. The macOS live results are evidence for the named host versions;
+Linux isolation remains unverified.
 
 
 ## Part 2: shell and script isolation
@@ -51,14 +51,16 @@ is 225 MB), before the checkout and the dependency install that a worktree also 
 The task's commits land in the clone. The shared repository, its objects, its refs and every other
 task's folders stay outside the boundary.
 
-### Every task size gets a clone, and the ownership records follow it
+### Every isolated task size gets a clone
 
-Isolation does not depend on task size: a small task also works in its own clone. Because a clone
+When opened with `task.py open`, a small task gets the same isolation as a large one. Ordinary
+sessions continue to use linked worktrees. Because a clone
 does not appear in `git worktree list`, the ownership, resume and cleanup behavior change together:
 
 - **Ownership**: the task record names the clone's path, its branch and the full SHA of its base.
   The session banner and the ownership checks read the task records, not `git worktree list`.
-- **Resume**: a resumed or new session for the same task opens the same clone from the record.
+- **Reopen**: `task.py open` refuses a task that is already open. Preserve and import its work,
+  end its session and release its clone before opening that task again.
 - **Cleanup**: `task.py release` (P4) deletes a clone only after these checks, made at the moment of
   deletion and under the lock that `import` also takes, so that no import runs at the same time:
   1. the folder is the one `task.py open` made: the record keeps its device and inode and a random
@@ -74,9 +76,10 @@ does not appear in `git worktree list`, the ownership, resume and cleanup behavi
   If one check fails, or cannot be made, release refuses and names what is not preserved. A missing
   or corrupt `.git`, an unreadable ref and a failed process listing are failures, never "clean". The
   human's explicit discard is a separate command that says what it will delete.
-- **Inspection runs nothing from the clone.** The agent can write its clone's `.git/config`, and a
-  clean filter or `core.fsmonitor` there runs on `git add` or `git status` with the rights of whoever
-  runs git; `core.hooksPath` does not stop them. So release and the evidence hooks read the clone's
+- **Inspection runs nothing from the clone.** A clean filter or `core.fsmonitor` in repository
+  config can run on `git add` or `git status` with the caller's rights; `core.hooksPath` does not
+  stop them. The sandbox protects the clone's config, and inspection also avoids trusting it.
+  Release and the evidence hooks read the clone's
   refs, `HEAD` and stash reflog as files, and compute its tree with git in a temporary git folder that
   holds only AgentKeel's config, with the clone's objects as a read-only alternate and no system or
   global config (`hooks/agentkeel_core/repostate.py`). A filter that `.gitattributes` names has no
@@ -154,7 +157,8 @@ boundary. Nothing changes in user or project settings on either host.
   `-c permissions.<task>.extends=":workspace"`, `-c permissions.<task>.filesystem={...}` as one
   inline table (`":workspace_roots"` with `"."` and `".git"` set to `write`, the six guarded paths
   set to `read`, the scratch folder set to `write`, `":tmpdir"` and `":slash_tmp"` set to `read`),
-  `-c shell_environment_policy.set.TMPDIR="<scratch>"`, `-P <task>` and `-C <clone>`. Dotted keys
+  `-c shell_environment_policy.set.TMPDIR="<scratch>"`,
+  `-c default_permissions="agentkeel-<task>"` and `-C <clone>`. Dotted keys
   fail for paths that contain a dot, so the table form is required. A glob in this table accepts
   only `deny`, and a deny glob under the workspace root stops every folder rename and removal in
   it (measured), so the guarded paths are exact paths.
@@ -171,8 +175,8 @@ Measured on both hosts, from inside one task's clone: a write to the clone and t
 - a symlink that points out of the clone
 - a write to the host's settings (`.claude/settings.local.json` and the session settings file on
   Claude Code; the clone's `.codex/` and `~/.codex/config.toml` on Codex)
-- on Codex, a test script and a `python3` placed first on `PATH` inside the clone, both aimed at
-  another task's clone (still to repeat on Claude Code)
+- a test script and a `python3` placed first on `PATH` inside the clone, both aimed at
+  another task's clone (measured on both hosts)
 
 ### The hosts run their own git in the clone
 
@@ -232,8 +236,10 @@ would let any test script run outside the boundary. Instead:
 - **The hook's interpreter cannot be redirected.** A hook command names a verified absolute
   interpreter (Python 3.10 or later, recorded by `init`), runs it in isolated mode (`-I`, which
   ignores `PYTHONPATH`, the other `PYTHON*` variables and the user site folder) under an emptied
-  environment (`env -i` with only `HOME` and a fixed `PATH`), and names the plugin script by its
-  absolute path. Measured, with the plain form `python3 <script>`:
+  environment (`env -i` with a fixed `PATH` and an explicit allowlist for host, session and
+  authentication variables), and names the plugin script by its absolute path. If `init` has
+  not recorded an interpreter, the launcher checks Python in fixed system/install directories.
+  Measured, with the plain form `python3 <script>`:
   - on Claude Code, a `json.py` planted in the clone and an `export PYTHONPATH` in the agent's shell
     did not reach the hook
   - on Codex, a `PYTHONPATH` that the Codex process inherited did redirect the hook: a planted
@@ -266,8 +272,9 @@ adapter names the exact events and fields it trusts:
   `PostToolUse` with `tool_response.interrupted` false and no `backgroundTaskId`. A non-zero exit
   sends `PostToolUseFailure` with "Exit code N" (exit 3, exit 4 and a timeout, "Exit code 143", all
   did). So the adapter records "passed" only for `PostToolUse` paired with its PreToolUse, with
-  `run_in_background` not set, `interrupted` false and no `backgroundTaskId`. It records "failed" for
-  `PostToolUseFailure`. Everything else is unrecorded. A command that printed "all tests passed, exit
+  `run_in_background` not set, `interrupted` false and no `backgroundTaskId`. The shared hook config
+  does not register `PostToolUseFailure`, so a failed run stays pending and counts as unrecorded.
+  A command that printed "all tests passed, exit
   code 0" and then exited 4 arrived as `PostToolUseFailure`: the event decides, never the output.
 - **A background command** returns at once with a `backgroundTaskId`, and its later exit reached no
   hook. It is unrecorded, never passed.
@@ -278,14 +285,14 @@ adapter names the exact events and fields it trusts:
   controls it. On Codex, local evidence is therefore unrecorded, and evidence for shipping comes from
   the CI required check that AgentKeel's push gate already uses: an absent, pending or failed check,
   or a check on another SHA, refuses shipping, and no transcript or success text replaces it.
-- **The rule is a host fact, so it is tested.** An adapter self-test runs a success, a failure, a
-  timeout and a background command on the installed host version and refuses to record evidence if
-  the events differ from the rule.
+- **The rule depends on the host version.** Unit tests cover the known payloads. The live probes
+  above checked success, failure, timeout and background runs on the named versions. There is no
+  automatic live compatibility test at each session start; host upgrades need fresh acceptance.
 - **The code did not move.** If `HEAD` or the working-tree hash differs between start and completion,
   the run is recorded as stale.
-- **Shipping accepts only clean, current evidence**: a passed run whose `HEAD` is the candidate's full
-  SHA, with a clean tree. Missing completion, a failure, a dirty tree or another commit means no
-  evidence. A resumed shell process follows the same rule.
+- **Shipping uses CI evidence.** Local evidence is a record, not a shipping gate. When
+  `require_check_before_push` is configured, the push gate requires a passed GitHub check on the
+  exact full SHA being pushed. Local output or a passed run on another SHA cannot substitute.
 
 ## Part 3: MCP calls with consequences
 
@@ -320,8 +327,9 @@ An adapter has value only if every call it guards passes through it before the s
   definition; changing the script file needed no new review. The plugin's script files must
   therefore stay outside every session's write boundary, which the task profile already ensures.
 - **If a later Codex version stops sending nested calls to hooks**, matching the `exec` source text
-  is not a boundary (aliases and built names pass it). The adapter self-test then fails, and the
-  options are Codex's per-tool `approval_mode`, a gateway process, or refusing `exec` in guarded mode.
+  is not a boundary (aliases and built names pass it). Repeat the recording-server acceptance
+  when upgrading hosts. If interception fails, that host version's MCP protection is unverified;
+  a different enforcement route would need a separate design and test.
 
 ### The adapter
 
@@ -333,10 +341,10 @@ tool name and the arguments, never the tool's description or annotations.
   them), store (changes or submits products in the app stores). Each adapter lists its operations by exact name
   (`hooks/agentkeel_core/mcp_catalog.py`, taken from each server's own catalog). A name it does not
   list is refused, however it is spelled: `get_` or `list` in a name does not make it a read.
-- **Permissions keep their meaning.** Remote writes need a new permission, `remote-write`, scoped to
+- **Permissions keep their meaning.** Remote writes need `remote-write`, scoped to
   a service and a target. Paid calls need `paid-job`. Publishing needs `publish`, and the store
   operations need `store-submission`; `remote-write` alone never publishes or submits, and
-  `store-submission` is not permission to publish anywhere else. A review task can change nothing.
+  `store-submission` is not permission to publish anywhere else. `review` alone grants no remote write.
   The adapter sorts by the operation's name: a generic update that can also turn something on
   through a field (PostHog's `update-feature-flag` with `active`) stays a remote write.
 - **Targets**: `agentkeel.json` names the allowed targets per server (for example one RevenueCat
@@ -356,7 +364,8 @@ tool name and the arguments, never the tool's description or annotations.
   `~/.claude.json`, then the project's `.mcp.json` and that one only for a server the human
   approved for the project (`enabledMcpjsonServers`), then the user's entry, and a plugin's own
   `.mcp.json` for `mcp__plugin_<plugin>_<server>__*`; on Codex `[mcp_servers.<server>]` in
-  `~/.codex/config.toml` with `http_headers` and `env_http_headers`. `.mcp.json` joins the
+  `~/.codex/config.toml` with `http_headers` and `env_http_headers`. Custom host roots
+  (`CLAUDE_CONFIG_DIR` and `CODEX_HOME`) are respected. `.mcp.json` joins the
   configuration files the session cannot write. A pin counts only on a `posthog.com` URL, and
   only when every pin the entry carries names the same project; a configuration file that exists
   and does not parse, a missing project directory, or plugin installs that disagree mean "not
@@ -371,8 +380,8 @@ tool name and the arguments, never the tool's description or annotations.
   `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
   segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment
   is a read).
-- **First adapters**: revenuecat, posthog, sentry, dataforseo. Every other server stays explicitly
-  unsupported and is listed as such in `init`'s report.
+- **Supported adapters**: revenuecat, posthog, sentry, dataforseo. Other servers pass through
+  without enforcement. `init` reports plugin/policy setup, not an MCP coverage inventory.
 - **What an adapter does not protect.** A refusal stops that MCP call only. The same credentials used
   from a shell (`curl`), a script or a browser are outside the adapter, and the documentation says so.
 
@@ -396,12 +405,12 @@ A batch means one tool call that carries several actions: the hook sees it whole
 one refused part refuses the whole batch. Separate parallel calls are not a batch: each forbidden call
 must reach the server zero times, and its permitted siblings may run.
 
-## What is built (0.7.1)
+## Implementation and live acceptance (0.8.0)
 
 The four choices above were approved on 2026-10-06: `remote-write` scoped to service and target,
 remote browser activity unsupported with local QA kept, an independent clone for every task size,
-and per-session settings on both hosts. Every feasibility probe is now a test in
-`tests/test_isolation.py` or `tests/test_mcp.py`. Where the build differs from the text above:
+and per-session settings on both hosts. Regression coverage lives in
+`tests/test_isolation.py` and `tests/test_mcp.py`. Important implementation choices:
 
 - **Codex profile selection.** `codex` and `codex exec` have no `-P` (only `codex sandbox` has it),
   so the session selects its profile with `-c default_permissions="agentkeel-<task>"`. Found in the
@@ -459,7 +468,8 @@ session-only settings, private task state and no MCP servers or hook bypass. Its
 estimated cost was $0.14. The session exited and its fixtures were removed. This proves text
 visibility, not pixel layout, and does not count toward the five real-session observation.
 
-Not shown live: the Stop report in Codex's interactive view (it needs trust for the new hook;
+Not shown live: the Stop report in Codex's interactive view (the founder's 2026-10-07 screenshot
+confirms the hook is enabled and trusted, but does not show its report;
 `codex exec` prints no system messages), and `import` and `release` of these clones (the guard
 refuses them from an agent session, as designed; the unit tests run them through the real commands).
 

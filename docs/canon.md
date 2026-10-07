@@ -10,7 +10,10 @@ Every rule serves one of these three. When two rules collide, the invariant deci
 
 ### I1. Every write is bounded before it happens
 
-The task record says how much process the task bought (size), which actions it may take (permissions) and where (worktrees). For large work, the approved boundary says which paths may change and which must not. The hooks refuse what falls outside.
+The task record names size, permissions and workspaces. For large work, the approved boundary
+lists allowed and excluded paths. Hooks refuse supported tool actions outside those limits;
+`task.py open` adds OS sandbox protection for shell writes. This invariant is the design goal,
+not a claim of coverage for unsupported tools or servers. See the [limits](../README.md#limits).
 
 Applied to intent, I1 is scope discipline: do the literal ask, then stop. An adjacent problem gets one line ("also noticed X, want it?"), never a fix. Each expansion looks reasonable alone, which is why they pile up, and then nobody can tell when a task is finished. Finishing the work and shipping it are two decisions, and the second is the human's.
 
@@ -54,7 +57,11 @@ The rest of the page stays editable, the boundary included, as a draft. The writ
 
 ### G2, plan gate
 
-A plan exists only when a different session will do the work. It is the Working section of the feature's state page. Two agents check it once, in parallel: a plan reviewer (does each task make sense against the boundary) and a scope auditor (does each check fit inside its task's files). The findings are applied and the work starts. The revised plan is not checked again; G3 catches what G2 missed. Dispatch prompts carry `[plan-gate]` so the guard can count them.
+A handoff plan is the Working section of the feature's state page. Two agents check it once,
+in parallel: a plan reviewer checks the tasks against the boundary; a scope auditor checks
+that each verification fits its task. Apply the findings and start work. Do not re-gate a
+revision. Claude dispatch prompts include `[plan-gate]` and the page path. Codex dispatches
+use a `task_name` beginning `plan_gate`, because its prompt is not readable by the hook.
 
 ### G3, review
 
@@ -70,7 +77,10 @@ Each rule has one home. Where a feature owns the detail, the rule links to its p
 
 ### The task record answers three separate questions
 
-Size buys process, permissions name actions, worktrees say where. The record belongs to one session and lives outside the repository. Every code task, small ones included, works in its own worktree. *Why:* one setting for all three granted actions nobody asked for, and the most common correction in practice was an action taken without being asked. Detail: [the task record](task-record.md).
+Size buys process, permissions name actions, workspaces say where. The record belongs to one
+session and lives outside the repository. Every code task uses its own worktree, or the isolated
+clone created by `task.py open`, small tasks included. *Why:* a task's size must not grant actions
+the human did not request. Detail: [the task record](task-record.md).
 
 ### Every git operation in a command line is judged
 
@@ -100,7 +110,11 @@ The installer previews by default, writes its fragment into `AGENTS.md` between 
 
 ### Guards read host-neutral events
 
-Claude Code and Codex calls become the same events before any guard runs, so both hosts get one decision. A tool that may write but has no adapter is refused. A plugin acts only in a repository with `agentkeel.json`. *Why:* a Codex patch once passed every guard that read Claude tool names. Detail: [hosts](hosts.md).
+Claude Code and Codex calls become the same events before any guard runs. Unknown host tools
+that may write are refused. MCP calls use the four service adapters; other MCP servers pass
+through without enforcement. A plugin acts only in opted-in repositories. Opt-in is remembered
+across worktrees, so deleting `agentkeel.json` alone does not turn it off. *Why:* a Codex patch
+once passed guards that read only Claude tool names. Detail: [hosts](hosts.md).
 
 ### Tests before main is a required CI check
 

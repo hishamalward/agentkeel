@@ -7,7 +7,7 @@ Hooks guard the agent, not the branch. To keep `main` green, test the candidate 
 | Setup | Who it stops | Needs |
 |---|---|---|
 | **Branch protection** requires `agentkeel-required` (below) | everyone, at GitHub | a public repository, or GitHub Pro/Team for a private one |
-| **The AgentKeel push gate** plus the deploy waiting for CI | every agent, before its push runs; the deploy for anyone | nothing paid |
+| **The AgentKeel push gate** plus the deploy waiting for CI | agents using active AgentKeel hooks, before their push; GitHub-triggered deploys for anyone | no paid GitHub branch-protection plan |
 
 GitHub Free has no branch protection on private repositories. There, use the push gate: add `"require_check_before_push": "agentkeel-required"` to `agentkeel.json`. An agent's push into a protected branch is then refused unless the check passed on the exact commit it ships.
 
@@ -18,14 +18,20 @@ GitHub Free has no branch protection on private repositories. There, use the pus
 
 ## The shipping path
 
+This is the path for ordinary sessions with shipping permission. An isolated session opened
+with `task.py open` returns its commit through the human's `task.py import`; the human then ships
+from the shared repository. Its sandbox cannot be widened by adding `merge` or `push`.
+
 1. **Push the branch**: `git push origin feat/<task>` (needs `push`).
-2. **Wait for the check**: `agentkeel-required` passes on that commit (`gh pr checks`).
+2. **Wait for the check**: `agentkeel-required` passes on the exact commit. Use `gh pr checks` for a PR, or inspect that commit's Actions run when there is no PR.
 3. **Move main**: `git push origin <full-tested-sha>:main`, in its own call.
 4. **Deploy**: it starts only when the check on that commit is green.
 
 The commit must already contain `main`, so the push is a fast-forward and `main` gets exactly the tested commit. If `main` moved, rebase and test again. GitHub then marks the branch's pull request as merged. With branch protection, `gh pr merge` (needs `merge` and `push`) also works, because GitHub requires the check on the result; under the push gate it is refused.
 
-A commit that never passed the check cannot reach `main` this way: GitHub refuses the push to a protected branch whose required status checks have not passed on the pushed commit.
+With branch protection configured, GitHub refuses a push whose required checks have not passed.
+With the AgentKeel push gate alone, the hook refuses the agent's push; a human push is still
+possible, and the deploy must wait for CI. These provide different levels of protection.
 
 ## Install
 

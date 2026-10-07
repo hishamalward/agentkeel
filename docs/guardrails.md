@@ -11,12 +11,13 @@ Seven hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A guard
 3. **Judge**: each guard checks the events against the task record and `agentkeel.json`.
 4. **Allow or refuse**: exit 0 inside the task; exit 2, with the reason, outside it.
 
-| Hook | Runs on | Refuses |
+| Hook or command | Runs on | Effect |
 |---|---|---|
 | `task-guard.py` | before every tool call, both hosts | writes, commits, moves and pushes outside the task record (the table below) |
 | `secret-guard.py` | before a shell command | printing `.env*` (not `.env.example`), key files and credentials; bare `env` or `printenv`; `echo $SECRET_NAME`; `git show` or `diff` of `.env` |
 | `plan-gate-guard.py` | before a subagent dispatch | a third gate dispatch for the same plan; on Codex, a third `plan_gate*` task name per task |
 | `plan-size-guard.sh` | after a file edit | nothing; it reports a Working section over 300 lines |
+| `verify-record.py` | after a tool completes | records verification evidence for the matching call; Codex results stay unrecorded because its hooks provide no exit status |
 | `session-start.py` | session start, plugin only | nothing; it prints where the session is, the human's profile (`AGENTKEEL_HOME/profile.md`, at most 200 lines or 8,000 characters, as plain context that grants no permission), the task command's real path and the session id |
 | `stop-report.py` | the end of every turn, both hosts | nothing; it reports to the human what the session's task still holds (each worktree: branch, merged or commits not merged, changed files; an opened clone: ready to release or why not), once per distinct report, and never removes anything |
 | `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, reports status, and starts, reads, finishes, checks and indexes docs pages. `approve` is the human's. |
@@ -29,10 +30,10 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 |---|---|---|
 | No write without a task declared by this session; another session cannot reuse it | prevents | NoTask, SessionBinding |
 | Writes only in the task's worktrees, its write roots and its own scratch; a review writes only its report folder, outside any repository | prevents | WriteRoots, ReviewFindings |
-| Code edits only in the task's own linked worktree, never the shared checkout, never on a protected branch | prevents | Branches, StageReviewFindings |
+| File-tool code edits only in the task's own worktree or isolated clone, never the shared checkout or a protected branch | prevents | Branches, StageReviewFindings |
 | Commits name their paths, so another agent's staged files never ride along | prevents | Commits |
 | A protected branch moves locally (commit, merge, reset, rebase, `update-ref`, `fetch .`) only with `merge` | prevents | Shipping |
-| Every push only with `push`, including `+main`, compound lines, `-C`, `-c`, aliases and `remote.*.push`; `gh pr merge` only with `merge` and `push` | prevents | Shipping, StageReviewFindings |
+| Every remote push needs `push`; local pushes between unprotected branches need `implement`. `gh pr merge` needs `merge` and `push` and is refused under the CI push gate | prevents | Shipping, StageReviewFindings |
 | Force push, remote branch delete, `reset --hard`, whole-tree checkout or restore, `clean -f`, `branch -D`, `stash drop/clear/pop` | prevents, with a logged override | Destructive |
 | `eas build/submit/update`, `npm publish`, deploy commands and repository-listed paid jobs only with their permission (also through `npx`, `pnpm exec`; a `--dry-run` is not the action) | prevents, for the listed shapes | CommandClasses |
 | Hook config, `agentkeel.json` and AgentKeel state are not editable by the agent's file tools | prevents | ProtectedConfig |
@@ -40,11 +41,11 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | An agent's push to `main`, and a local move to a known commit, land only a commit whose docs check passes, named by full SHA, alone in its call; an error while checking the move refuses it | prevents, for those moves; a commit on `main`, a rebase or a non-fast-forward merge is checked later, at the push and in CI ([limits](html-records.md#current-limitations-and-open-decisions)) | DocsGate, StageTwoBReviewFindings |
 | An agent ships to `main` only a commit whose required check passed (`require_check_before_push`) | prevents, for a full-SHA push alone in its call; other forms and `gh pr merge` are refused | PushGate |
 | A printed secret | prevents, for the listed shapes | `test_secret_guard.py` |
-| A third plan-gate dispatch | prevents with the `[plan-gate]` marker; heuristic without it | `test_plan_gate_guard.py` |
+| A third plan-gate dispatch | prevents: Claude uses `[plan-gate]` and the plan path (with a heuristic fallback); Codex uses a `plan_gate*` task name | `test_plan_gate_guard.py` |
 | A Working section over 300 lines | warns after | `test_plan_size_guard.py` |
 | Worktrees and clones a task leaves behind | reports after each turn, never removes; an unreadable worktree is reported as unreadable | StopReport |
 | The same protections on Codex (`apply_patch`, shell, subagents) | prevents | SameDecision, CapturedShapes |
-| A tool that may write but has no adapter (Codex `write_stdin` included) | prevents: it is refused with a reason | ConfiguredRoute |
+| An unknown host tool that may write (Codex `write_stdin` included) | prevents: refused with a reason; unsupported MCP servers are outside this rule | ConfiguredRoute |
 | One review round per scope (G3) | guidance only |  |
 | Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
 | In a session started with `task.py open`: a shell write outside the task's clone, scratch folder and declared caches, from any command, script or child process | prevents, by the host's OS sandbox (Claude Code `--settings`, Codex permission profile) | Open, ImportAndRelease; live on both hosts |
@@ -72,7 +73,7 @@ hooks never override a host's decision.
 
 | The message says | Decided by | Resolution |
 |---|---|---|
-| `AGENTKEEL: ... needs the '<permission>' permission; task '<id>' has ...` | the task's own permissions | the human widens the scope; the agent re-declares with `task.py start <task> --size <size> --allow <full set>` |
+| `AGENTKEEL: ... needs the '<permission>' permission; task '<id>' has ...` | the task's own permissions | when the request grants the action, re-declare with `task.py start ... --allow <full set>`; isolated sessions use the [reopen procedure](task-record.md#changing-permissions) |
 | `AGENTKEEL: refusing to write <path>: it belongs to ...` or `... is not one of task '<id>'s worktrees` | ownership of worktrees and write roots | work in the task's worktree, or add one with `--worktree` |
 | `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the adapter's catalog (exact names) | the human runs it, or the catalog learns the name in a release |
 | `AGENTKEEL: ... targets '<x>', which agentkeel.json does not list` or `... connection is not pinned` | `agentkeel.json` targets and the host's own connection entry | list the target, or pin the connection on the host (`x-posthog-project-id`) |
@@ -91,9 +92,9 @@ AGENTKEEL_ALLOW_DESTRUCTIVE=1 git reset --hard
 AGENTKEEL_SHOW_SECRETS=1 cat .env
 ```
 
-## The pattern on every write path
+## Guidance for tools that write
 
-A tool that writes follows this pattern, taken from [toilscan](https://github.com/hishamalward/toilscan)'s `apply` path:
+For tools you build, use this pattern, taken from [toilscan](https://github.com/hishamalward/toilscan)'s `apply` path:
 
 1. Preview by default. Nothing is written until the caller authorizes it.
 2. Authorize each operation, never "apply all" by default.
@@ -102,7 +103,9 @@ A tool that writes follows this pattern, taken from [toilscan](https://github.co
 5. Keep a journal of what was written, so the last apply can be undone.
 6. Never move or push `main` without permission, never edit outside the task's worktrees, never print a secret.
 
-The hooks enforce item 6 and the permission half of item 2. Items 1, 3, 4 and 5 are how to build a tool that writes; a hook cannot enforce them from outside.
+The hooks check the supported operations described above, including shipping permissions.
+They cannot enforce a tool's internal preview, journal or atomic-write design, or inspect all
+secret reads and shell writes. Those are tool design responsibilities, not hook guarantees.
 
 ## Isolation is a different problem
 
