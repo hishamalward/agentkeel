@@ -26,8 +26,10 @@ operation's name, not by every argument: a generic update that can also turn som
 a field (PostHog's update-feature-flag with "active") stays a remote write.
 
 PostHog's tools act on the server's active project and do not name it (only the project-* tools
-carry an id). The adapter cannot establish that target, so with specific targets listed it refuses
-those writes and says why; reads pass.
+carry an id). The target is the project the host's own connection is pinned to (mcp_connection.py
+reads the host's entry for the server that made the call): a write passes when that pin is a listed
+project, and is refused with the reason when the connection is pinned elsewhere or not pinned.
+Reads pass either way.
 "targets": ["*"] allows any target for that server. A server name the host gives a guarded
 service under another name is added with "servers": ["name"]. Servers with no adapter here pass and
 are reported as unsupported; a refusal stops only the MCP call, not the same credentials used from
@@ -145,8 +147,9 @@ def classify(call):
     return UNKNOWN, None, call.tool
 
 
-def judge(call, rec, policy_mcp):
-    """None when the call may run, else the refusal text."""
+def judge(call, rec, policy_mcp, pinned=None):
+    """None when the call may run, else the refusal text. `pinned` is the project the host's
+    connection for this call is pinned to (mcp_connection.pinned_project), when it is."""
     cls, target, what = classify(call)
     perms = set((rec or {}).get("permissions") or [])
     label = f"{call.service} `{what}`"
@@ -171,9 +174,18 @@ def judge(call, rec, policy_mcp):
     if "*" in allowed:
         return None
     if target is None and call.service == "posthog":
-        return (f"{label} acts on PostHog's active project, which the call does not name, so agentkeel\n"
-                "cannot tell which project it changes. It is refused while agentkeel.json lists specific\n"
-                'projects. The human runs it, or allows every project with "mcp": {"posthog": {"targets": ["*"]}}.')
+        if pinned is not None and str(pinned) in allowed:
+            return None
+        if pinned is not None:
+            return (f"{label} acts on PostHog's active project, and the host's `{call.server}` connection is\n"
+                    f"pinned to project '{pinned}', which agentkeel.json does not list for posthog "
+                    f"(allowed: {', '.join(allowed) or 'none'}).")
+        return (f"{label} acts on PostHog's active project, which the call does not name, and the host's\n"
+                f"`{call.server}` connection is not pinned to one, so agentkeel cannot tell which project it\n"
+                "changes. It is refused while agentkeel.json lists specific projects. Pin the connection:\n"
+                f"the header `x-posthog-project-id: <id>` (or `?project_id=<id>` on the URL) on the host's\n"
+                'entry for this server. Or the human runs it, or allows every project with\n'
+                '"mcp": {"posthog": {"targets": ["*"]}}.')
     if target is None:
         return (f"{label} acts on the remote service, and agentkeel cannot tell which "
                 f"{call.service} target it changes.\nIt is refused. agentkeel.json can allow every target for "

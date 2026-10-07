@@ -45,7 +45,9 @@ rules that matter into hooks, outside the model's memory.
   that changes the service needs `remote-write` and a target that `agentkeel.json` lists, a call
   that bills needs `paid-job` (and a listed target when it names one), a call that publishes to
   end users needs `publish`, a call that changes or submits store products needs
-  `store-submission`, and a tool the adapter does not list by name is refused.
+  `store-submission`, and a tool the adapter does not list by name is refused. A PostHog write
+  acts on the project your own connection is pinned to, read from your host's configuration; an
+  unpinned connection cannot write.
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
 - **Records with one current owner per fact.** In a repository that opts in, the agents' work

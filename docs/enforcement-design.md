@@ -344,14 +344,20 @@ tool name and the arguments, never the tool's description or annotations.
   `remote-write`. A paid call that names a target (a Sentry organization) is held to the same list:
   `paid-job` is permission to spend, not permission for every organization. A paid call with no
   target at all (DataForSEO) needs only `paid-job`. PostHog's tools act on the server's active
-  project and do not name it (only the project tools carry an id), so with specific projects listed
-  a PostHog write is refused with that reason; reads pass, and `"*"` allows every project.
-  Only `project-settings-update` supplies a supported project selector (`id`). An invented
-  `project_id` on another tool never establishes its target or overrides that selector.
-  PostHog supports [connection pinning](https://posthog.com/docs/model-context-protocol/faq#advanced-configuration)
-  with `x-posthog-project-id` or `project_id` in the connection URL. That is a possible path to
-  narrow access for active-project writes, but this adapter does not yet verify a connection's
-  pin. Adding a target to the allowlist alone does not enable those writes.
+  project and do not name it (only `project-settings-update` carries a supported selector, `id`;
+  an invented `project_id` on another tool never establishes a target or overrides that
+  selector). The target of such a call is the project the host's own connection is pinned to.
+  PostHog documents the pin ([connection pinning](https://posthog.com/docs/model-context-protocol/faq#advanced-configuration)):
+  the header `x-posthog-project-id: <id>` or `?project_id=<id>` on the server's URL, and a pinned
+  connection no longer offers `switch-project`. The guard reads the pin from the host's entry for
+  the exact server the call came from (`hooks/agentkeel_core/mcp_connection.py`): on Claude Code
+  the project's entry in `~/.claude.json`, then the project's `.mcp.json`, then the user's entry,
+  and a plugin's own `.mcp.json` for `mcp__plugin_<plugin>_<server>__*`; on Codex
+  `[mcp_servers.<server>]` in `~/.codex/config.toml` with `http_headers` and `env_http_headers`.
+  A pin counts only on a `posthog.com` URL. A write passes when the pin is a listed project; it
+  is refused with the reason when the connection is pinned to another project or not pinned at
+  all (the refusal says how to pin). Reads pass either way, and `"*"` allows every project.
+  Listing a project in `agentkeel.json` alone enables nothing: the pin must exist on the host.
 - **Generic tools**: PostHog's `exec` is classified by its command verb and the listed tool that
   `call` names (`--json` and `--confirm` skipped), DataForSEO's `api_request` by method and path
   segments (a `live` or `task_post` segment is paid; a GET with an `appendix` or `user_data` segment

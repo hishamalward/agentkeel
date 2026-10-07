@@ -32,7 +32,7 @@ HOOK_FILES = ["task.py", "task-guard.py", "secret-guard.py", "plan-gate-guard.py
               "verify-record.py", "stop-report.py"]
 CORE_FILES = ["__init__.py", "shell.py", "gitops.py", "record.py", "patch.py", "host.py", "checks.py", "pages.py",
               "starters.py", "hostcheck.py", "instructions.py", "isolation.py", "evidence.py", "mcp.py",
-              "mcp_catalog.py", "repostate.py"]
+              "mcp_catalog.py", "mcp_connection.py", "repostate.py"]
 OBSOLETE = ["tier.sh", "tier-guard.py", "write-path-guard.py"]
 START, END = "<!-- agentkeel:start -->", "<!-- agentkeel:end -->"
 
