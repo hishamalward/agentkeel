@@ -25,7 +25,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 |---|---|---|
 | `small` | its own branch and worktree; no plan document, no subagents; one check; short report | a declared task; code edits off the protected branch |
 | `medium` | as small, plus tests and one review round | the same |
-| `large` | an approved boundary on the feature's state page; a plan table (its Working section) gated once; per-task and whole-branch review | no edit outside `docs/` before the boundary is approved; then only the approved boundary's `Changes` paths |
+| `large` | an approved boundary on the feature's state page; a plan table (its Working section) gated once; per-task and whole-branch review | no edit outside `docs/` before the boundary is approved; then only the approved boundary's `Changes` paths, in every repository the task spans (one page; `<repository>:<path>` entries for the others, see html-records.md) |
 
 | Permission | Allows |
 |---|---|

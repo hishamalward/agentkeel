@@ -386,6 +386,42 @@ class LargeAndBoundaryApproval(RepoCase):
         code, err = self.hook(self.write("cli_legacy.py"))
         self.assertEqual(code, 2); self.assertIn("Must not change", err)
 
+    def test_one_boundary_bounds_a_task_that_spans_two_repositories(self):
+        """The second repository (Markdown docs, no page of its own) is a worktree of the same task;
+        the page's lists name its paths as `<repository>:<path>`, by the main checkout's folder name."""
+        from helpers import git
+        other_primary = os.path.join(self.tmp, "tools")
+        other = os.path.join(self.tmp, "tools-feat")
+        subprocess.run(["git", "init", "-q", "-b", "main", other_primary], check=True)
+        git(other_primary, "commit", "-q", "--allow-empty", "-m", "init")
+        git(other_primary, "worktree", "add", "-q", other, "-b", "feat/json-flag")
+        os.makedirs(os.path.join(other, "docs"))
+        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
+        # no page anywhere: code is blocked in both, and docs/ (the other repository's Markdown) is not
+        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
+        self.assertEqual(code, 2); self.assertIn("no state page", err); self.assertIn("another worktree", err)
+        self.assertEqual(self.hook(self.write(os.path.join(other, "docs", "guide.md"), cwd=other))[0], 0)
+        # the page here lists nothing for the other repository: its code stays blocked, with the spelling
+        self.approved()
+        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
+        self.assertEqual(code, 2); self.assertIn("tools:<path>", err)
+        # entries for the other repository apply only there; plain entries apply only here
+        self.approved(changes=("cli.py", "tools:hooks/", "tools:README.md"), must_not=("tools:hooks/secret.py",))
+        self.assertEqual(self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))[0], 0)
+        self.assertEqual(self.hook(self.write(os.path.join(other, "README.md"), cwd=other))[0], 0)
+        code, err = self.hook(self.write(os.path.join(other, "hooks", "secret.py"), cwd=other))
+        self.assertEqual(code, 2); self.assertIn("Must not change", err)
+        code, err = self.hook(self.write(os.path.join(other, "cli.py"), cwd=other))
+        self.assertEqual(code, 2); self.assertIn("Changes list", err)
+        code, err = self.hook(self.write("hooks/x.py"))
+        self.assertEqual(code, 2); self.assertIn("Changes list", err)
+        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
+        # a page in each repository for the same task is one too many to choose from
+        with open(os.path.join(other, "docs", "261005-json-flag-state.html"), "w") as fh:
+            fh.write(state_page(changes=("*",)))
+        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
+        self.assertEqual(code, 2, err); self.assertIn("boundary", err)
+
     def test_editing_the_boundary_is_allowed_and_grants_nothing(self):
         text = self.approved()
         widened = text.replace("<li><code>tests/</code></li>", "<li><code>tests/</code></li><li><code>src/</code></li>")

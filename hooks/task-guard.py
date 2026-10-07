@@ -227,42 +227,83 @@ def judge_page_edit(ev, rel):
             f"  {TASK_CMD} approve {rel}")
 
 
-def approved_boundary(root, rec):
-    """(page name, the approved boundary's HTML) for a large task, else Block with the reason.
-    When the page's boundary was edited after approval, the approved version (kept by approve in
-    AGENTKEEL_HOME) still sets the limits: a widened draft grants nothing."""
+def repo_name(root):
+    """The repository's name: the folder of its main checkout, which every worktree shares."""
+    common = gitops.common_dir(root)
+    return os.path.basename(os.path.dirname(common)) if common else os.path.basename(root)
+
+
+def state_pages(root, task):
     import glob
+    return sorted(glob.glob(os.path.join(root, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{task}-state.html")))
+
+
+def approved_boundary(root, rec):
+    """(page name, the approved boundary's HTML, the page's repository root) for a large task, else
+    Block with the reason. A task that spans repositories keeps one boundary: when `root` has no
+    state page for the task, the page is looked for in the task's other worktrees, and its lists
+    name the other repository's paths as `<repository>:<path>` (large_limits). When the page's
+    boundary was edited after approval, the approved version (kept by approve in AGENTKEEL_HOME)
+    still sets the limits: a widened draft grants nothing."""
     task = rec.get("task", "")
-    found = sorted(glob.glob(os.path.join(root, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{task}-state.html")))
+    found = state_pages(root, task)
+    page_root = root
+    if not found:
+        others = [(w, state_pages(w, task)) for w in rec.get("worktrees") or []
+                  if os.path.isdir(w) and os.path.realpath(w) != os.path.realpath(root)]
+        others = [(w, f) for w, f in others if f]
+        if len(others) == 1:
+            page_root, found = others[0]
+        elif len(others) > 1:
+            found = [f for _, fs in others for f in fs]
     ask = (f"Approval is the human's: they run\n  {TASK_CMD} approve {task}\n"
            "Edits under docs/ are allowed meanwhile.")
     if len(found) != 1:
         raise Block(
             f"size large needs an approved boundary before any edit outside docs/. There is "
             f"{'no' if not found else 'more than one'} state page for '{task}'\n"
-            f"(docs/YYMMDD-{task}-state.html). Start it with: {TASK_CMD} new state {task}\n" + ask)
+            f"(docs/YYMMDD-{task}-state.html, in this repository or in another worktree of the task).\n"
+            f"Start it with: {TASK_CMD} new state {task}\n" + ask)
     name, text = os.path.basename(found[0]), record.read(found[0]) or ""
     state, why = pages.boundary_state(name, text)
     if state == "approved":
-        return name, pages.sections(text, "boundary")[0]
+        return name, pages.sections(text, "boundary")[0], page_root
     got = pages.approval(text) if state == "changed" else None
     if got:
         kept = record.read(record.approved_boundary_path(got[0]))
         if kept is not None and pages.digest(name, kept) == got[0]:
-            return name, kept
+            return name, kept, page_root
     raise Block(f"size large needs an approved boundary before any edit outside docs/.\n"
                 f"docs/{name}: {why or 'it has no boundary section'}.\n" + ask)
 
 
+def scoped(patterns, here, home):
+    """The patterns that apply in repository `here`: `<repository>:<path>` entries for that
+    repository, and plain entries only in the page's own repository (`home`)."""
+    out = []
+    for p in patterns:
+        repo, sep, path = p.partition(":")
+        if sep and repo and "/" not in repo and "*" not in repo:
+            if repo == here and path:
+                out.append(path)
+        elif here == home:
+            out.append(p)
+    return out
+
+
 def large_limits(root, rec):
-    """(page name, changes, must_not) from the approved boundary. An empty or missing Changes list
-    grants nothing: wide access is a pattern the human approved (`*`), never an omission."""
-    name, boundary = approved_boundary(root, rec)
+    """(page name, changes, must_not) from the approved boundary, for the repository of `root`.
+    An empty or missing Changes list grants nothing: wide access is a pattern the human approved
+    (`*`), never an omission."""
+    name, boundary, page_root = approved_boundary(root, rec)
+    here, home = repo_name(root), repo_name(page_root)
     changes, must_not = pages.blast_radius(boundary)
+    changes, must_not = scoped(changes, here, home), scoped(must_not, here, home)
     if not changes:
+        where = "" if here == home else f" for repository '{here}' (its entries read `{here}:<path>`)"
         raise Block(
-            f"the approved boundary of {name} lists no paths under Changes, so this large task may change\n"
-            "nothing outside docs/. List the paths (<ul data-keel-changes><li><code>src/x/</code></li></ul>;\n"
+            f"the approved boundary of {name} lists no paths under Changes{where}, so this large task may\n"
+            "change nothing outside docs/ here. List the paths (<ul data-keel-changes><li><code>src/x/</code></li></ul>;\n"
             "`*` means every path) and ask the human to approve the boundary again.")
     return name, changes, must_not
 

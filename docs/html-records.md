@@ -44,6 +44,7 @@ The human runs `task.py approve <feature|page>` in their own terminal. It writes
 - The agent may edit anything on the page, the boundary included, as a draft. It cannot add, change or remove the approval, or rename or delete an approved page.
 - A large task's write limits come from the approved boundary. When the draft differs, the kept copy still rules; a widened draft grants nothing.
 - An empty or missing Changes list grants no path outside `docs/`. Wide access is explicit: `*` grants every path.
+- A large task that spans repositories keeps one boundary, on the state page of the repository that has HTML records. An entry for another repository the task owns (one of the task's worktrees, `task.py start ... --worktree`) is written `<repository>:<path>`, where `<repository>` is the folder name of that repository's main checkout (the one every worktree shares), for example `agentkeel:hooks/`. Plain entries apply in the page's own repository only; `<repository>:` entries apply in that repository only, under Changes and under Must not change alike. In a repository with no entries of its own the task may change nothing outside `docs/`, and the refusal gives the spelling.
 - `main` does not move while any boundary is unapproved, changed since approval, missing its approval, duplicated, malformed, or dropped by renaming or deleting an approved page.
 
 ### Reading a page
