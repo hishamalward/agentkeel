@@ -122,7 +122,7 @@ def _toml(path, environ):
                 return json.loads(res.stdout), None
             except Exception:
                 break
-    return None, "reading ~/.codex/config.toml needs Python 3.11 or newer (tomllib)"
+    return None, "reading ~/.codex/config.toml needs Python 3.11 or newer (tomllib), or the tomli package"
 
 
 def codex(repo, environ=os.environ):

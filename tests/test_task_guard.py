@@ -416,11 +416,62 @@ class LargeAndBoundaryApproval(RepoCase):
         code, err = self.hook(self.write("hooks/x.py"))
         self.assertEqual(code, 2); self.assertIn("Changes list", err)
         self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-        # a page in each repository for the same task is one too many to choose from
+        # a repository's own page comes first: the other repository's unapproved page shadows this one
         with open(os.path.join(other, "docs", "261005-json-flag-state.html"), "w") as fh:
             fh.write(state_page(changes=("*",)))
         code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
-        self.assertEqual(code, 2, err); self.assertIn("boundary", err)
+        self.assertEqual(code, 2, err); self.assertIn("has not been approved", err)
+
+    def other_repo(self, primary, worktree):
+        """A second repository of the task: `primary` (a checkout, or a bare `*.git`) and its worktree."""
+        from helpers import git
+        if primary.endswith(".git"):
+            git(self.tmp, "clone", "-q", "--bare", self.primary, primary)
+        else:
+            subprocess.run(["git", "init", "-q", "-b", "main", primary], check=True)
+            git(primary, "commit", "-q", "--allow-empty", "-m", "init")
+        git(primary, "worktree", "add", "-q", worktree, "-b", "feat/json-flag-tools")
+        return worktree
+
+    def test_a_folder_name_shared_by_two_repositories_widens_nothing(self):
+        """`primary` names this repository and another one: plain entries stay here, and the
+        shared name's prefixed entries grant nothing, with the reason."""
+        other = self.other_repo(os.path.join(self.tmp, "elsewhere", "primary"), os.path.join(self.tmp, "primary-feat"))
+        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
+        self.approved(changes=("*", "primary:hooks/"), must_not=("primary:hooks/secret.py",))
+        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
+        self.assertEqual(code, 2, err); self.assertIn("ambiguous", err)
+        code, err = self.hook(self.write("hooks/secret.py"))
+        self.assertEqual(code, 2, err); self.assertIn("Must not change", err)
+        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
+
+    def test_a_bare_repository_is_named_without_its_git_suffix(self):
+        other = self.other_repo(os.path.join(self.tmp, "tools.git"), os.path.join(self.tmp, "tools-feat"))
+        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
+        self.approved(changes=("cli.py", "tools:hooks/"))
+        self.assertEqual(self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))[0], 0)
+
+    def test_one_committed_page_in_two_worktrees_of_a_repository_is_one_page(self):
+        tools = os.path.join(self.tmp, "tools")
+        subprocess.run(["git", "init", "-q", "-b", "main", tools], check=True)
+        os.makedirs(os.path.join(tools, "docs"))
+        page = os.path.join(tools, self.PAGE)
+        with open(page, "w") as fh:
+            fh.write(state_page(changes=("hooks/", "primary:cli.py")))
+        approve_file(page, self.home)
+        git(tools, "add", "docs"); git(tools, "commit", "-q", "-m", "page")
+        trees = [os.path.join(self.tmp, f"tools-{n}") for n in ("a", "b")]
+        for n, t in zip("ab", trees):
+            git(tools, "worktree", "add", "-q", t, "-b", f"feat/json-flag-{n}")
+        self.declare(size="large", task="json-flag", worktrees=[self.repo, *trees])
+        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
+        code, err = self.hook(self.write("src/x.py"))
+        self.assertEqual(code, 2, err); self.assertIn("Changes list", err)
+
+    def test_a_colon_that_names_no_repository_of_the_task_is_part_of_the_path(self):
+        self.approved(changes=("*",), must_not=("secrets:prod.yml",))
+        code, err = self.hook(self.write("secrets:prod.yml"))
+        self.assertEqual(code, 2, err); self.assertIn("Must not change", err)
 
     def test_editing_the_boundary_is_allowed_and_grants_nothing(self):
         text = self.approved()

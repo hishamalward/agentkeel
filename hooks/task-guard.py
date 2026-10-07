@@ -227,10 +227,29 @@ def judge_page_edit(ev, rel):
             f"  {TASK_CMD} approve {rel}")
 
 
-def repo_name(root):
-    """The repository's name: the folder of its main checkout, which every worktree shares."""
-    common = gitops.common_dir(root)
-    return os.path.basename(os.path.dirname(common)) if common else os.path.basename(root)
+def repo_common(root):
+    """The repository's identity: its git common dir, which every worktree of it shares."""
+    return gitops.common_dir(root) or os.path.realpath(root)
+
+
+def repo_name(common):
+    """The repository's name in `<repository>:<path>` entries, from its common dir: the folder that
+    holds `.git`, a bare repository's folder without `.git`, a submodule's own folder."""
+    base = os.path.basename(common)
+    if base == ".git":
+        return os.path.basename(os.path.dirname(common))
+    return base[:-len(".git")] if base.endswith(".git") else base
+
+
+def task_repos(root, rec):
+    """{name: {common dirs}} for the repositories of the task's worktrees and of `root`. A name with
+    two common dirs is ambiguous: its prefixed Changes entries grant nothing (large_limits)."""
+    out = {}
+    for w in [root, *(rec.get("worktrees") or [])]:
+        if os.path.isdir(w):
+            common = repo_common(w)
+            out.setdefault(repo_name(common), set()).add(common)
+    return out
 
 
 def state_pages(root, task):
@@ -249,13 +268,15 @@ def approved_boundary(root, rec):
     found = state_pages(root, task)
     page_root = root
     if not found:
-        others = [(w, state_pages(w, task)) for w in rec.get("worktrees") or []
-                  if os.path.isdir(w) and os.path.realpath(w) != os.path.realpath(root)]
-        others = [(w, f) for w, f in others if f]
-        if len(others) == 1:
-            page_root, found = others[0]
-        elif len(others) > 1:
-            found = [f for _, fs in others for f in fs]
+        # two worktrees of one repository carry the same committed page: it is one page
+        seen = {}
+        for w in rec.get("worktrees") or []:
+            if os.path.isdir(w) and os.path.realpath(w) != os.path.realpath(root):
+                for f in state_pages(w, task):
+                    seen.setdefault((repo_common(w), os.path.basename(f)), (w, f))
+        found = [f for _, f in seen.values()]
+        if len(seen) == 1:
+            page_root = next(iter(seen.values()))[0]
     ask = (f"Approval is the human's: they run\n  {TASK_CMD} approve {task}\n"
            "Edits under docs/ are allowed meanwhile.")
     if len(found) != 1:
@@ -277,16 +298,17 @@ def approved_boundary(root, rec):
                 f"docs/{name}: {why or 'it has no boundary section'}.\n" + ask)
 
 
-def scoped(patterns, here, home):
-    """The patterns that apply in repository `here`: `<repository>:<path>` entries for that
-    repository, and plain entries only in the page's own repository (`home`)."""
+def scoped(patterns, here, home, names):
+    """The patterns that apply in the repository named `here`: `<repository>:<path>` entries for
+    it, and plain entries only when it is the page's own repository (`home`). A prefix is a
+    repository only when it is one of the task's repository `names`; otherwise the entry is plain."""
     out = []
     for p in patterns:
         repo, sep, path = p.partition(":")
-        if sep and repo and "/" not in repo and "*" not in repo:
+        if sep and repo in names:
             if repo == here and path:
                 out.append(path)
-        elif here == home:
+        elif home:
             out.append(p)
     return out
 
@@ -294,13 +316,23 @@ def scoped(patterns, here, home):
 def large_limits(root, rec):
     """(page name, changes, must_not) from the approved boundary, for the repository of `root`.
     An empty or missing Changes list grants nothing: wide access is a pattern the human approved
-    (`*`), never an omission."""
+    (`*`), never an omission. The page's own repository is the one with the same common dir, never
+    the same name; a name two of the task's repositories share grants nothing under Changes, and
+    its Must-not entries apply in both."""
     name, boundary, page_root = approved_boundary(root, rec)
-    here, home = repo_name(root), repo_name(page_root)
+    common = repo_common(root)
+    here, home = repo_name(common), common == repo_common(page_root)
+    repos = task_repos(root, rec)
+    shared = len(repos.get(here, ())) > 1
     changes, must_not = pages.blast_radius(boundary)
-    changes, must_not = scoped(changes, here, home), scoped(must_not, here, home)
+    changes = scoped(changes, None if shared else here, home, repos)
+    must_not = scoped(must_not, here, home, repos)
     if not changes:
-        where = "" if here == home else f" for repository '{here}' (its entries read `{here}:<path>`)"
+        if shared:
+            where = (f" for repository '{here}' (the name is ambiguous: two of the task's repositories are\n"
+                     f"named '{here}', so its `{here}:<path>` entries grant nothing)")
+        else:
+            where = "" if home else f" for repository '{here}' (its entries read `{here}:<path>`)"
         raise Block(
             f"the approved boundary of {name} lists no paths under Changes{where}, so this large task may\n"
             "change nothing outside docs/ here. List the paths (<ul data-keel-changes><li><code>src/x/</code></li></ul>;\n"
