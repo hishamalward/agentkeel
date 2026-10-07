@@ -509,23 +509,28 @@ class CodexTrust(unittest.TestCase):
             env.update(environ or {})
             return hostcheck.codex(home, env)["trusted"]
 
-    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib needs Python 3.11+")
     def test_comments_arrays_and_order_do_not_change_the_count(self):
+        from agentkeel_core import hostcheck
+        if hostcheck._tomllib() is None:
+            self.skipTest("no TOML parser: tomllib (Python 3.11+) or tomli")
         self.assertEqual(self.trust(self.CONFIG), 2)
         reordered = self.CONFIG.replace('note = ["a", "[not a table]"]\ntrusted_hash = "sha256:a"',
                                         'trusted_hash = "sha256:a"\nnote = ["a", "[not a table]"]')
         self.assertEqual(self.trust(reordered), 2)
 
     def test_without_a_toml_parser_trust_is_unknown(self):
-        saved = sys.modules.get("tomllib")
-        sys.modules["tomllib"] = None
+        names = ("tomllib", "tomli", "pip._vendor.tomli")
+        saved = {n: sys.modules.get(n) for n in names}
+        for n in names:
+            sys.modules[n] = None  # an import of a None entry raises ImportError
         try:
             self.assertIsNone(self.trust(self.CONFIG))
         finally:
-            if saved is None:
-                sys.modules.pop("tomllib", None)
-            else:
-                sys.modules["tomllib"] = saved
+            for n in names:
+                if saved[n] is None:
+                    sys.modules.pop(n, None)
+                else:
+                    sys.modules[n] = saved[n]
 
 
 class SessionBanner(RepoCase):
