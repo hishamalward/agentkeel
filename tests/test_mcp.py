@@ -1,8 +1,10 @@
 """MCP adapters: guarded servers' calls against the task's permissions and agentkeel.json's targets."""
 import json
 import os
+import subprocess
+import sys
 
-from helpers import SESSION, RepoCase
+from helpers import HOOKS, SESSION, RepoCase
 
 
 class Adapters(RepoCase):
@@ -62,6 +64,58 @@ class Adapters(RepoCase):
         self.assertEqual(code, 2, f"{tool} {args} was allowed")
         self.assertIn(text, err)
         return err
+
+    def launched(self, env=None, codex=False):
+        """Exercise the production environment filter, not just task-guard.py directly."""
+        with open(os.path.join(self.home, "interpreter"), "w") as fh:
+            fh.write(sys.executable + "\n")
+        payload = {"tool_name": "mcp__posthog__exec", "cwd": self.repo, "session_id": SESSION,
+                   "tool_input": {"command": 'call update-feature-flag {"id": 4, "name": "x"}'}}
+        if codex:
+            payload["turn_id"] = "t1"
+        return subprocess.run(["/bin/sh", os.path.join(HOOKS, "run.sh"), "task-guard.py"],
+                              input=json.dumps(payload), text=True, capture_output=True,
+                              env={**os.environ, **self.env, **(env or {})}, cwd=self.repo, timeout=60)
+
+    def test_launcher_uses_the_hosts_config_root(self):
+        self.declare(allow=("implement", "remote-write"))
+        self.claude_servers({"posthog": {"url": "https://mcp.posthog.com/mcp?project_id=111"}})
+        self.codex_servers('[mcp_servers.posthog]\nurl = "https://mcp.posthog.com/mcp?project_id=111"\n')
+        custom = os.path.join(self.tmp, "custom-host")
+        os.makedirs(custom)
+        for codex, key, filename in ((False, "CLAUDE_CONFIG_DIR", ".claude.json"),
+                                     (True, "CODEX_HOME", "config.toml")):
+            for pin, expected in (("222", 2), ("111", 0)):
+                with self.subTest(codex=codex, pin=pin):
+                    with open(os.path.join(custom, filename), "w") as fh:
+                        url = "https://mcp.posthog.com/mcp?project_id=" + pin
+                        if codex:
+                            fh.write('[mcp_servers.posthog]\nurl = "' + url + '"\n')
+                        else:
+                            json.dump({"mcpServers": {"posthog": {"url": url}}}, fh)
+                    result = self.launched({key: custom}, codex=codex)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if expected:
+                        self.assertIn("pinned to project '222'", result.stderr)
+
+    def test_launcher_does_not_drop_an_unresolved_or_blank_pin(self):
+        self.declare(allow=("implement", "remote-write"))
+        base = "https://mcp.posthog.com/mcp?project_id=111"
+        entries = [
+            {"url": base, "headers": {"x-posthog-project-id": "${POSTHOG_PIN}"}},
+            {"url": base, "headers": {"x-posthog-project-id": "${POSTHOG_PIN:-111}"}},
+            {"url": base, "headers": {"x-posthog-project-id": ""}},
+            {"url": base + "&project_id="},
+        ]
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.claude_servers({"posthog": entry})
+                result = self.launched({"POSTHOG_PIN": "222"})
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("is not pinned", result.stderr)
+        self.claude_servers({"posthog": {"url": base,
+                                         "headers": {"x-posthog-project-id": "111"}}})
+        self.assertEqual(self.launched().returncode, 0)
 
     def test_reads_pass_with_any_task_and_with_none(self):
         reads = [("mcp__revenuecat__list_apps", {"project_id": "proj_other"}),

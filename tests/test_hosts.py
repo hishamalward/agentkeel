@@ -54,6 +54,20 @@ class CapturedShapes(unittest.TestCase):
         for tool in ("web_run_script", "webrun_delete", "browser_run_code"):
             self.assertEqual(host.events({"tool_name": tool, "tool_input": {}}, "/r")[0].kind, "gap")
 
+    def test_a_subagent_handback_is_not_a_gap(self):
+        """A subagent's report to its parent is text, not a file; a lookalike that may write stays a gap."""
+        from agentkeel_core import host
+        self.assertEqual(host.events({"tool_name": "SubagentHandback", "tool_input": {
+            "report": "done: two files changed"}}, "/r"), [])
+        self.assertEqual(host.events({"tool_name": "SubagentSpawnAndEdit", "tool_input": {}}, "/r")[0].kind, "gap")
+
+    def test_codex_normalized_agent_listing_is_read_only(self):
+        from agentkeel_core import host
+        self.assertEqual(host.events({"tool_name": "collaborationlist_agents", "tool_input": {}}, "/r"), [])
+        self.assertEqual(host.events({"tool_name": "collaborationspawn_agent", "tool_input": {
+            "task_name": "probe"}}, "/r")[0].kind, "dispatch")
+        self.assertEqual(host.events({"tool_name": "collaborationlist_agents_and_edit", "tool_input": {}}, "/r")[0].kind, "gap")
+
     def test_codex_events(self):
         import helpers  # noqa: F401
         from agentkeel_core import host

@@ -438,10 +438,18 @@ project:
 
 | Check | Claude Code | Codex |
 |---|---|---|
-| `project-get` names the pinned project; `switch 999` is refused by the guard (a write to an unlisted project), and the pinned server does not offer it | guard run against the real entries; the call waits for the human's sign-in to the pinned entry | yes, live (the server answered "Unknown command: switch" before the guard treated it as a write) |
-| A write on the active project under the pin | allowed | allowed, live: one disposable annotation created and deleted at once |
+| The project read names the pinned project | yes, live: `projects-get` listed Listenality, project 644556 | yes, live: `project-get` |
+| `switch 999` is refused by the guard, and the pinned server does not offer it | guard run against the real entries; switch was not called in the live session | yes, live (the server answered "Unknown command: switch" before the guard treated it as a write) |
+| A write on the active project under the pin | allowed, live: annotation 479636 created and deleted; server returned `deleted: true` | allowed, live: one disposable annotation created and deleted at once |
 | The same write through the host's unpinned entry (the plugin's) | refused, says how to pin | (one entry, pinned) |
-| `project-settings-update` naming another project; an unknown tool name | refused | refused, live, 0 calls |
+| `project-settings-update` naming another project; an unknown tool name | refused, live: project 999999999 mismatched pin 644556; both calls stopped at PreToolUse | refused, live, 0 calls |
+
+Claude's pinned user-scope connection was authenticated with `claude mcp login posthog`, which
+also works when an existing session's `/mcp` view shows only the plugin connection. The live
+check used the candidate hooks through session-only settings, with no hook bypass flag; the
+old installed AgentKeel plugin was disabled only for that test session to avoid running two
+guard versions. The test fixture and its task records were removed; no persistent host settings
+changed during acceptance. The two turns cost at most $0.34 in total.
 
 Not shown live: the stop report's message in the hosts' interactive views (`claude -p` and
 `codex exec` print no system messages), and `import` and `release` of these clones (the guard

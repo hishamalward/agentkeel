@@ -15,7 +15,8 @@ could have written:
   (enabledMcpjsonServers or enableAllProjectMcpServers, and not disabledMcpjsonServers), then the
   user's entry (~/.claude.json, mcpServers). `mcp__plugin_<plugin>_<server>__<tool>` is the
   plugin's own .mcp.json under its install paths (installed_plugins.json); installs that disagree
-  are no pin. A `${VAR}` in a header expands from the hook's environment, as the host expands it.
+  are no pin. A `${VAR}` in a header needs the variable in the hook environment. Use literal
+  project ids with the hardened launcher, which clears other environment variables.
 - Codex: [mcp_servers.<server>] in ~/.codex/config.toml: url, http_headers and env_http_headers
   (a header whose value is the name of an environment variable).
 A pin counts only for an entry whose URL is on posthog.com, and only when every pin the entry
@@ -49,16 +50,17 @@ def _json(path):
 
 
 def _expand(value, environ):
-    """${VAR} and ${VAR:-default} as the hosts expand them in a server entry."""
-    def one(m):
-        name, default = m.group(1), m.group(2)
-        return environ.get(name) if environ.get(name) is not None else (default or "")
-    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}", one, str(value))
+    """Expand only known variables; a cleared host variable cannot justify its default."""
+    pattern = r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}"
+    value = str(value)
+    if any(environ.get(m.group(1)) is None for m in re.finditer(pattern, value)):
+        return ""
+    return re.sub(pattern, lambda m: environ[m.group(1)], value)
 
 
 def _one(values):
-    values = {v for v in values if v}
-    return values.pop() if len(values) == 1 else None
+    values = set(values)
+    return values.pop() if len(values) == 1 and all(values) else None
 
 
 def _pin_of(url, headers, environ):
@@ -70,7 +72,7 @@ def _pin_of(url, headers, environ):
         return None
     items = headers.items() if isinstance(headers, dict) else (headers or [])
     pins = [_expand(value, environ).strip() for key, value in items if str(key).lower() == HEADER]
-    pins += [v.strip() for v in parse_qs(parts.query).get(QUERY) or []]
+    pins += [v.strip() for v in parse_qs(parts.query, keep_blank_values=True).get(QUERY) or []]
     return _one(pins)
 
 

@@ -32,6 +32,39 @@ The task guard receives every tool (`*`) on both hosts. In `host.py`, file edits
 
 MCP calls go through the [service adapters](enforcement-design.md#part-3-mcp-calls-with-consequences). Servers without an adapter remain unsupported. Any other tool whose name suggests a write (`write_stdin` among them) is refused as a visible gap.
 
+## PostHog: one active connection, one known project
+
+PostHog tools often use the connection's active project without naming it in the call.
+To allow writes, AgentKeel needs three things: the project in `agentkeel.json`'s
+`mcp.posthog.targets`, a connection pinned to that project, and the task's required permission
+(`remote-write`, or `publish` for actions that publish). A login alone grants none of these.
+This explains the existing target rule; it adds no new permission.
+
+Use PostHog's supported `x-posthog-project-id` header with a literal project ID. Keep the
+normal server URL, `https://mcp.posthog.com/mcp`. See PostHog's
+[pinning options](https://posthog.com/docs/model-context-protocol/faq#advanced-configuration).
+Pin to the project this repository uses, not to a hard-coded AgentKeel default. Prefer a
+repository-scoped connection when different repositories use different PostHog projects.
+User scope is suitable when the same project is intentionally used across your checkouts.
+
+On Claude Code, inspect the existing entry with `claude mcp get posthog` before adding one.
+Authenticate it with `claude mcp login posthog`; browser consent is the human step. Start a
+fresh session after changing a pin. Claude's documented
+[connection precedence](https://code.claude.com/docs/en/mcp#scope-hierarchy-and-precedence)
+gives an explicit server priority over a plugin server at the same endpoint. The PostHog
+plugin can stay installed for its skills. Confirm that only the intended connection is
+active; do not leave two competing connections or edit the plugin cache to remove its server.
+Using a query-string pin changes the endpoint, so prefer the header when overriding the
+plugin's connection.
+
+Check the active project's identity before a write. For acceptance, use one disposable write,
+delete only what that test created, and verify a foreign-project call is refused. Keep host
+authentication, connection targeting and task permissions separate when diagnosing a refusal.
+
+`task.py init` currently reports AgentKeel installation and hook trust, but does not configure
+MCP connections or check their project pins. Follow this setup explicitly; an `init` success
+does not mean PostHog writes are ready.
+
 ## What it means for agents
 
 - **One process, two ids.** When one agent runs inside the other (Codex started from a Claude Code shell), both session variables are set. `task.py` takes the variable of the nearest agent process above it; `AGENTKEEL_SESSION_ID` overrides both. The guards never guess: they read `session_id` from the payload.

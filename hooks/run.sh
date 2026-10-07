@@ -29,7 +29,7 @@ if [ -z "$py" ]; then
 fi
 [ -n "$py" ] || { echo "agentkeel: no Python 3.10 or later found; run task.py init with one" >&2; exit 0; }
 keep() { eval "v=\${$1+set}"; [ "$v" = set ] && eval "printf '%s\n' \"$1=\$$1\""; }
-env_args=$(for name in HOME AGENTKEEL_HOME AGENTKEEL_SCRATCH AGENTKEEL_GH CLAUDE_PROJECT_DIR \
+env_args=$(for name in HOME AGENTKEEL_HOME AGENTKEEL_SCRATCH AGENTKEEL_GH CLAUDE_PROJECT_DIR CLAUDE_CONFIG_DIR CODEX_HOME \
     CLAUDE_PLUGIN_ROOT PLUGIN_ROOT CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID GH_TOKEN GITHUB_TOKEN GH_HOST; do keep $name; done)
 case "$hook" in
   *.sh) set -- /bin/bash "$here/$hook" "$@" ;;
