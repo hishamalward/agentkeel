@@ -15,20 +15,20 @@ class Adapters(RepoCase):
         self.hosthome = os.path.join(self.tmp, "hosthome")
         os.makedirs(os.path.join(self.hosthome, ".claude", "plugins"))
         os.makedirs(os.path.join(self.hosthome, ".codex"))
-        self.env.update({"HOME": self.hosthome, "CODEX_HOME": os.path.join(self.hosthome, ".codex")})
-        self.env.pop("CLAUDE_CONFIG_DIR", None)
+        self.env.update({"HOME": self.hosthome, "CODEX_HOME": os.path.join(self.hosthome, ".codex"),
+                         "CLAUDE_PROJECT_DIR": self.repo, "CLAUDE_CONFIG_DIR": ""})
 
-    def claude_servers(self, servers, scope="user"):
+    def claude_servers(self, servers, scope="user", approved=()):
         """A Claude Code entry set: user scope in ~/.claude.json, the project's local scope there, or
-        the project's own .mcp.json."""
+        the project's own .mcp.json (used by the host only for the servers the human approved)."""
         path = os.path.join(self.hosthome, ".claude.json")
+        data = json.load(open(path)) if os.path.exists(path) else {}
         if scope == "project":
-            path = os.path.join(self.repo, ".mcp.json")
-            data = {}
-        else:
-            data = json.load(open(path)) if os.path.exists(path) else {}
-        if scope == "local":
-            data.setdefault("projects", {})[self.repo] = {"mcpServers": servers}
+            with open(os.path.join(self.repo, ".mcp.json"), "w") as fh:
+                json.dump({"mcpServers": servers}, fh)
+            data.setdefault("projects", {}).setdefault(self.repo, {})["enabledMcpjsonServers"] = list(approved)
+        elif scope == "local":
+            data.setdefault("projects", {}).setdefault(self.repo, {})["mcpServers"] = servers
         else:
             data["mcpServers"] = servers
         with open(path, "w") as fh:
@@ -69,7 +69,6 @@ class Adapters(RepoCase):
                  ("mcp__plugin_posthog_posthog__exec", {"command": "search project-update"}),
                  ("mcp__plugin_posthog_posthog__exec", {"command": 'call execute-sql {"query": "select 1"}'}),
                  ("mcp__plugin_posthog_posthog__exec", {"command": 'call insight-get {"id": 4}'}),
-                 ("mcp__plugin_posthog_posthog__exec", {"command": "switch 999"}),
                  ("mcp__plugin_sentry_sentry__search_issues", {"organizationSlug": "other-org"}),
                  ("mcp__plugin_sentry_sentry__execute_sentry_tool", {"name": "get_alert_rule", "arguments": {}}),
                  ("mcp__dfs-mcp__api_request", {"method": "GET", "path": "/v3/appendix/user_data"}),
@@ -236,19 +235,49 @@ class Adapters(RepoCase):
         self.claude_plugin("posthog", {"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp",
                                                    "headers": {"X-PostHog-Project-Id": "222"}}})
         self.refused("mcp__plugin_posthog_posthog__exec", write, "pinned to project '222'")
-        # a user-scope entry pinned by the URL query; the same name in the project's .mcp.json wins
+        # a user-scope entry pinned by the URL query
         self.claude_servers({"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp?project_id=111"}})
         self.ok("mcp__posthog__exec", write)
+        # the project's own .mcp.json counts only once the human approved that server for the project
         self.claude_servers({"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp"}}, scope="project")
+        self.ok("mcp__posthog__exec", write)
+        self.claude_servers({"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp"}}, scope="project",
+                            approved=("posthog",))
         self.refused("mcp__posthog__exec", write, "is not pinned")
-        # a pin on a URL that is not PostHog's is no pin
+        # and the session cannot write it: it is a protected configuration file
+        code, err = self.hook(self.write(".mcp.json", content="{}"))
+        self.assertEqual(code, 2); self.assertIn(".mcp.json", err)
+        # the host's project directory keys the local scope, not the hook's cwd
         self.claude_servers({"posthog": {"type": "http", "url": "https://proxy.example.com/mcp",
                                          "headers": {"x-posthog-project-id": "111"}}}, scope="local")
+        self.refused("mcp__posthog__exec", write, "is not pinned")  # a pin on a URL that is not PostHog's
+        code, err = self.hook({"tool_name": "mcp__posthog__exec", "cwd": os.path.join(self.repo, "src"),
+                               "session_id": SESSION, "tool_input": write})
+        self.assertEqual(code, 2); self.assertIn("is not pinned", err)
+        # two pins that disagree are no pin; a torn ~/.claude.json is no pin
+        self.claude_servers({"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp?project_id=222",
+                                         "headers": {"X-PostHog-Project-Id": "111"}}}, scope="local")
         self.refused("mcp__posthog__exec", write, "is not pinned")
-        # reads pass unpinned, and the explicit project tool is still held to its own id
+        with open(os.path.join(self.hosthome, ".claude.json"), "a") as fh:
+            fh.write("{")
+        self.refused("mcp__posthog__exec", write, "is not pinned")
+        # reads pass unpinned; the explicit project tool is held to its own id, and to the pin
         self.ok("mcp__plugin_posthog_posthog__exec", {"command": 'call insight-get {"id": 4}'})
         self.refused("mcp__plugin_posthog_posthog__exec",
                      {"command": 'call project-settings-update {"id": 222, "autocapture_opt_out": true}'}, "targets '222'")
+        self.claude_plugin("posthog", {"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp",
+                                                   "headers": {"x-posthog-project-id": "222"}}})
+        self.refused("mcp__plugin_posthog_posthog__exec",
+                     {"command": 'call project-settings-update {"id": 111, "autocapture_opt_out": true}'}, "pinned to project '222'")
+        # switching the active project is a write to the project it names
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": "switch 999"}, "pinned to project '222'")
+        self.claude_plugin("posthog", {"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp"}})
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": "switch 999"}, "targets '999'")
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": 'call switch-project {"projectId": 999}'}, "targets '999'")
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": 'call switch-organization {"organizationId": "o1"}'}, "targets 'o1'")
+        self.ok("mcp__plugin_posthog_posthog__exec", {"command": "switch 111"})
+        self.declare(allow=("review",))
+        self.refused("mcp__plugin_posthog_posthog__exec", {"command": "switch 111"}, "'remote-write' permission")
 
     def test_a_codex_posthog_connection_is_read_from_config_toml(self):
         import sys

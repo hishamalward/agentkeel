@@ -42,7 +42,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agentkeel_core import checks, evidence, gitops, host, mcp, mcp_connection, pages, patch as patchmod, record, shell  # noqa: E402
 
-CONFIG_NAMES = ("agentkeel.json",)
+CONFIG_NAMES = ("agentkeel.json", ".mcp.json")  # .mcp.json: a project MCP entry the guard may read as a pin
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
                 (".codex", "hooks.json"), (".codex", "config.toml"), (".codex", "hooks"))
 NPX = {"npx", "bunx", "pnpx"}
@@ -634,12 +634,12 @@ def judge_mcp(ev, cwd, rec, payload, environ):
     if not call:
         return  # no adapter for this server: unsupported, and reported as such by init
     call.args = ev.args
-    pinned = None
-    if call.service == "posthog":
+
+    def pinned():
         try:
-            pinned = mcp_connection.pinned_project(call.server, evidence.host_of(payload), cwd, environ)
+            return mcp_connection.pinned_project(call.server, evidence.host_of(payload), cwd, environ)
         except Exception:
-            pinned = None  # unreadable configuration is "not pinned", and the refusal says how to pin
+            return None  # unreadable configuration is "not pinned", and the refusal says how to pin
     reason = mcp.judge(call, rec, pol_mcp, pinned)
     if reason:
         raise Block(reason)

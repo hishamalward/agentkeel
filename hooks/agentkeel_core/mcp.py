@@ -21,6 +21,8 @@ a class from a name's shape. It sorts a call into a class:
 agentkeel.json, for example:
   "mcp": {"revenuecat": {"targets": ["proj1a2b3c"]}, "posthog": {"targets": ["12345"]},
           "sentry": {"targets": ["my-org"]}, "dataforseo": {}}
+`switch <id>`, `switch-project` and `switch-organization` change the connection's active project:
+remote writes to the target they name (an organization is never a listed project).
 `remote-write` alone never publishes and never submits to a store. The adapter sorts by the
 operation's name, not by every argument: a generic update that can also turn something on through
 a field (PostHog's update-feature-flag with "active") stays a remote write.
@@ -118,16 +120,24 @@ def classify(call):
         words = str(a.get("command") or "").split()
         verb = words[0] if words else ""
         if verb in cat.POSTHOG_VERBS_READ:
-            return READ, None, verb  # switch only picks the project later calls use
+            return READ, None, verb
+        if verb == "switch":
+            # changes the connection's active project: a write to the project it names
+            return WRITE, (words[1] if len(words) > 1 else None), "switch"
         if verb == "call":
             rest = [w for w in words[1:] if w not in ("--json", "--confirm")]
             if not rest or rest[0].startswith("-"):
                 return UNKNOWN, None, "call"
             target_tool = rest[0]
             body = _json_tail(str(a.get("command")))
-            # Only this write's schema names the affected project. Other tools use
-            # the server's active project; an extra project_id is not a selector.
-            target = body.get("id") if target_tool == "project-settings-update" else None
+            # Only these schemas name the affected project. Other tools use the server's
+            # active project; an extra project_id is not a selector.
+            target = None
+            if target_tool == "project-settings-update":
+                target = body.get("id")
+            elif target_tool in ("switch-project", "switch-organization"):
+                target = body.get("projectId") or body.get("project_id") or body.get("id") \
+                    or body.get("organizationId") or body.get("organization_id")
             return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE, publish=cat.POSTHOG_PUBLISH),
                     None if target is None else str(target), target_tool)
         return UNKNOWN, None, verb or "exec"
@@ -149,7 +159,8 @@ def classify(call):
 
 def judge(call, rec, policy_mcp, pinned=None):
     """None when the call may run, else the refusal text. `pinned` is the project the host's
-    connection for this call is pinned to (mcp_connection.pinned_project), when it is."""
+    connection for this call is pinned to (mcp_connection.pinned_project), or a function that
+    reads it, called only when the decision needs it."""
     cls, target, what = classify(call)
     perms = set((rec or {}).get("permissions") or [])
     label = f"{call.service} `{what}`"
@@ -173,6 +184,11 @@ def judge(call, rec, policy_mcp, pinned=None):
     allowed = [str(t) for t in ((policy_mcp or {}).get(call.service) or {}).get("targets") or []]
     if "*" in allowed:
         return None
+    if call.service == "posthog" and callable(pinned):
+        pinned = pinned()
+    if call.service == "posthog" and pinned is not None and target is not None and str(target) != str(pinned):
+        return (f"{label} names project '{target}' while the host's `{call.server}` connection is pinned to "
+                f"project '{pinned}'; agentkeel cannot tell which one the server changes, so it is refused.")
     if target is None and call.service == "posthog":
         if pinned is not None and str(pinned) in allowed:
             return None

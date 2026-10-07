@@ -171,7 +171,7 @@ POSTHOG_READ = frozenset("""
     signals-scout-scratchpad-search skill-file-get skill-get skill-list
     subscriptions-deliveries-list subscriptions-deliveries-retrieve subscriptions-list
     subscriptions-retrieve survey-get survey-stats surveys-get-all surveys-global-stats
-    surveys-responses-list switch-organization switch-project usage-metrics-list
+    surveys-responses-list usage-metrics-list
     usage-metrics-retrieve user-get user-home-settings-get view-get view-list
     vision-alerts-events-list vision-alerts-get vision-alerts-list vision-observations-get
     vision-observations-list vision-observations-retrieve vision-observations-search
@@ -188,6 +188,7 @@ POSTHOG_READ = frozenset("""
 """.split())
 
 POSTHOG_WRITE = frozenset("""
+    switch-organization switch-project
     action-create action-delete action-update agent-feedback alert-create alert-delete
     alert-destinations-create alert-destinations-delete alert-simulate alert-update
     annotation-create annotation-delete annotations-partial-update batch-export-create
@@ -343,7 +344,8 @@ POSTHOG_PUBLISH = frozenset("""
     workflows-test-run workflows-update-schedule
 """.split())
 
-POSTHOG_VERBS_READ = frozenset({"help", "tools", "search", "info", "schema", "learn", "switch"})
+POSTHOG_VERBS_READ = frozenset({"help", "tools", "search", "info", "schema", "learn"})
+# `switch <id>` changes the connection's active project: a write whose target is that id (mcp.py)
 
 # DataForSEO: docs tools, and api_request paths sorted by their segments
 DATAFORSEO_READ = frozenset({"docs_index", "docs_list_sections", "docs_search"})
