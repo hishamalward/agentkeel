@@ -49,7 +49,8 @@ Set the repository variables your app needs (Settings, Secrets and variables, Va
 
 The template targets `main`; change both branch filters if your default branch has another name.
 It needs `contents: read` for checkout and `actions: read` for the main run's evidence lookup.
-The installer also copies `candidate.py`, `select_checks.py` and `pages.py` to `.github/agentkeel/`.
+Copy the CI helpers with the commands above; `task.py init` installs the managed instructions,
+not the CI workflow or its helpers.
 The standard PR workflow instruction comes from AgentKeel's managed `AGENTS.md` block.
 
 The workflow has four jobs:
