@@ -40,10 +40,9 @@ so run task.py from the main agent. An opened isolated session is bound automati
 **Docs** (agentkeel.json sets "docs": "html"): one authored page per document in flat docs/.
 Use a project canon, one state page per feature, references, audits and mockups.
 task.py new starts a page; task.py context reads it. Plan and progress go in Working.
-Before task.py finish, update the same state page's permanent Outcome section: intended outcome,
-delivered outcome with verification links, and meaningful differences or deferrals with reasons.
-Keep it brief and overwrite it as the feature evolves; link existing detail instead of copying it.
-Keep the approved boundary unchanged during closeout; put the summary outside it and Working.
+Before task.py finish, update the state page's permanent Outcome: intended outcome, delivered
+outcome with verification links, and meaningful differences or deferrals with reasons.
+Rewrite briefly in place, linking detail; keep it outside Working and the unchanged approved boundary.
 Then task.py finish removes Working before main moves; unfinished outcomes stay in Remaining scope.
 No decision log, Markdown twin or copied facts: link to the current owner.
 A gated move names the full checked SHA, alone in its call: git merge --ff-only <full-sha>.
