@@ -282,9 +282,14 @@ the measured results on both hosts are in [enforcement design](docs/enforcement-
 | [Hook payloads](docs/hook-payloads.md) | read the captured JSON that the hooks parse |
 | [Enforcement design](docs/enforcement-design.md) | see what each host and AgentKeel enforce: task clones, the session sandbox, the MCP adapters, and the measured limits |
 
-Related work: [agent-slots](https://github.com/hishamalward/agent-slots) isolates the database,
-ports and queues of several agents on one machine. AgentKeel is the process side; agent-slots is
-the resource side.
+## Works with AgentSlots
+
+[AgentSlots](https://github.com/hishamalward/agentslots) manages local workspaces, databases,
+ports, queue schemas, simulator ownership and cleanup. AgentKeel manages task scope, permissions,
+reviews and shipping checks. Use them together to keep each task within its scope and give it
+separate runtime resources. Neither tool grants access beyond the host's sandbox.
+See AgentSlots' [setup guide](https://github.com/hishamalward/agentslots/blob/main/QUICKSTART.md)
+for installation, host access and attaching runtime resources to an AgentKeel clone.
 
 ## Test
 

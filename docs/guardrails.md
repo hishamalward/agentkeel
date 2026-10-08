@@ -109,4 +109,4 @@ secret reads and shell writes. Those are tool design responsibilities, not hook 
 
 ## Isolation is a different problem
 
-A git worktree isolates files and nothing else. The database, the ports, the job queue and the simulator stay shared, and two agents on one machine collide there first. [agent-slots](https://github.com/hishamalward/agent-slots) handles that: one number gives each agent a worktree, a database, two ports and a queue schema.
+A git worktree isolates files and nothing else. The database, the ports, the job queue and the simulator stay shared, and two agents on one machine collide there first. [AgentSlots](https://github.com/hishamalward/agentslots) handles that: one number gives each task a worktree, a database, two ports and a queue schema, with an exclusive simulator lock when needed.
