@@ -107,6 +107,18 @@ STATE = """
   or config that defines a value instead of copying the value.</p>
 </section>
 
+<section id="outcome">
+  <h2>Outcome</h2>
+  <dl>
+    <dt>Intended outcome</dt><dd>The plan's goal in one sentence; link the agreed boundary when present.</dd>
+    <dt>Delivered outcome</dt><dd>Not built yet. Before merge, state what works and link behavior and verification.</dd>
+    <dt>Differences and why</dt><dd>Meaningful changes or deferrals and their reasons, or no material differences.
+    Link unfinished outcomes in Remaining scope.</dd>
+  </dl>
+  <p>Update in place before removing Working; keep this brief, outside the approved boundary,
+  and link existing detail instead of copying it. Do not keep a phase-by-phase log.</p>
+</section>
+
 <section id="remaining">
   <h2>Remaining scope</h2>
   <p>Outstanding outcomes and what they depend on. Update in place as phases land.</p>
@@ -125,7 +137,8 @@ STATE = """
 <section data-keel-transient="working" id="working">
   <h2>Working</h2>
   <p>This phase only: the plan as a table (task, files, check), progress, next action.
-  Overwrite it; never append a log. <code>task.py finish</code> removes it before main moves.</p>
+  Overwrite it; never append a log. Update Outcome, State now, Remaining scope and Verification
+  before <code>task.py finish</code> removes this section. It does not summarize the content.</p>
 </section>
 """
 

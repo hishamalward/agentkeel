@@ -32,6 +32,25 @@ The date is the family's creation date and never changes; related files reuse it
 - A **Working** section, `<section data-keel-transient="working">`, holds this phase's plan table, progress and next action. It is overwritten, never appended, and removed before `main` moves (`task.py finish <page>`).
 - A **boundary**, `<section data-keel-boundary>`, holds what the human agreed: outcome, constraints, acceptance checks, and for a large task its `data-keel-changes` and `data-keel-must-not` path lists. At most one per page; static HTML only.
 
+### Before merge: preserve the outcome
+
+This completes the Working-section removal rule: before `task.py finish`, the agent updates
+the same state page's permanent **Outcome** section with:
+
+- **Intended outcome:** a short summary of the plan's goal; link the agreed boundary when present.
+- **Delivered outcome:** what actually works, with links to behavior and verification.
+- **Differences and why:** meaningful changes or deferrals and their reasons; link outstanding
+  work in Remaining scope. Say when there are no material differences.
+
+Keep the summary outside Working and the approved boundary. Do not rewrite the approved
+boundary to match the implementation; a genuine scope change still follows boundary approval.
+Rewrite the summary in place as phases land, without a progress log or copied task checklist.
+Update State now, Remaining scope and Verification, then remove Working. The page remains the
+feature's current record; a separate audit holds review findings, not duplicate progress.
+
+The agent writes this summary. `task.py finish` only removes Working; it does not summarize or
+transfer content. No new gate checks the summary's presence or accuracy.
+
 ### Approval of a boundary
 
 The human runs `task.py approve <feature|page>` in their own terminal. It writes `<meta name="keel-approval" content="sha256:<digest> by <name> on <date>">` in the head and keeps a copy of the approved boundary in `AGENTKEEL_HOME/approvals/`. The digest covers the page's file name and the boundary's HTML source with line endings normalised, so changed words, link targets or list structure all need approval again; edits elsewhere on the page do not.
