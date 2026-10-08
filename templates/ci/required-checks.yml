@@ -1,5 +1,5 @@
 # agentkeel required checks. Copy to .github/workflows/agentkeel-checks.yml,
-# templates/ci/select_checks.py to .github/agentkeel/select_checks.py and
+# templates/ci/{candidate,select_checks}.py to .github/agentkeel/ and
 # hooks/agentkeel_core/pages.py to .github/agentkeel/pages.py, then follow agentkeel's required
 # checks page: the protected branch (or the agent push gate) requires the `agentkeel-required`
 # check, and the deploy waits for it. Set the repository variable AGENTKEEL_TEST_COMMAND (default: npm test)
@@ -8,63 +8,81 @@ name: agentkeel-checks
 
 on:
   push:
+    branches: [main]  # change this if the repository's default branch has a different name
   pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   select:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       app: ${{ steps.select.outputs.app }}
+      sha: ${{ steps.select.outputs.sha }}
+      base: ${{ steps.select.outputs.base }}
+      reuse: ${{ steps.select.outputs.reuse }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - id: select
-        # On a push to the default branch, judge every pushed commit (since `before`); elsewhere,
-        # judge the whole branch against the default branch.
+        name: Bind tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
-          python3 .github/agentkeel/select_checks.py
-          --base origin/${{ github.event.repository.default_branch }} --head ${{ github.sha }}
-          --since "${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && github.event.before || '' }}"
+          python3 .github/agentkeel/candidate.py
           >> "$GITHUB_OUTPUT"
 
   app-tests:
     needs: select
-    if: needs.select.outputs.app == 'true'
+    if: needs.select.outputs.app == 'true' && needs.select.outputs.reuse != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.select.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: ${{ vars.AGENTKEEL_SETUP_COMMAND || 'npm ci' }}
       - run: ${{ vars.AGENTKEEL_TEST_COMMAND || 'npm test' }}
 
-  # The docs check on the candidate, docs-only changes included, against what it replaces on the
-  # default branch: the commit before a push to it, the base of a pull request, or the default
-  # branch itself for a push to another branch. It passes untouched where agentkeel.json does not
-  # set "docs": "html". No path filter: Railway ignores a skipped workflow.
+  # This cheap check also runs on main, against its previous tip. App tests may reuse the PR run.
   docs:
+    needs: select
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.select.outputs.sha }}
       - run: >-
-          python3 .github/agentkeel/pages.py check --rev ${{ github.sha }}
-          --base "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
-          || (github.ref_name == github.event.repository.default_branch && github.event.before)
-          || format('origin/{0}', github.event.repository.default_branch) }}"
+          python3 .github/agentkeel/pages.py check --rev ${{ needs.select.outputs.sha }}
+          --base ${{ needs.select.outputs.base }}
 
   # The one check the protected branch requires. It always reports, so a docs-only change
   # (app tests skipped) is green, and a failed or cancelled test or docs job is red.
   agentkeel-required:
     needs: [select, app-tests, docs]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     steps:
       - run: |
           echo "select: ${{ needs.select.result }}, app-tests: ${{ needs.app-tests.result }}, docs: ${{ needs.docs.result }}"
           test "${{ needs.select.result }}" = "success"
           test "${{ needs.docs.result }}" = "success"
-          case "${{ needs.app-tests.result }}" in success|skipped) ;; *) exit 1 ;; esac
+          if [ "${{ needs.select.outputs.app }}" = true ] && [ "${{ needs.select.outputs.reuse }}" != true ]; then
+            test "${{ needs.app-tests.result }}" = success
+          else
+            test "${{ needs.app-tests.result }}" = skipped
+          fi

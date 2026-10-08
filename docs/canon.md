@@ -118,7 +118,7 @@ once passed guards that read only Claude tool names. Detail: [hosts](hosts.md).
 
 ### Tests before main is a required CI check
 
-One check, `agentkeel-required`, always reports. It runs the app tests (skipped for a docs-only change) and the docs check on the candidate commit, and the deploy waits for it. *Why:* a hook guards the agent, not the branch, and CI after a push to `main` reports after the deploy started. Detail: [required checks](required-checks.md).
+Ordinary branch pushes are backups. Ready PRs run the relevant tests and docs check on their exact head, which must contain fetched current main. Ship only by fast-forwarding the exact tested SHA after rechecking main. One check, `agentkeel-required`, reports for ready PRs and main pushes, and the deploy waits for it. Main reruns the docs check and reuses successful same-SHA PR app-test evidence from the expected workflow and repository; missing or uncertain evidence runs the needed app tests on main. Docs-only changes skip app tests. The managed `AGENTS.md` block carries this workflow instruction. *Why:* branch backups need no test run, while a ready candidate needs evidence before main moves and deployment needs a check that fails closed. Detail: [required checks](required-checks.md).
 
 ### Documentation has one current owner per fact
 

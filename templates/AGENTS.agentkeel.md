@@ -34,9 +34,10 @@ so run task.py from the main agent. An opened isolated session is bound automati
 - G2 Plan, AI, once: one plan reviewer and one scope auditor. Claude prompts use [plan-gate]
   and the page path; Codex dispatch task_name starts with plan_gate.
 - G3 Review, AI: each task, then the whole branch, one round per scope.
-- G4 Ship, human decides: green tests on the candidate, required checks before main moves.
-  Already granted merge/push permission needs no repeated question.
-
+- G4 Ship, human decides: use one PR per change, with a short summary, checks and any state-page link.
+  Backup pushes run no CI; ready PRs test each new head. Run focused local tests while developing.
+  Fetch main before ready/merge; rebase if needed, test the new head, then fast-forward its full SHA.
+  Existing merge/push grants need no repeated question; opening a PR grants no shipping permission.
 **Docs** (agentkeel.json sets "docs": "html"): one authored page per document in flat docs/.
 Use a project canon, one state page per feature, references, audits and mockups.
 task.py new starts a page; task.py context reads it. Plan and progress go in Working.
@@ -46,7 +47,6 @@ Rewrite briefly in place, linking detail; keep it outside Working and the unchan
 Then task.py finish removes Working before main moves; unfinished outcomes stay in Remaining scope.
 No decision log, Markdown twin or copied facts: link to the current owner.
 A gated move names the full checked SHA, alone in its call: git merge --ff-only <full-sha>.
-
 **Guards** refuse supported writes outside the task, protected-branch edits, commits without
 paths, unauthorized shipping/builds/paid jobs, edits to hook config or task state, and a third
 plan-gate dispatch. Guarded MCP calls need their permission and target. Destructive git and

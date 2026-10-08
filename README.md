@@ -48,6 +48,9 @@ on the agent remembering them. The [limits](#limits) explain what the hooks cann
   and a local move to a known commit, wait for the docs check; CI runs it for everyone. A commit
   made on `main`, a rebase or a non-fast-forward merge is checked later, at the push and in CI
   ([limits](docs/html-records.md#current-limitations-and-open-decisions)).
+- **Ready PRs run CI.** With the [required-checks template](docs/required-checks.md), branch
+  pushes back up work; ready PRs test the exact candidate. Main reuses matching successful PR
+  app tests, reruns the docs check and runs needed tests when evidence is unavailable.
 - **Loops have caps.** The hook refuses a third plan-gate dispatch. One review round per scope
   is an instruction, not a hook-enforced limit.
 - **What a task leaves behind is reported.** When a turn ends, the stop hook tells you which of
@@ -289,11 +292,13 @@ the resource side.
 python3 -m unittest discover -s tests
 ```
 
-CI runs the suite on macOS and Linux, on Python 3.10 and 3.13, plus each hook's `--selftest`.
+AgentKeel's own CI runs the suite on macOS and Linux, on Python 3.10 and 3.13, plus each hook's
+`--selftest`, for ready PRs and `v*` tags. Ordinary branch pushes run no CI. This is separate
+from the required-checks template for adopting applications.
 
 Every version field (both plugin manifests, the marketplace entry and the plugin paths in this
 README) states one product version. `python3 release_check.py --tag vX.Y.Z` refuses a release
-whose fields disagree with each other or with the tag, and CI runs it on every push and tag.
+whose fields disagree with each other or with the tag, and CI runs it on ready PRs and version tags.
 
 ## License
 

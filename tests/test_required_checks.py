@@ -86,12 +86,18 @@ class DocsJob(unittest.TestCase):
         with open(WORKFLOW) as fh:
             wf = yaml.safe_load(fh)
         jobs = wf["jobs"]
-        self.assertNotIn("if", jobs["docs"])
+        self.assertEqual(jobs["docs"]["needs"], "select")
         self.assertIn("pages.py check --rev", jobs["docs"]["steps"][-1]["run"])
         self.assertIn("docs", jobs["agentkeel-required"]["needs"])
         self.assertIn('test "${{ needs.docs.result }}" = "success"', jobs["agentkeel-required"]["steps"][0]["run"])
         on = wf.get("on", wf.get(True))
         self.assertEqual(set(on), {"push", "pull_request"})
+        self.assertEqual(on["push"]["branches"], ["main"])
+        self.assertIn("ready_for_review", on["pull_request"]["types"])
+        self.assertIn("!github.event.pull_request.draft", jobs["select"]["if"])
+        self.assertEqual(jobs["select"]["steps"][0]["with"]["ref"],
+                         "${{ github.event.pull_request.head.sha || github.sha }}")
+        self.assertIn("needs.select.outputs.reuse", jobs["app-tests"]["if"])
         self.assertFalse(any(isinstance(v, dict) and ("paths" in v or "paths-ignore" in v) for v in on.values()))
 
 
