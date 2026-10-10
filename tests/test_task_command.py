@@ -24,9 +24,26 @@ class TaskCommand(RepoCase):
         out = self.task("start", "json-flag", "--size", "medium", "--allow", "implement,merge")
         self.assertEqual(out.returncode, 0, out.stderr)
         rec = self.record()
-        self.assertEqual((rec["task"], rec["size"], rec["session_id"]), ("json-flag", "medium", SESSION))
+        self.assertEqual((rec["task"], rec["size"], rec["session_id"]), ("json-flag", "small", SESSION))
+        self.assertIn("two sizes", out.stderr)  # medium is an alias of small since 0.9: the smaller tier wins
+        self.assertEqual(rec["kind"], "feature")
         self.assertEqual(rec["permissions"], ["implement", "merge"])
         self.assertEqual(rec["worktrees"], [self.repo])
+
+    def test_kind_and_deliverable_are_recorded_and_the_status_page_renders(self):
+        page = os.path.join(self.tmp, "report.html")
+        out = self.task("start", "bug-x", "--size", "small", "--kind", "fix", "--allow", "implement",
+                        "--deliverable", page)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        rec = self.record()
+        self.assertEqual((rec["kind"], rec["deliverable"], rec["fix"]), ("fix", page, {"cycles": 0, "edited": False}))
+        self.assertIn("kind fix", out.stdout)
+        out = self.task("status", "--html")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        path = out.stdout.split("agentkeel status page: ", 1)[1].strip()
+        text = open(path, encoding="utf-8").read()
+        self.assertIn("bug-x", text); self.assertIn("Fix guards", text); self.assertIn("not written yet", text)
+        self.assertIn("Guard modes", text)
 
     def test_shared_checkout_is_not_recorded_as_the_tasks_worktree(self):
         out = self.task("start", "x", "--size", "small", "--allow", "implement", cwd=self.primary)
@@ -80,7 +97,10 @@ class TaskCommand(RepoCase):
         self.assertEqual(self.task("show").returncode, 0)
         out = self.task("verify", "--", sys.executable, "-c", "raise SystemExit(3)")
         self.assertEqual(out.returncode, 3)
-        self.assertEqual(self.record()["evidence"], [])  # the hooks record results, not the command
+        ev = self.record()["evidence"]  # a failure is task.py's own to record; a pass is the hooks'
+        self.assertEqual([e["result"] for e in ev], ["failed"]); self.assertIn("exit 3", ev[0]["reason"])
+        self.assertEqual(self.task("verify", "--", sys.executable, "-c", "pass").returncode, 0)
+        self.assertEqual(len(self.record()["evidence"]), 1)
         self.assertEqual(self.task("end").returncode, 0)
         self.assertEqual(self.task("show").returncode, 1)
 
@@ -228,7 +248,7 @@ class Status(RepoCase):
         before = self.snapshot()
         out = self.task("status")
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("this session's task: x (small; implement)", out.stdout)
+        self.assertIn("this session's task: x (small, feature; implement)", out.stdout)
         self.assertRegex(out.stdout, rf"{self.repo}  branch feat/x  tip [0-9a-f]{{12}}  1 commit\(s\) not in main, "
                                      r"not merged, 1 changed or untracked file\(s\)")
         self.assertEqual(self.snapshot(), before)               # it changes nothing
@@ -592,7 +612,7 @@ class SharedInstructions(RepoCase):
         self.assertIn("created AGENTS.md with the agentkeel block", out)
         text = self.read()
         self.assertTrue(text.startswith("<!-- agentkeel:start -->\n<!-- agentkeel:sha256="))
-        self.assertIn('python3 "<task.py path>" start <task-id> --size <size> --allow <permissions>', text)
+        self.assertIn('python3 "<task.py path>" start <task-id> --size small|large --allow <permissions>', text)
         self.assertNotIn(".claude/hooks/task.py start", text)
         for name in ("CLAUDE.md", "CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")):
             self.assertFalse(os.path.exists(os.path.join(self.primary, name)))

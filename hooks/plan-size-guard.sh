@@ -68,6 +68,18 @@ $FILES
 EOF_FILES
 [ -n "$FILE" ] || exit 0
 
+MODE=$(printf '%s' "$INPUT" | python3 -c 'import json,sys,os
+sys.path.insert(0, sys.argv[1])
+from agentkeel_core import record
+try: p = json.load(sys.stdin)
+except Exception: p = {}
+print(record.guard_mode("plan_size", p.get("cwd") or os.getcwd()))' "$HOOKS_DIR" 2>/dev/null || echo block)
+[ "$MODE" = "off" ] && exit 0
+if [ "$MODE" = "warn" ]; then
+  python3 -c 'import json,sys; print(json.dumps({"systemMessage": "(warn mode) PLAN SIZE GUARD: the Working section of %s is %s lines; the limit is %s. Plans never carry code." % tuple(sys.argv[1:])}))' "$(basename "$FILE")" "$LINES" "$LIMIT"
+  exit 0
+fi
+
 cat >&2 <<MSG
 PLAN SIZE GUARD: the Working section of $(basename "$FILE") is now $LINES lines; the limit is $LIMIT.
 

@@ -25,8 +25,15 @@ on the agent remembering them. The [limits](#limits) explain what the hooks cann
 
 ## What it does
 
-- **One task record per session.** The agent states the task's size (how much process),
-  permissions (which actions) and worktrees (where). Size never grants a permission.
+- **One task record per session.** The agent states the task's size (`small` or `large`: how
+  much process), kind (what it is), permissions (which actions) and worktrees (where). Size and
+  kind never grant a permission.
+- **Fixes start from a failing check.** A task declared `--kind fix` edits no code until the
+  record holds a failed check and a one-line cause. The fourth edit-then-fail cycle waits for
+  you (`task.py reopen`). The `debugging` skill is the method.
+- **Each guard has a mode.** `agentkeel.json` sets every guard to `block`, `warn` or `off`.
+- **A status page.** `task.py status --html` writes one page: the task, its fix-guard state, the
+  guard modes, its worktrees, the checks on record and every other task record.
 - **Bounded writes.** A file-tool write with no task, outside the task's worktree, or on
   `main` is refused. Every code task uses its own worktree or isolated task clone.
 - **Shipping is a permission.** Moving `main` needs `merge`. Any remote push needs `push`.
@@ -59,9 +66,9 @@ on the agent remembering them. The [limits](#limits) explain what the hooks cann
 - **Your standing preferences, in every session.** `~/.agentkeel/profile.md` is printed at
   session start in each opted-in repository, on both hosts. It is plain text: it grants no
   permission.
-- **One review-page skill for both hosts.** `review-page` writes a present-state review page: the
-  result, the ranked findings with their evidence, what was verified, the limits and the next
-  steps.
+- **Two skills for both hosts.** `review-page` writes a present-state review page: the result,
+  the ranked findings with their evidence, what was verified, the limits and the next steps.
+  `debugging` is the method for a fix: cause first, one change at a time.
 
 ## Install
 
@@ -103,8 +110,8 @@ Installing the plugin makes AgentKeel available; opting a repository in turns it
 
 ```bash
 cd path/to/your-repo
-python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py init   # Claude Code
-python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py init    # Codex
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py init    # Codex
 ```
 
 `init`:
@@ -152,8 +159,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.8.0/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it. The same message says where the session is (the
 checkout, its branch, its task) and lists the repository's other worktrees with the task that
 holds each.
@@ -198,7 +205,7 @@ the session-start message.
 
 ```bash
 # 1. In the shared checkout: declare the task. The hooks read this record on every tool call.
-python3 "$TASK" start json-flag --size small --allow implement,merge
+python3 "$TASK" start json-flag --size small --kind feature --allow implement,merge
 
 # 2. Make the task's own worktree. It is recorded as the task's automatically.
 git worktree add ../myrepo-json-flag -b feat/json-flag
@@ -227,6 +234,13 @@ What the hooks refuse on the way, and why:
 | `git commit -m x` with no paths | `refusing a commit that does not name its paths` |
 | `git push origin feat/json-flag` | `a push to 'feat/json-flag' needs the 'push' permission; task 'json-flag' has implement, merge` |
 
+`--kind` says what the task is (`feature`, `fix`, `review`, `docs`, `chore`) and grants nothing.
+A bug fix declares `--kind fix`: before its first code edit it runs `python3 "$TASK" verify -- <the
+failing test>` (a non-zero exit is recorded as a failed check) and `python3 "$TASK" cause "X causes Y
+because Z"`. Add `--deliverable <path>` to name a file the task must leave; the stop report says
+when it is missing. `python3 "$TASK" status --html --open` shows the whole record on one page.
+`medium` is accepted for one release as an alias of `small`.
+
 The agent ends the task after the local merge and reports that nothing was pushed. On Codex,
 `verify` runs the command but cannot record a trusted success; use the
 [required CI check](docs/required-checks.md) for shipping evidence.
@@ -247,6 +261,13 @@ python3 "$TASK" release json-flag      # refused while anything in the clone is 
 The session's boundary comes from the command line (`claude --settings <file>`, or `codex -c ...`),
 so no user or project settings change, and two open tasks never share a boundary. The design and
 the measured results on both hosts are in [enforcement design](docs/enforcement-design.md).
+
+## What 0.9 changes
+
+Two sizes (`small`, `large`; `medium` is a one-release alias of `small`), a task kind, the fix
+guards and the `debugging` skill, a mode for each guard, a declared deliverable, the status page,
+and an MCP catalog kept as data. The `review-page` skill no longer sets a page style: findings,
+reviews and progress are HTML pages that look the way the content needs.
 
 ## Limits
 
@@ -274,8 +295,8 @@ the measured results on both hosts are in [enforcement design](docs/enforcement-
 | Page | Read it to |
 |---|---|
 | [Project canon](docs/canon.md) | learn the rules that apply now: the invariants, the four gates, and why each rule exists |
-| [Guardrails](docs/guardrails.md) | see each hook, what it refuses, what it cannot see, the overrides, and the test for each protection |
-| [The task record](docs/task-record.md) | declare a task: sizes, permissions, worktrees, scratch, `agentkeel.json` |
+| [Guardrails](docs/guardrails.md) | see each hook, what it refuses, the guard modes, the fix guards, what it cannot see, the overrides, and the test for each protection |
+| [The task record](docs/task-record.md) | declare a task: sizes, kinds, permissions, worktrees, scratch, `agentkeel.json` |
 | [HTML records](docs/html-records.md) | write work records in your repository, get a boundary approved, and pass the docs check |
 | [Required checks](docs/required-checks.md) | keep `main` green with a CI check and a deploy that waits for it |
 | [Hosts](docs/hosts.md) | see the Claude Code and Codex facts and the live results |

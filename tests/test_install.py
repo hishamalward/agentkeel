@@ -183,7 +183,7 @@ class InstallContract(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("ak_install_c", INSTALL)
         mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
         core = os.path.join(os.path.dirname(INSTALL), "hooks", "agentkeel_core")
-        self.assertEqual(sorted(mod.CORE_FILES), sorted(f for f in os.listdir(core) if f.endswith(".py")))
+        self.assertEqual(sorted(mod.CORE_FILES), sorted(f for f in os.listdir(core) if f.endswith((".py", ".json"))))
         hooks = os.path.join(os.path.dirname(INSTALL), "hooks")
         shipped = set(mod.HOOK_FILES) | {"session-start.py", "run.sh"}  # these ship only with the plugin
         self.assertEqual(shipped, {f for f in os.listdir(hooks) if f.endswith((".py", ".sh"))})

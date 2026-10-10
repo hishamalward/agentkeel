@@ -31,7 +31,7 @@ The reason is not cost. A control that re-runs on its own output feeds itself: l
 
 ### The pricing rule
 
-Process is chosen once, by size, and size buys no permissions. When in doubt, pick the smaller size: moving up is cheap. A task never grows on its own. If the work is bigger than declared, stop and say so; the human re-scopes.
+Process is chosen once, by size (small or large), and size buys no permissions. When in doubt, pick the smaller size: moving up is cheap. A task never grows on its own. If the work is bigger than declared, stop and say so; the human re-scopes.
 
 ## Gates
 

@@ -70,7 +70,7 @@ def decide(payload, environ=os.environ):
         plan = f"task:{rec['task']}" if rec else f"session:{payload.get('session_id')}"
         path = state_path(environ)
         with record.locked(path):
-            return count(path, f"{repo_key(payload, environ)}::{plan}", plan)
+            return count(path, f"{repo_key(payload, environ)}::{plan}", plan, cwd)
     prompt = ev.prompt
     if not prompt:
         return 0
@@ -86,10 +86,10 @@ def decide(payload, environ=os.environ):
     path = state_path(environ)
     key = f"{repo_key(payload, environ)}::{plan}"
     with record.locked(path):
-        return count(path, key, plan)
+        return count(path, key, plan, cwd)
 
 
-def count(path, key, plan):
+def count(path, key, plan, cwd=None):
     try:
         with open(path) as fh:
             state = json.load(fh)
@@ -97,7 +97,7 @@ def count(path, key, plan):
         state = {}
     used = int(state.get(key, 0))
     if used >= LIMIT:
-        sys.stderr.write(
+        return record.soften("plan_gate", (
             f"PLAN GATE GUARD: refusing a further gate dispatch for {plan}.\n\n"
             f"That plan has already been gated ({used} gate agents recorded; the allowance is {LIMIT}:\n"
             "one round of a plan reviewer plus a scope auditor).\n\n"
@@ -106,8 +106,7 @@ def count(path, key, plan):
             "is the net for whatever the single gate missed.\n\n"
             "If this is genuinely a plan that was never gated, the counter is wrong: tell the human,\n"
             f"who can remove the \"{key}\" key from {path}.\n"
-        )
-        return 2
+        ), cwd)
     state[key] = used + 1
     record.atomic_write_json(path, state)
     return 0

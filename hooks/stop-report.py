@@ -83,6 +83,12 @@ def report(session_id, environ=os.environ):
     for w in rec.get("worktrees") or []:
         if os.path.isdir(w) and not (opened and w == opened.get("clone")):
             lines.append(worktree_line(w))
+    d = rec.get("deliverable")
+    if d:
+        if not os.path.exists(d):
+            lines.append(f"  deliverable {d}: declared, not written yet")
+        elif os.path.getmtime(d) < int(rec.get("declared_at") or 0):
+            lines.append(f"  deliverable {d}: exists, but unchanged since the task was declared")
     if not lines:
         return None
     return (f"agentkeel: task '{rec.get('task')}' still holds (a report only; nothing was removed):\n"

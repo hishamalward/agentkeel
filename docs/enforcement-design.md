@@ -339,7 +339,7 @@ tool name and the arguments, never the tool's description or annotations.
 - **Classes**: read (passes), remote-write (creates, updates, archives, deletes, resolves, changes
   settings), paid (bills per call), publish (makes something live for end users at once or sends to
   them), store (changes or submits products in the app stores). Each adapter lists its operations by exact name
-  (`hooks/agentkeel_core/mcp_catalog.py`, taken from each server's own catalog). A name it does not
+  (`hooks/agentkeel_core/mcp_catalog.json`, taken from each server's own catalog; adding a service or an operation is a json edit, `mcp_catalog.py` only loads it). A name it does not
   list is refused, however it is spelled: `get_` or `list` in a name does not make it a read.
 - **Permissions keep their meaning.** Remote writes need `remote-write`, scoped to
   a service and a target. Paid calls need `paid-job`. Publishing needs `publish`, and the store

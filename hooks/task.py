@@ -12,7 +12,10 @@
   task.py release <task-id> [--discard]
                                    HUMAN ONLY: delete the clone, scratch and records once nothing in the
                                    clone is unpreserved (--discard deletes it anyway)
-  task.py start <task-id> --size small|medium|large --allow <permissions>
+  task.py start <task-id> --size small|large --allow <permissions> [--kind fix|feature|review|docs|chore] [--deliverable <page>]
+  task.py cause "X causes Y because Z"       the one-line cause a fix task records before its first code edit
+  task.py reopen <task-id>                    human only: after three failed fixes, re-open the loop
+  task.py status --html [--open]              the status page, in the task scratch folder
                 [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
   task.py show                     the record for this session
   task.py status [--json]          derived facts, read-only, with or without a session: this task's
@@ -53,10 +56,11 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import gitops, hostcheck, instructions, isolation, pages, record, starters  # noqa: E402
+from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, pages, record, starters  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -84,6 +88,10 @@ def start(args, environ):
     if not perms or unknown:
         return fail(f"--allow needs one or more of: {', '.join(record.PERMISSIONS)}"
                     + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
+    size = record.SIZE_ALIASES.get(args.size, args.size)
+    if size != args.size:
+        sys.stderr.write(f"agentkeel: size '{args.size}' is '{size}' now: two sizes since 0.9, small or large.\n")
+    args.size = size
     cwd = os.getcwd()
     top = gitops.toplevel(cwd)
     shared = bool(top) and gitops.is_primary(top)
@@ -105,11 +113,17 @@ def start(args, environ):
 
     prev = record.load(session, environ)
     now = int(time.time())
-    rec = {"version": 1, "task": args.task, "session_id": session, "size": args.size,
+    kind = getattr(args, "kind", None) or "feature"
+    deliverable = realpath(args.deliverable, cwd) if getattr(args, "deliverable", None) else None
+    rec = {"version": 1, "task": args.task, "session_id": session, "size": args.size, "kind": kind,
            "permissions": sorted(set(perms)), "worktrees": [], "write_roots": [],
            "resources": sorted(set(args.resource or [])), "declared_at": now, "evidence": [],
-           "history": []}
+           "history": [], "deliverable": deliverable, "cause": None, "fix": {"cycles": 0, "edited": False}}
     if prev and prev.get("task") == args.task:
+        rec["deliverable"] = deliverable or prev.get("deliverable")
+        rec["cause"] = prev.get("cause")
+        rec["fix"] = prev.get("fix") or rec["fix"]
+        rec["declared_at"] = prev.get("declared_at") or now
         rec["history"] = (prev.get("history") or []) + [
             {k: prev.get(k) for k in ("size", "permissions", "declared_at")}]
         rec["worktrees"] = prev.get("worktrees") or []
@@ -134,8 +148,13 @@ def start(args, environ):
                                   record._safe(session))
     os.makedirs(rec["scratch"], exist_ok=True)
     path = record.save(rec, environ)
-    print(f"agentkeel: task '{args.task}', size {args.size}, permissions {', '.join(rec['permissions'])}")
+    print(f"agentkeel: task '{args.task}', size {args.size}, kind {kind}, permissions {', '.join(rec['permissions'])}")
     print(f"  worktrees: {', '.join(rec['worktrees']) or '(none)'}")
+    if rec.get("deliverable"):
+        print(f"  deliverable: {rec['deliverable']} (the stop report says when it is missing)")
+    if kind == "fix":
+        print("  kind fix: before the first code edit, record a failed check (task.py verify -- <cmd>)\n"
+              "  and the cause (task.py cause \"...\"); three edit-then-fail cycles stop the loop.")
     if rec["write_roots"]:
         print(f"  write roots: {', '.join(rec['write_roots'])}")
     print(f"  scratch: {rec['scratch']}")
@@ -153,6 +172,7 @@ def open_cmd(args, environ):
         return fail(f"--allow needs one or more of: {', '.join(record.PERMISSIONS)}"
                     + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
     try:
+        args.size = record.SIZE_ALIASES.get(args.size, args.size)
         rec = isolation.open_task(os.getcwd(), args.task, args.host, args.size, perms, base=args.base,
                                   branch=args.branch, path=args.path, environ=environ)
     except isolation.OpenError as exc:
@@ -216,9 +236,62 @@ def verify(args, environ):
     if not cmd:
         return fail("usage: task.py verify -- <command...>")
     code = subprocess.call(cmd)
-    sys.stderr.write(f"agentkeel: `{' '.join(cmd)}` exited {code}; the hooks record the result "
-                     "(task.py show)\n")
+    if code != 0:
+        # A failure needs no hook to be trusted: the command ran under task.py and did not pass.
+        # Only a pass is recorded by the hooks (exit 0 on unchanged code).
+        rec = record.load(record.session_from_env(environ), environ)
+        if rec:
+            head, tree = evidence.code_state(os.getcwd())
+            rec["evidence"] = (rec.get("evidence") or [])[-(evidence.KEEP - 1):] + [{
+                "command": " ".join(cmd)[:300], "result": "failed", "reason": f"exit {code}, recorded by task.py verify",
+                "head": head, "tree": tree, "at": int(time.time()), "seconds": 0}]
+            fix = rec.get("fix") or {"cycles": 0, "edited": False}
+            if rec.get("kind") == "fix" and fix.get("edited"):
+                fix["cycles"] = int(fix.get("cycles") or 0) + 1
+                fix["edited"] = False
+                sys.stderr.write(f"agentkeel: fix cycle {fix['cycles']} of 3 failed (an edit, then a failed check).\n")
+            rec["fix"] = fix
+            record.save(rec, environ)
+    sys.stderr.write(f"agentkeel: `{' '.join(cmd)}` exited {code}; "
+                     + ("recorded as failed" if code != 0 else "the hooks record a pass") + " (task.py show)\n")
     return code
+
+
+def cause(args, environ):
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec:
+        return fail("no task declared for this session")
+    text = " ".join(args.text).strip()
+    if not text:
+        return fail('usage: task.py cause "X causes Y because Z"')
+    rec["cause"] = text[:300]
+    record.save(rec, environ)
+    print(f"agentkeel: cause on record for '{rec.get('task')}': {rec['cause']}")
+    return 0
+
+
+def reopen(args, environ):
+    """Human only (the guard refuses it from a session): reset a fix task's cycle count."""
+    hits = []
+    tasks = os.path.join(record.home(environ), "tasks")
+    for name in sorted(os.listdir(tasks)) if os.path.isdir(tasks) else []:
+        path = os.path.join(tasks, name)
+        try:
+            with open(path) as fh:
+                rec = json.load(fh)
+        except Exception:
+            continue
+        if isinstance(rec, dict) and rec.get("task") == args.task:
+            hits.append((path, rec))
+    if not hits:
+        return fail(f"no task record named '{args.task}'")
+    for path, rec in hits:
+        fix = rec.get("fix") or {}
+        fix.update({"cycles": 0, "edited": False, "reopened_at": int(time.time())})
+        rec["fix"] = fix
+        record.atomic_write_json(path, rec)
+        print(f"agentkeel: '{args.task}' re-opened (session {rec.get('session_id')}): the fix cycles are reset to 0.")
+    return 0
 
 
 def end(args, environ):
@@ -585,8 +658,11 @@ def status(args, environ):
     mine = [w for w in (rec.get("worktrees") or []) if os.path.isdir(w)] if rec else []
     out = {"repository": top, "task": None, "worktrees": [], "opened": [], "others": [], "pages": []}
     if rec:
-        out["task"] = {"id": rec.get("task"), "size": rec.get("size"), "permissions": rec.get("permissions") or []}
+        out["task"] = {"id": rec.get("task"), "size": rec.get("size"), "kind": rec.get("kind") or "feature",
+                       "permissions": rec.get("permissions") or [], "deliverable": rec.get("deliverable"),
+                       "cause": rec.get("cause"), "fix": rec.get("fix") or {}, "evidence": rec.get("evidence") or []}
         out["worktrees"] = [_worktree_facts(w, protected) for w in mine]
+    out["guards"] = pol["guards"]
     common = gitops.common_dir(top)
     for r in isolation.all_opened(environ):
         if r.get("repo_common_dir") == common or r.get("repo") == top:
@@ -613,9 +689,26 @@ def status(args, environ):
     if args.json:
         print(json.dumps(out, indent=2))
         return 0
+    if getattr(args, "html", False):
+        from agentkeel_core import statuspage
+        others = statuspage.other_records(environ, rec)
+        html = statuspage.render(out, rec, pol, others)
+        folder = rec.get("scratch") if rec and rec.get("scratch") else os.path.join(
+            os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "agentkeel-status.html")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        print(f"agentkeel status page: {path}")
+        if getattr(args, "open", False):
+            try:
+                subprocess.Popen(["open", path] if sys.platform == "darwin" else ["xdg-open", path])
+            except Exception as exc:
+                print(f"  (could not open it: {exc})")
+        return 0
     print(f"agentkeel status: {top}")
     t = out["task"]
-    print(f"this session's task: {t['id']} ({t['size']}; {', '.join(t['permissions'])})" if t
+    print(f"this session's task: {t['id']} ({t['size']}, {t.get('kind') or 'feature'}; {', '.join(t['permissions'])})" if t
           else "this session's task: none")
     for w in out["worktrees"]:
         if "error" in w:
@@ -651,15 +744,18 @@ def main(argv=None, environ=os.environ):
     sub = p.add_subparsers(dest="action")
     s = sub.add_parser("start")
     s.add_argument("task")
-    s.add_argument("--size", required=True, choices=record.SIZES)
+    s.add_argument("--size", required=True, choices=record.SIZES + tuple(record.SIZE_ALIASES))
     s.add_argument("--allow", required=True)
+    s.add_argument("--kind", choices=record.KINDS, default="feature")
+    s.add_argument("--deliverable")
     s.add_argument("--write-root", action="append")
     s.add_argument("--worktree", action="append")
     s.add_argument("--resource", action="append")
     o = sub.add_parser("open")
     o.add_argument("task")
     o.add_argument("--host", required=True, choices=isolation.HOSTS)
-    o.add_argument("--size", required=True, choices=record.SIZES)
+    o.add_argument("--size", required=True, choices=record.SIZES + tuple(record.SIZE_ALIASES))
+    o.add_argument("--kind", choices=record.KINDS, default="feature")
     o.add_argument("--allow", required=True)
     o.add_argument("--base")
     o.add_argument("--branch")
@@ -690,14 +786,20 @@ def main(argv=None, environ=os.environ):
     c.add_argument("--rev")
     c.add_argument("--base")
     sub.add_parser("index").add_argument("--full", action="store_true")
-    sub.add_parser("status").add_argument("--json", action="store_true")
+    st = sub.add_parser("status")
+    st.add_argument("--json", action="store_true")
+    st.add_argument("--html", action="store_true")
+    st.add_argument("--open", action="store_true")
+    sub.add_parser("cause").add_argument("text", nargs="+")
+    sub.add_parser("reopen").add_argument("task")
     if argv is None:
         argv = sys.argv[1:]
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
     handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
-                "context": context, "finish": finish, "check": check, "index": index, "status": status}
+                "context": context, "finish": finish, "check": check, "index": index, "status": status,
+                "cause": cause, "reopen": reopen}
     if args.action not in handlers:
         p.print_help()
         return 2

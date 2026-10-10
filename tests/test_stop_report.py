@@ -140,3 +140,19 @@ class StopReport(RepoCase):
             with open(os.path.join(ROOT, rel)) as fh:
                 stop = [h["command"] for g in json.load(fh)["hooks"]["Stop"] for h in g["hooks"]]
             self.assertEqual(len(stop), 1, rel); self.assertIn("stop-report.py", stop[0], rel)
+
+
+class Deliverable(StopReport):
+    def test_missing_deliverable_is_reported(self):
+        from agentkeel_core import record
+        page = os.path.join(self.tmp, "report.html")
+        record.atomic_write_json(os.path.join(self.home, "tasks", SESSION + ".json"), {
+            "version": 1, "task": "r", "session_id": SESSION, "size": "small", "kind": "review",
+            "permissions": ["review"], "worktrees": [], "write_roots": [self.tmp], "resources": [],
+            "declared_at": 0, "evidence": [], "history": [], "deliverable": page})
+        code, msg, err = self.stop(claude_stop(self.primary))
+        self.assertEqual(code, 0, err); self.assertIn("deliverable", msg); self.assertIn("not written yet", msg)
+        with open(page, "w") as fh:
+            fh.write("<p>done</p>")
+        code, msg, err = self.stop(claude_stop(self.primary))
+        self.assertEqual(code, 0, err); self.assertNotIn("deliverable", msg)

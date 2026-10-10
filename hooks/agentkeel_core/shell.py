@@ -155,6 +155,9 @@ def _unwrap(argv, env):
             if head == "timeout" and argv:
                 argv = argv[1:]  # the duration
             changed = True
+        elif head == "rtk":
+            argv = argv[1:]  # no options of its own
+            changed = True
         elif head == "xargs":
             argv = argv[1:]
             while argv and argv[0].startswith("-"):

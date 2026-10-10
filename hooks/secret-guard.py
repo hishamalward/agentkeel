@@ -104,13 +104,13 @@ def decide(payload, environ=os.environ):
     if any(sc.env.get("AGENTKEEL_SHOW_SECRETS") == "1" for sc in shell.commands(command, cwd)):
         record.log_override("AGENTKEEL_SHOW_SECRETS", command, payload.get("session_id"), environ)
         return 0
-    return block(
+    return record.soften("secret", "SECRET GUARD: " + (
         f"refusing: {reason}.\n"
         "A secret may be used, not shown; once printed it lives in the transcript.\n"
         "Use it without printing (source .env, read it in the program), or check that it is set\n"
         "with `test -n \"$VAR\" && echo set`. If the human asked to see it, prefix the command\n"
         "with AGENTKEEL_SHOW_SECRETS=1; the override is logged and visible in the transcript."
-    )
+    ), cwd)
 
 
 def main():

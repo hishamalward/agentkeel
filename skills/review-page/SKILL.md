@@ -7,15 +7,7 @@ description: "Write or update a present-state review page: one HTML page with th
 
 Write one self-contained HTML page for a human reviewer. It states the present, not the history.
 
-## Where it goes
-
-- In a repository whose `agentkeel.json` sets `"docs": "html"`, start it with
-  `task.py new audit <family>`. That makes `docs/YYMMDD-<family>-audit.html`.
-- A review task without the `implement` permission writes the page in its `--write-root` folder,
-  outside the repository.
-- One authored page: repository records link the shared `keel.css`; standalone reports inline
-  their styles. No external scripts or remotely fetched assets. This replaces the inline-only
-  rule so repository reviews follow the same shared-style contract as other records.
+The user is a very visual person: present findings, reviews and progress as HTML pages, with mockups where they help. Nothing checks the look. The plain keel.css look is for the project canon page only; every other page is free to look the way its content needs.
 
 ## What it says, in this order
 

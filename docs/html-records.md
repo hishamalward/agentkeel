@@ -2,7 +2,7 @@
 
 In a repository that opts in, every work record is one authored HTML page in a flat `docs/` folder, in the present tense. This page is the contract for those records. AgentKeel's own documentation is Markdown and does not use it. A large task's boundary on its state page is what the human approves. The docs check runs before an agent's push to `main` and before a local move to a known commit, and CI runs it for everyone.
 
-HTML records are included in the published 0.8.0 release. This is a behavior reference;
+HTML records are included in the published releases since 0.8.0. This is a behavior reference;
 an adopting repository keeps its implementation and release status on its own state pages.
 
 ## Current behavior and constraints
@@ -19,8 +19,10 @@ A repository opts in with `"docs": "html"` in `agentkeel.json` (the agent's file
 | `...-audit.html` | findings and evidence at a stated revision; it never outranks the state page |
 | `...-mockup.html` | a design exploration; bespoke layout welcome |
 | `...-asset.<ext>` | a supporting file; an HTML asset is checked like a page (links, Working section) |
-| `keel.css` | the shared look; pages link `./keel.css` and may add their own styles |
+| `keel.css` | the look of the project canon page only; every other page looks the way its content needs |
 | `index.html` | derived by `task.py index` (see [the index](#the-index)); never committed |
+
+The human is a very visual person: present findings, reviews and progress as HTML pages, with mockups where they help. Nothing checks the look; the checks cover names, links and sections.
 
 The date is the family's creation date and never changes; related files reuse it, so a family sorts together. Names are lowercase kebab-case, the kind last. No subfolders. A repository can list legacy paths in `"docs_legacy"` (globs): those files stay as history, the check skips them, and the index links them.
 

@@ -51,7 +51,9 @@ DESTRUCTIVE_OVERRIDE = "AGENTKEEL_ALLOW_DESTRUCTIVE"
 
 
 class Block(Exception):
-    pass
+    def __init__(self, msg, guard="task"):
+        super().__init__(msg)
+        self.guard = guard
 
 
 def block(msg):
@@ -101,7 +103,7 @@ TASK_CMD = 'python3 "%s"' % os.path.join(os.path.dirname(os.path.abspath(__file_
 NO_TASK = (
     "no task is declared for this session.\n\n"
     "Declare it in one command, from your reading of the human's request, then retry:\n"
-    f"  {TASK_CMD} start <task-id> --size small|medium|large --allow <permissions>\n\n"
+    f"  {TASK_CMD} start <task-id> --size small|large --allow <permissions> [--kind fix|feature|review|docs|chore]\n\n"
     "Permissions: review (write only --write-root folders), implement, merge, push,\n"
     "distribution-build, store-submission, paid-job, remote-write, publish. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
@@ -187,6 +189,39 @@ def judge_edit(ev, rec, environ):
             "then work there (the new worktree is recorded as this task's automatically).")
     if large:
         judge_large_path(rel, root, rec)
+    if rec.get("kind") == "fix" and rel and not rel.startswith("docs/"):
+        judge_fix(rec, environ)
+
+
+def judge_fix(rec, environ):
+    """The debugging guards, for a task declared --kind fix: a code edit needs one failed check
+    and one cause line on record, and three edit-then-fail cycles end the guessing. The guard
+    checks that the records exist, not that they are true; the method is the debugging skill."""
+    fix = rec.get("fix") or {}
+    failed = any(e.get("result") == "failed" for e in rec.get("evidence") or [])
+    if not failed:
+        raise Block(
+            "kind fix: no code edit before a check has failed on record. Reproduce the bug first:\n"
+            f"  {TASK_CMD} verify -- <the command that shows it>\n"
+            "A check that exits non-zero is recorded as failed. A new test must fail on the old code\n"
+            "before the fix (tests can encode the defect).", guard="fix")
+    if not rec.get("cause"):
+        raise Block(
+            "kind fix: no code edit before the cause is on record, in one line:\n"
+            f'  {TASK_CMD} cause "X causes Y because Z"\n'
+            "The guard checks that it exists, not that it is true: trace the bad data to its origin first.",
+            guard="fix")
+    if int(fix.get("cycles") or 0) >= 3:
+        raise Block(
+            "kind fix: three edit-then-fail cycles are on record. A fourth fix is not the answer:\n"
+            "question the design, say why the pattern may be wrong, and report. The human re-opens\n"
+            f"the task with: {TASK_CMD} reopen {rec.get('task')}", guard="fix")
+    fix["edited"] = True
+    rec["fix"] = fix
+    try:
+        record.save(rec, environ)
+    except Exception:
+        pass
 
 
 def own_scratch(target, rec, environ):
@@ -367,10 +402,10 @@ def normalise(argv):
 
 
 def human_task_command(argv):
-    """'approve' or 'open' when the line runs one of task.py's human-only commands, else None."""
+    """'approve', 'open', 'import', 'release' or 'reopen' when the line runs one of task.py's human-only commands, else None."""
     for i, tok in enumerate(argv):
         if os.path.basename(tok) == "task.py":
-            for word in ("approve", "open", "import", "release"):
+            for word in ("approve", "open", "import", "release", "reopen"):
                 if word in argv[i + 1:i + 4]:
                     return word
     return None
@@ -637,6 +672,10 @@ def judge_command(command, cwd, rec, environ, session, line=None):
                 f"`task.py {human}` is the human's command: it moves work into the shared repository or\n"
                 "deletes a task's clone. Tell the human the full commit id to import, or that the task\n"
                 "is ready to release.")
+        if human == "reopen":
+            raise Block(
+                "`task.py reopen` is the human's command: after three failed fixes only the human\n"
+                "re-opens the loop. Report why the design may be wrong and wait.")
         if argv[0] == "git" or "--dry-run" in argv:
             if argv[0] == "git":
                 judge_git(sc, rec, environ, session, line)
@@ -695,7 +734,7 @@ def decide(payload, environ=os.environ):
                     "than silently allowed. Use a tool agentkeel reads (file edits, apply_patch, shell),\n"
                     "or tell the human this tool needs an adapter.")
     except Block as b:
-        return block(str(b))
+        return record.soften(b.guard, "AGENTKEEL: " + str(b), cwd)
     try:
         evidence.start(rec, payload, environ)
     except Exception as exc:  # recording must never block the call

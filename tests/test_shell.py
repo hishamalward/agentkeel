@@ -22,6 +22,10 @@ class Shell(unittest.TestCase):
         c = shell.commands("FOO=1 BAR=2 sudo -u me env BAZ=3 timeout 10 git push", "/r")[0]
         self.assertEqual(c.argv, ["git", "push"]); self.assertEqual(c.env, {"FOO": "1", "BAR": "2", "BAZ": "3"})
 
+    def test_rtk_is_unwrapped(self):
+        self.assertEqual(argvs("rtk git push origin main"), [["git", "push", "origin", "main"]])
+        shell.commands("rtk", "/r")  # nothing after it: no crash
+
     def test_cd_changes_directory_for_later_commands(self):
         cs = shell.commands("cd /other && git push; cd sub && git status", "/r")
         self.assertEqual([c.cwd for c in cs], ["/other", "/other/sub"])

@@ -20,7 +20,7 @@ Seven hooks and one command, Python 3.10+ and bash 3.2, no dependencies. A guard
 | `verify-record.py` | after a tool completes | records verification evidence for the matching call; Codex results stay unrecorded because its hooks provide no exit status |
 | `session-start.py` | session start, plugin only | nothing; it prints where the session is, the human's profile (`AGENTKEEL_HOME/profile.md`, at most 200 lines or 8,000 characters, as plain context that grants no permission), the task command's real path and the session id |
 | `stop-report.py` | the end of every turn, both hosts | nothing; it reports to the human what the session's task still holds (each worktree: branch, merged or commits not merged, changed files; an opened clone: ready to release or why not), once per distinct report, and never removes anything |
-| `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, reports status, and starts, reads, finishes, checks and indexes docs pages. `approve` is the human's. |
+| `task.py` | the agent runs it | nothing; it declares, shows, verifies and ends a task, reports status, and starts, reads, finishes, checks and indexes docs pages. `approve` and `reopen` are the human's. |
 
 ## Protections
 
@@ -49,11 +49,39 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | One review round per scope (G3) | guidance only |  |
 | Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
 | In a session started with `task.py open`: a shell write outside the task's clone, scratch folder and declared caches, from any command, script or child process | prevents, by the host's OS sandbox (Claude Code `--settings`, Codex permission profile) | Open, ImportAndRelease; live on both hosts |
-| `task.py open`, `import` and `release` are the human's commands | prevents | Open, ImportAndRelease |
+| `task.py open`, `import`, `release` and `reopen` are the human's commands | prevents | Open, ImportAndRelease, FixGuards |
+| A `fix` task edits no code before a failed check and a cause line are on record, and stops after three edit-then-fail cycles | prevents | FixGuards |
+| Any guard can be set to `warn` or `off` in `agentkeel.json` | configurable | GuardModes |
 | A guarded MCP server (RevenueCat, PostHog, Sentry, DataForSEO): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job` and a listed target when it names one, a call that publishes to end users needs `publish`, a call that changes or submits store products needs `store-submission`, a tool not listed by name is refused | prevents, also for Codex calls inside `exec` | Adapters; live on both hosts |
 | A plugin hook's interpreter or imports redirected by the environment | prevents: the hooks run through `run.sh` (recorded interpreter, `-I`, emptied environment) | HookLauncher |
 | A test run's result is recorded by the hooks, bound to `HEAD` and the tree; only an unambiguous foreground success on unchanged code is "passed" | records; Codex runs stay unrecorded | Evidence |
 | Shell writes that are not git and commands inside scripts, in a session not started with `task.py open`; other MCP servers; browser automation | unsupported |  |
+
+## Guard modes
+
+`agentkeel.json` sets each guard's mode:
+
+```
+{ "guards": { "task": "block", "secret": "block", "plan_gate": "block", "plan_size": "block", "fix": "block" } }
+```
+
+| Mode | Effect |
+|---|---|
+| `block` | the call is refused with the reason (the default) |
+| `warn` | the call runs; the refusal text goes to the human and the agent as a system message marked "(warn mode, the call ran)" |
+| `off` | the guard is silent |
+
+A missing key or an unknown value means `block`. Each guard reads only its own key: `task` does not soften `secret`. Shipping has no mode: it is a permission.
+
+## The fix guards
+
+A task declared `--kind fix` gets three refusals. They apply to code edits (Edit, Write, `apply_patch`); a path under `docs/` is exempt. Mode key: `fix`.
+
+1. **No failed check yet.** The message asks the agent to reproduce the bug first with `task.py verify -- <command>`. A run that exits non-zero records a "failed" entry itself.
+2. **No cause on record.** The message asks for `task.py cause "X causes Y because Z"`. The guard checks that a cause line exists, not that it is true.
+3. **Three cycles used.** An edit, then a failed check, is one cycle. The fourth edit is refused until the human runs `task.py reopen <task>` in a terminal of their own. A session that runs it is refused.
+
+The method is the `debugging` skill: reproduce, find the cause, change one thing, check.
 
 ## Blind spots
 
@@ -66,6 +94,8 @@ Hooks see a tool call, not the filesystem and not the process it starts.
 | `plan-gate-guard.py` | dispatches that name a plan, with the marker or the gate words | a dispatch worded to avoid the heuristic |
 | `plan-size-guard.sh` | the Working section's length after a write | a plan split across pages |
 
+Wrapper commands (`sudo`, `env`, `nice`, `timeout`, `caffeinate`, `rtk`) are stripped before a command is judged. `rtk` is unwrapped, so the shipping checks fire under an `rtk` prefix. Hook order matters: an `rtk` rewrite hook must run after AgentKeel's PreToolUse guard, or the guard sees the rewritten command.
+
 ## Where a refusal comes from
 
 Every refusal names what decided it, and the smallest step that resolves it is that decider's. The
@@ -75,7 +105,7 @@ hooks never override a host's decision.
 |---|---|---|
 | `AGENTKEEL: ... needs the '<permission>' permission; task '<id>' has ...` | the task's own permissions | when the request grants the action, re-declare with `task.py start ... --allow <full set>`; isolated sessions use the [reopen procedure](task-record.md#changing-permissions) |
 | `AGENTKEEL: refusing to write <path>: it belongs to ...` or `... is not one of task '<id>'s worktrees` | ownership of worktrees and write roots | work in the task's worktree, or add one with `--worktree` |
-| `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the adapter's catalog (exact names) | the human runs it, or the catalog learns the name in a release |
+| `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the adapter's catalog (exact names, data in `hooks/agentkeel_core/mcp_catalog.json`; adding a service or an operation is a json edit) | the human runs it, or the catalog learns the name in a release |
 | `AGENTKEEL: ... targets '<x>', which agentkeel.json does not list` or `... connection is not pinned` | `agentkeel.json` targets and the host's own connection entry | list the target, or pin the connection on the host (`x-posthog-project-id`) |
 | `AGENTKEEL: size large needs an approved boundary` | the human's approval of the page | `task.py approve <task>`, run by the human |
 | `AGENTKEEL: agentkeel cannot read the tool '<name>' and it may write` | a tool name the hooks do not know | a release lists the tool; until then use a tool the hooks read |

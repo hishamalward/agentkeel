@@ -7,27 +7,28 @@ A repository opts in once, before any task: `task.py init` in the repository cre
 Declare it from your reading of the human's request:
 
 ```
-python3 "<task.py path printed at session start>" start <task-id> --size small|medium|large --allow <permissions> \
+python3 "<task.py path printed at session start>" start <task-id> --size small|large --allow <permissions> \
+    [--kind feature|fix|review|docs|chore] [--deliverable <path>] \
     [--write-root DIR]... [--worktree DIR]... [--resource NAME]...
 ```
 
 Later examples abbreviate that command as `task.py`. A project install uses
 `.claude/hooks/task.py`; a plugin uses the path printed at session start.
 
-It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). The guards read it on every tool call. Fields: `task`, `session_id`, `size`, `permissions`, `worktrees`, `write_roots`, `resources`, `evidence`, `history`.
+It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). The guards read it on every tool call. Fields: `task`, `session_id`, `size`, `kind`, `permissions`, `worktrees`, `write_roots`, `resources`, `deliverable`, `cause`, `fix`, `evidence`, `history`. `fix` holds `cycles` (edit-then-failed-check rounds), `edited` (a code edit since the last failed check) and `reopened_at` (set by `task.py reopen`).
 
-## Three questions, answered separately
+## Size, kind, permissions, resources
 
 | Question | Values | Rule |
 |---|---|---|
-| Size | `small`, `medium`, `large` | how much process the task buys; it grants no action |
+| Size | `small`, `large` | how much process the task buys; it grants no action. `medium` is accepted for one release as an alias of `small`: the smaller tier wins, and the human asks for more process |
+| Kind | `feature` (default), `fix`, `review`, `docs`, `chore` | what the task is; it grants nothing. `fix` turns on the [debugging guards](guardrails.md#the-fix-guards) |
 | Permissions | `review`, `implement`, `merge`, `push`, `distribution-build`, `store-submission`, `paid-job`, `remote-write`, `publish` | each action needs its own; "merge and push" means `implement,merge,push` |
 | Resources | worktrees, write roots, named resources | where the task may write; everything else belongs to someone else |
 
 | Size | Process | The hooks require |
 |---|---|---|
 | `small` | its own branch and worktree or isolated clone; no plan document, no subagents; one check; short report | a declared task; code edits off the protected branch |
-| `medium` | as small, plus tests and one review round | the same |
 | `large` | an approved boundary on the feature's state page; a plan table (its Working section) gated once; per-task and whole-branch review | no edit outside `docs/` before the boundary is approved; then only the approved boundary's `Changes` paths, in every repository the task spans (one page; `<repository>:<path>` entries for the others, see html-records.md) |
 
 | Permission | Allows |
@@ -45,6 +46,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 ## Rules
 
 - **No record, no writes.** A record belongs to one session. A second session, or a record file copied under another name, grants nothing. A subagent's tool calls carry its parent's session on both hosts (in Codex its own shell has its own id, so run task.py from the main agent).
+- **A declared deliverable.** `--deliverable <path>` names the file the task is to leave behind. The stop report adds one line when the file does not exist, or is unchanged since the declaration. It refuses nothing.
 - **Size never grants a permission.** Re-declaring with a different size keeps the permissions exactly as given. Widening the permissions is printed on stderr and kept in `history`; say it in your next update.
 - **State your reading, then proceed.** The record is your interpretation of the request. Ask only when information is missing, the request is unclear, or an action would go past it.
 - **When in doubt, smaller.** A task never grows on its own: if it turns out bigger, stop and say so; re-scoping is the human's.
@@ -53,8 +55,10 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 - **Every code task has its own worktree or isolated clone**, even when you are the only agent. File-tool code edits in the shared checkout are refused on every branch, and `task.py start` there records no worktree. Create one with `git worktree add ../<repo>-<task> -b feat/<task>` (recorded as the task's automatically), or have the human use `task.py open` for an isolated clone.
 - **Explicit-path commits**: `git commit -m "..." -- <paths>`. A bare `git commit` commits the whole index, including what another agent staged. Finishing a merge is the one exception (git refuses a partial commit then).
 - **A new task in the same session starts fresh.** Only re-declaring the same task id keeps its worktrees, write roots and evidence.
-- **Evidence**: `task.py verify -- <command>` runs a check; the hooks record its result, not the command. The guard notes the start with `HEAD` and a tree id, read without running anything the repository's config names; the PostToolUse hook records "passed" only for a foreground success that Claude Code reports with `interrupted` false, on unchanged code. A background run, an interrupted run, a run where the code moved, and every Codex run (no exit status reaches its hooks) are unrecorded or stale. A failure leaves the run pending. It is a record, not a gate: shipping is gated by the CI required check.
+- **Evidence**: `task.py verify -- <command>` runs a check; the hooks record its result, not the command. The guard notes the start with `HEAD` and a tree id, read without running anything the repository's config names; the PostToolUse hook records "passed" only for a foreground success that Claude Code reports with `interrupted` false, on unchanged code. A background run, an interrupted run, a run where the code moved, and every Codex run (no exit status reaches its hooks) are unrecorded or stale. A run that exits non-zero is different: `task.py verify` itself records an entry with result "failed" (command, exit code, `HEAD`, tree), because the command ran under it and did not pass. A pass is still the hooks' to record. In a `fix` task a failed check also closes an edit-then-fail cycle. It is a record, not a gate: shipping is gated by the CI required check.
 - **The human approves a boundary**: `task.py approve <feature|page>` writes the page's `keel-approval` meta (a digest of the boundary, the approver from git `user.name`, the date) and keeps the approved boundary in `AGENTKEEL_HOME/approvals/`. The guard refuses it when the agent runs it, and refuses an agent edit that adds, changes or removes the approval, or that renames or deletes an approved page. The human runs it in a terminal of their own.
+- **Fix tasks**: `task.py cause "X causes Y because Z"` stores the one-line cause in `cause` (the guard checks that a line exists, not that it is true). `task.py reopen <task>` resets `fix.cycles` to 0 and stamps `reopened_at`; it is the human's command, like `approve`.
+- **`task.py status --html [--open]`** writes `agentkeel-status.html` to the task's scratch folder: the task, size, kind, permissions, deliverable, the fix-guard state, the guard modes, the task's worktrees, the checks on record, and every other task record with its age and the path the human deletes. The hooks cannot tell a live session from an ended one, so the page lists them all and deletes nothing.
 - **`task.py status [--json]`** prints derived facts and changes nothing. It works with or without a session, so a human runs it in their own terminal too. It shows this session's task, if any, and for each of its worktrees that still exists: the branch, the tip, how many commits are not in the protected branch, whether the tip is in it ("merged"), and how many files are changed or untracked. A worktree is read without running anything its repository's config names; one that cannot be read says so and is never called clean. Then the tasks opened in their own clones for this repository, each "ready to release" or with what `release` would refuse on; the repository's other worktrees, each "foreign: task <id>" or "no task record"; and each state page's State now with the result of each claim ([claims](html-records.md#claims-the-check-proves)).
 - **`task.py end`** drops the record and lists what the task owned. It does not remove the task's worktrees or slots. While the record exists, the stop hook reports at the end of each turn what the task still holds: each worktree that still exists (its branch, whether its tip is merged into a protected branch and so can be removed, or how many commits are not, and how many files are changed or untracked), and for a session opened with `task.py open`, whether its clone is ready to release or why not. It speaks once per distinct report and removes nothing. Ordinary worktree cleanup needs authorization; an isolated clone is removed by the human with `task.py release`.
 
@@ -94,7 +98,7 @@ does not close the existing task. This is a limit of the current isolated workfl
 ```
 
 `writable` adds caches that a session opened with `task.py open` may write besides its clone and
-scratch folder. `mcp` lists, per guarded service, the targets a `remote-write` task may change
+scratch folder. `guards` sets each guard's mode: `{"guards": {"task": "warn"}}` (see [guard modes](guardrails.md#guard-modes)). `mcp` lists, per guarded service, the targets a `remote-write` task may change
 and a `paid-job` call may name (`"*"` for any) and, under `"servers"`, other names the host gives that service's server.
 
 `commands` adds regular expressions to a permission's built-in list. They match the command's
