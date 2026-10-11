@@ -44,10 +44,23 @@ on the agent remembering them. The [limits](#limits) explain what the hooks cann
   write, from any command or script, stays in the clone, its scratch folder and declared caches.
   `task.py import` brings the result back by exact commit; `task.py release` deletes the clone
   only when nothing in it would be lost.
-- **Scoped MCP access.** Adapters cover RevenueCat, PostHog, Sentry and DataForSEO. Writes need
+- **Scoped MCP access.** The plugin ships catalog entries for RevenueCat, PostHog, Sentry and
+  DataForSEO, and any other server is added in `agentkeel.json` with no plugin release. Writes need
   the relevant permission and an allowed target; paid calls need `paid-job`. Publishing and
-  store operations have separate permissions. Unknown tools on those servers are refused.
+  store operations have separate permissions. Unknown tools on a cataloged server are refused.
   PostHog writes use the project pinned in the host's connection. See [MCP setup](docs/hosts.md).
+
+  ```
+  "mcp": {
+    "linear": { "servers": ["linear"], "target_arg": "teamId", "targets": ["TEAM1"],
+                "read": ["list_issues", "get_issue"], "write": ["create_issue", "update_issue"] }
+  },
+  "guards": { "mcp_unknown": "warn" }
+  ```
+
+  A server with no entry passes by default; `"mcp_unknown"` set to `warn` or `block` reports or
+  refuses it. Each unseen tool is noted in the task's scratch folder, and
+  `task.py mcp draft <server>` prints an entry to sort and paste ([guardrails](docs/guardrails.md#mcp-catalog)).
 - **Large work waits for you.** A large task edits nothing outside `docs/` until you approve its
   boundary, and then only the paths that the boundary lists.
 - **Records with one current owner per fact.** In a repository that opts in, the agents' work
@@ -110,8 +123,8 @@ Installing the plugin makes AgentKeel available; opting a repository in turns it
 
 ```bash
 cd path/to/your-repo
-python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py init   # Claude Code
-python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py init    # Codex
+python3 ~/.claude/plugins/cache/agentkeel/agentkeel/0.9.1/hooks/task.py init   # Claude Code
+python3 ~/.codex/plugins/cache/agentkeel/agentkeel/0.9.1/hooks/task.py init    # Codex
 ```
 
 `init`:
@@ -159,8 +172,8 @@ declares a task, makes a worktree, and edits there, which is allowed.
 
 Agents run `task.py` to declare a task. With the plugin, it lives in the plugin's folder, and
 each session starts with a message that gives its real path, for example
-`~/.claude/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py` in Claude Code or
-`~/.codex/plugins/cache/agentkeel/agentkeel/0.9.0/hooks/task.py` in Codex. A refusal repeats the
+`~/.claude/plugins/cache/agentkeel/agentkeel/0.9.1/hooks/task.py` in Claude Code or
+`~/.codex/plugins/cache/agentkeel/agentkeel/0.9.1/hooks/task.py` in Codex. A refusal repeats the
 path, so an agent never has to guess it. The same message says where the session is (the
 checkout, its branch, its task) and lists the repository's other worktrees with the task that
 holds each.
@@ -269,6 +282,11 @@ guards and the `debugging` skill, a mode for each guard, a declared deliverable,
 and an MCP catalog kept as data. The `review-page` skill no longer sets a page style: findings,
 reviews and progress are HTML pages that look the way the content needs.
 
+0.9.1 opens the MCP catalog: a user file (`~/.agentkeel/mcp_catalog.json`) and the project's
+`agentkeel.json` add servers and tools on top of the shipped entries, `guards.mcp_unknown` decides
+what a server with no entry may do, and `task.py mcp draft <server>` turns the unseen-tool log
+into an entry to classify.
+
 ## Limits
 
 - Without `task.py open`, the hooks see the agent's tool calls, not the filesystem: a shell
@@ -276,8 +294,9 @@ reviews and progress are HTML pages that look the way the content needs.
   the host's OS sandbox limits those writes to the task's clone, scratch folder and declared caches.
 - Claude Code gives every session of one user the same temp folder (`/tmp/claude-<uid>`), so
   temp files are not isolated between Claude Code sessions.
-- MCP servers other than RevenueCat, PostHog, Sentry and DataForSEO are not checked. An adapter
-  stops the MCP call only, not the same credentials used from a shell, a script or a browser.
+- An MCP server with no catalog entry is not checked unless `guards.mcp_unknown` is `warn` or
+  `block`. A catalog entry stops the MCP call only, not the same credentials used from a shell, a
+  script or a browser.
   Browser automation that changes remote state is unsupported.
 - Codex reports no exit status to its hooks, so a test run in Codex is recorded as unrecorded.
   Shipping evidence comes from a CI required check on both hosts.

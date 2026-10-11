@@ -3,8 +3,9 @@
 Both hosts send each MCP call to PreToolUse as `mcp__<server>__<tool>` with its arguments,
 including the calls Codex makes inside its JavaScript `exec` tool (measured; see
 docs/enforcement-design.md). An adapter reads only the tool name and the arguments, never a tool's
-description. Each operation is listed by its exact name in mcp_catalog.py; the adapter never infers
-a class from a name's shape. It sorts a call into a class:
+description. Each operation is listed by its exact name in the catalog (mcp_catalog.py: the plugin
+default, the human's AGENTKEEL_HOME/mcp_catalog.json, the project's agentkeel.json "mcp" block);
+the adapter never infers a class from a name's shape. It sorts a call into a class:
 
   read          passes
   remote-write  creates, updates, archives, deletes, resolves or changes settings on the service:
@@ -16,7 +17,10 @@ a class from a name's shape. It sorts a call into a class:
                 experiment, a workflow, a flag rollout): needs `publish` and a listed target
   store         changes or submits products in the app stores: needs `store-submission` and a
                 listed target
+  unclassified  listed by `task.py mcp draft` and not yet sorted: judged as a remote write
   unknown       a name the catalog does not list, however it is spelled: refused
+A name a layer lists under more than one class takes the class that asks the most (store, publish,
+paid, remote-write, then read): a layer adds names, it cannot turn a listed write into a read.
 
 agentkeel.json, for example:
   "mcp": {"revenuecat": {"targets": ["proj1a2b3c"]}, "posthog": {"targets": ["12345"]},
@@ -33,12 +37,19 @@ reads the host's entry for the server that made the call): a write passes when t
 project, and is refused with the reason when the connection is pinned elsewhere or not pinned.
 Reads pass either way.
 "targets": ["*"] allows any target for that server. A server name the host gives a guarded
-service under another name is added with "servers": ["name"]. Servers with no adapter here pass and
-are reported as unsupported; a refusal stops only the MCP call, not the same credentials used from
-a shell or a browser.
+service under another name is added with "servers": ["name"]. Any other server is added the same
+way, as a generic service: its class lists, and "target_arg", the argument that names the target
+(absent: the operation has no target). A server with no catalog entry follows agentkeel.json
+"guards": {"mcp_unknown": "pass" | "warn" | "block"} (default pass), and each of its tools is noted
+once per task, argument names only, in the task's scratch folder (mcp-unseen.jsonl), which
+`task.py mcp draft <server>` turns into an entry. A refusal stops only the MCP call, not the same
+credentials used from a shell or a browser.
 """
 import json
+import os
 import re
+import tempfile
+import time
 
 from . import mcp_catalog as cat
 
@@ -58,28 +69,59 @@ SERVERS = {
     "dataforseo": {"dataforseo", "dfs-mcp", "dfs_mcp"},
 }
 
+UNSEEN_LOG = "mcp-unseen.jsonl"
+CLASS_KEYS = ("read", "write", "paid", "publish", "store", "unclassified")
+
+
 class Call:
-    def __init__(self, service, server, tool, args):
+    def __init__(self, service, server, tool, args, entry=None):
         self.service, self.server, self.tool, self.args = service, server, tool, args or {}
+        self.entry = entry if entry is not None else cat.DEFAULT.get(service, {})
 
 
-def match(tool_name, extra_servers=None):
-    """Call or None: which guarded service a host tool name belongs to."""
+def match(tool_name, catalog=None):
+    """Call or None: which catalog service a host tool name belongs to. `catalog` is the merged
+    catalog (mcp_catalog.merged); None means the plugin default alone. The longest server name wins."""
     if not str(tool_name).startswith("mcp__"):
         return None
+    catalog = cat.DEFAULT if catalog is None else catalog
     rest = tool_name[len("mcp__"):]
-    for service, names in SERVERS.items():
-        for name in sorted(names | set((extra_servers or {}).get(service) or []), key=len, reverse=True):
-            if rest.startswith(name + "__"):
-                return Call(service, name, rest[len(name) + 2:], None)
+    names = []
+    for service, entry in catalog.items():
+        own = SERVERS.get(service) or ({service} if not entry.get("servers") else set())
+        for name in own | set(entry.get("servers") or []):
+            names.append((-len(name), service not in SERVERS, name, service))
+    for _, _, name, service in sorted(names):
+        if rest.startswith(name + "__"):
+            return Call(service, name, rest[len(name) + 2:], None, catalog[service])
     return None
 
 
-def _listed(name, read, write, paid=frozenset(), publish=frozenset(), store=frozenset()):
-    for cls, names in ((READ, read), (PAID, paid), (PUBLISH, publish), (STORE, store), (WRITE, write)):
-        if name in names:
+def split(tool_name):
+    """(server, tool) of `mcp__<server>__<tool>`."""
+    server, _, tool = str(tool_name)[len("mcp__"):].partition("__")
+    return server, tool
+
+
+def _listed(name, entry):
+    """A name's class from an entry's lists. A name in more than one list takes the class that asks
+    the most; unclassified is judged as a remote write."""
+    for cls, key in ((STORE, "store"), (PUBLISH, "publish"), (PAID, "paid"), (WRITE, "write"),
+                     (WRITE, "unclassified"), (READ, "read")):
+        if name in (entry.get(key) or ()):
             return cls
     return UNKNOWN
+
+
+def _target(entry, args, name=None):
+    """A generic service's target: the argument target_arg names, or NO_TARGET without one. An
+    unclassified name is a write whose target is unknown without target_arg: None, so only
+    "targets": ["*"] lets it through."""
+    if not entry.get("target_arg"):
+        sorted_ = any(name in (entry.get(k) or ()) for k in CLASS_KEYS if k != "unclassified")
+        return None if name in (entry.get("unclassified") or ()) and not sorted_ else NO_TARGET
+    value = args.get(str(entry["target_arg"]))
+    return None if value is None or value == "" else str(value)
 
 
 def _sentry_org(args):
@@ -104,22 +146,21 @@ def _json_tail(text):
 def classify(call):
     """(class, target, what) for one guarded call. target is None when the call names none that
     agentkeel can read, or NO_TARGET for an operation that has no target at all."""
-    a, svc = call.args, call.service
+    a, svc, e = call.args, call.service, call.entry
     if svc == "revenuecat":
-        return (_listed(call.tool, cat.REVENUECAT_READ, cat.REVENUECAT_WRITE, publish=cat.REVENUECAT_PUBLISH,
-                        store=cat.REVENUECAT_STORE), a.get("project_id"), call.tool)
+        return _listed(call.tool, e), a.get("project_id"), call.tool
     if svc == "sentry":
         name, args = call.tool, a
         if call.tool == "execute_sentry_tool":
             name = str(a.get("name") or "")
             args = {**a, **(a.get("arguments") if isinstance(a.get("arguments"), dict) else {})}
-        return _listed(name, cat.SENTRY_READ, cat.SENTRY_WRITE, cat.SENTRY_PAID), _sentry_org(args), name
+        return _listed(name, e), _sentry_org(args), name
     if svc == "posthog":
         if call.tool != "exec":
             return UNKNOWN, None, call.tool
         words = str(a.get("command") or "").split()
         verb = words[0] if words else ""
-        if verb in cat.POSTHOG_VERBS_READ:
+        if verb in (e.get("verbs_read") or ()):
             return READ, None, verb
         if verb == "switch":
             # changes the connection's active project: a write to the project it names
@@ -138,27 +179,28 @@ def classify(call):
             elif target_tool in ("switch-project", "switch-organization"):
                 target = body.get("projectId") or body.get("project_id") or body.get("id") \
                     or body.get("organizationId") or body.get("organization_id")
-            return (_listed(target_tool, cat.POSTHOG_READ, cat.POSTHOG_WRITE, publish=cat.POSTHOG_PUBLISH),
-                    None if target is None else str(target), target_tool)
+            return _listed(target_tool, e), None if target is None else str(target), target_tool
         return UNKNOWN, None, verb or "exec"
     if svc == "dataforseo":
-        if call.tool in cat.DATAFORSEO_READ:
+        if call.tool != "api_request" and _listed(call.tool, e) == READ:
             return READ, None, call.tool
         if call.tool == "api_request":
             path = str(a.get("path") or a.get("url") or "")
             method = str(a.get("method") or "GET").upper()
             segments = set(re.split(r"[/?#]", path))
-            if segments & cat.DATAFORSEO_PAID_SEGMENTS:
+            if segments & set(e.get("paid_segments") or ()):
                 return PAID, NO_TARGET, f"{method} {path}"  # billed to the account; no project to name
-            if method == "GET" and segments & cat.DATAFORSEO_READ_SEGMENTS:
+            if method == "GET" and segments & set(e.get("read_segments") or ()):
                 return READ, None, f"{method} {path}"
             return UNKNOWN, None, f"{method} {path}"
-        return UNKNOWN, None, call.tool
-    return UNKNOWN, None, call.tool
+        return _listed(call.tool, e), _target(e, a, call.tool), call.tool
+    # a generic service, from a user or project layer: its lists, and its target_arg
+    return _listed(call.tool, e), _target(e, a, call.tool), call.tool
 
 
 def judge(call, rec, policy_mcp, pinned=None):
-    """None when the call may run, else the refusal text. `pinned` is the project the host's
+    """None when the call may run, else the refusal text. `policy_mcp` is the merged catalog, whose
+    entries carry the listed "targets". `pinned` is the project the host's
     connection for this call is pinned to (mcp_connection.pinned_project), or a function that
     reads it, called only when the decision needs it."""
     cls, target, what = classify(call)
@@ -210,3 +252,64 @@ def judge(call, rec, policy_mcp, pinned=None):
         return (f"{label} targets '{target}', which agentkeel.json does not list for {call.service} "
                 f"(allowed: {', '.join(allowed) or 'none'}).")
     return None
+
+
+def unknown_text(server, tool, mode):
+    """What the guard says about a call on a server with no catalog entry (guards.mcp_unknown)."""
+    head = (f"the MCP server `{server}` (tool `{tool}`) has no entry in agentkeel's MCP catalog, so agentkeel\n"
+            "cannot tell what the call does" + (", and agentkeel.json sets guards.mcp_unknown to block, so it is\n"
+                                                "refused." if mode == "block" else "."))
+    return (head + "\nThe human adds the server in agentkeel.json under \"mcp\", for example\n"
+            f'  "mcp": {{"{server}": {{"servers": ["{server}"], "read": ["..."], "write": ["..."], "targets": [], "target_arg": "..."}}}}\n'
+            f"`task.py mcp draft {server}` prints an entry from the calls this task has seen.")
+
+
+def scratch_of(rec, session_id):
+    """The task's scratch folder: the record's, else the one task.py start makes for the session."""
+    if rec and rec.get("scratch"):
+        return rec["scratch"]
+    if not session_id:
+        return None
+    from . import record
+    return os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch", record._safe(session_id))
+
+
+def _unseen(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict):
+                    out.append(row)
+    except OSError:
+        pass
+    return out
+
+
+def log_unseen(folder, server, tool, args):
+    """Note one call on a server with no catalog entry, once per (server, tool) in this folder. Only
+    the argument names are kept, never their values, which can hold secrets."""
+    if not folder:
+        return False
+    path = os.path.join(folder, UNSEEN_LOG)
+    if any(r.get("server") == server and r.get("tool") == tool for r in _unseen(path)):
+        return False
+    os.makedirs(folder, exist_ok=True)
+    keys = sorted(str(k) for k in args) if isinstance(args, dict) else []
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"server": server, "tool": tool, "args_keys": keys, "ts": int(time.time())}) + "\n")
+    return True
+
+
+def draft(folder, server):
+    """A catalog entry for `server` from the unseen log: every tool unclassified, no target listed.
+    None when the log holds no call on that server."""
+    tools = sorted({str(r.get("tool")) for r in _unseen(os.path.join(folder or "", UNSEEN_LOG))
+                    if r.get("server") == server and r.get("tool")})
+    if not tools:
+        return None
+    return {server: {"servers": [server], "targets": [], "unclassified": tools}}

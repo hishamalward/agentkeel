@@ -19,6 +19,9 @@ class Adapters(RepoCase):
         os.makedirs(os.path.join(self.hosthome, ".codex"))
         self.env.update({"HOME": self.hosthome, "CODEX_HOME": os.path.join(self.hosthome, ".codex"),
                          "CLAUDE_PROJECT_DIR": self.repo, "CLAUDE_CONFIG_DIR": ""})
+        # the unseen log of servers with no entry goes to a private temp folder, not the machine's
+        self.env["TMPDIR"] = os.path.join(self.tmp, "t")
+        os.makedirs(self.env["TMPDIR"])
 
     def claude_servers(self, servers, scope="user", approved=()):
         """A Claude Code entry set: user scope in ~/.claude.json, the project's local scope there, or

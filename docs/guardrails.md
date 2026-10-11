@@ -45,17 +45,18 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 | A Working section over 300 lines | warns after | `test_plan_size_guard.py` |
 | Worktrees and clones a task leaves behind | reports after each turn, never removes; an unreadable worktree is reported as unreadable | StopReport |
 | The same protections on Codex (`apply_patch`, shell, subagents) | prevents | SameDecision, CapturedShapes |
-| An unknown host tool that may write (Codex `write_stdin` included) | prevents: refused with a reason; unsupported MCP servers are outside this rule | ConfiguredRoute |
+| An unknown host tool that may write (Codex `write_stdin` included) | prevents: refused with a reason; MCP servers follow the [MCP catalog](#mcp-catalog) instead | ConfiguredRoute |
 | One review round per scope (G3) | guidance only |  |
 | Cursor, Copilot and other hosts | unsupported: no adapter; a host that loads `AGENTS.md` receives the shared instructions only |  |
 | In a session started with `task.py open`: a shell write outside the task's clone, scratch folder and declared caches, from any command, script or child process | prevents, by the host's OS sandbox (Claude Code `--settings`, Codex permission profile) | Open, ImportAndRelease; live on both hosts |
 | `task.py open`, `import`, `release` and `reopen` are the human's commands | prevents | Open, ImportAndRelease, FixGuards |
 | A `fix` task edits no code before a failed check and a cause line are on record, and stops after three edit-then-fail cycles | prevents | FixGuards |
 | Any guard can be set to `warn` or `off` in `agentkeel.json` | configurable | GuardModes |
-| A guarded MCP server (RevenueCat, PostHog, Sentry, DataForSEO): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job` and a listed target when it names one, a call that publishes to end users needs `publish`, a call that changes or submits store products needs `store-submission`, a tool not listed by name is refused | prevents, also for Codex calls inside `exec` | Adapters; live on both hosts |
+| An MCP server in the [catalog](#mcp-catalog) (shipped: RevenueCat, PostHog, Sentry, DataForSEO; any other added in `agentkeel.json`): a remote change needs `remote-write` and a listed target, a billed call needs `paid-job` and a listed target when it names one, a call that publishes to end users needs `publish`, a call that changes or submits store products needs `store-submission`, a tool not listed by name is refused | prevents, also for Codex calls inside `exec` | Adapters, Generic, Merge; live on both hosts |
+| An MCP server with no catalog entry | `guards.mcp_unknown`: passes (the default), warns or is refused; each tool is noted once per task, argument names only | UnknownServers |
 | A plugin hook's interpreter or imports redirected by the environment | prevents: the hooks run through `run.sh` (recorded interpreter, `-I`, emptied environment) | HookLauncher |
 | A test run's result is recorded by the hooks, bound to `HEAD` and the tree; only an unambiguous foreground success on unchanged code is "passed" | records; Codex runs stay unrecorded | Evidence |
-| Shell writes that are not git and commands inside scripts, in a session not started with `task.py open`; other MCP servers; browser automation | unsupported |  |
+| Shell writes that are not git and commands inside scripts, in a session not started with `task.py open`; browser automation | unsupported |  |
 
 ## Guard modes
 
@@ -73,6 +74,8 @@ Each row says what kind of protection it is: **prevents** (refused before it hap
 
 A missing key or an unknown value means `block`. Each guard reads only its own key: `task` does not soften `secret`. Shipping has no mode: it is a permission.
 
+`mcp_unknown` has modes of its own, for an MCP server with no [catalog](#mcp-catalog) entry: `pass` (the default when the key is missing, so the host's own servers such as `ide` or `claude-in-chrome` keep working), `warn` (the call runs, with the system message) and `block` (refused, with how to add the server). An unknown value means `block`.
+
 ## The fix guards
 
 A task declared `--kind fix` gets three refusals. They apply to code edits (Edit, Write, `apply_patch`); a path under `docs/` is exempt. Mode key: `fix`.
@@ -82,6 +85,40 @@ A task declared `--kind fix` gets three refusals. They apply to code edits (Edit
 3. **Three cycles used.** An edit, then a failed check, is one cycle. The fourth edit is refused until the human runs `task.py reopen <task>` in a terminal of their own. A session that runs it is refused.
 
 The method is the `debugging` skill: reproduce, find the cause, change one thing, check.
+
+## MCP catalog
+
+The catalog says, per service, which tools are reads and which change, bill, publish or submit. It is
+three layers, merged in this order, the most specific last:
+
+1. the plugin's `hooks/agentkeel_core/mcp_catalog.json`: RevenueCat, PostHog, Sentry and DataForSEO
+2. the human's `~/.agentkeel/mcp_catalog.json` (`AGENTKEEL_HOME` moves it), optional, for every repository
+3. the project's `agentkeel.json` `"mcp"` block
+
+An entry, in any layer, may carry:
+
+| Field | Meaning |
+|---|---|
+| `servers` | the server names the host gives the service (`mcp__<server>__<tool>`); default: the service key |
+| `read`, `write`, `paid`, `publish`, `store` | exact tool names per class; the permission each class needs is in the [task record](task-record.md#size-kind-permissions-resources) |
+| `unclassified` | tools not sorted yet (what `task.py mcp draft` writes): judged as `write`, and without `target_arg` they pass only with `"targets": ["*"]` |
+| `targets` | the targets a call may change (`"*"` for any) |
+| `target_arg` | the argument that names the target; absent, the service's operations have no target and need only the permission |
+| `note` | documentation |
+
+Lists merge by union, so a project can add a tool to PostHog's `read` list; `targets`, `target_arg`
+and `note` come from the most specific layer that sets them. A tool listed in more than one class
+takes the class that asks the most (store, publish, paid, write, then read), so a layer can add a
+name but cannot turn a listed write into a read. The four shipped services keep their own target
+logic (RevenueCat `project_id`, the Sentry organization, the PostHog pin, DataForSEO's billed paths);
+any other service is generic: its lists, and its `target_arg`.
+
+A call on a server with no entry follows `guards.mcp_unknown` ([guard modes](#guard-modes)). In
+every mode the guard appends one line per tool, once per task, to `mcp-unseen.jsonl` in the task's
+scratch folder: `{"server", "tool", "args_keys", "ts"}`, the argument names and never their values.
+`task.py mcp draft <server>` prints an entry from it, every tool under `unclassified`, with
+`"servers": [<server>]` and `"targets": []`. The human moves each tool to its class, lists the
+targets, sets `target_arg`, and pastes the entry under `"mcp"` in `agentkeel.json`.
 
 ## Blind spots
 
@@ -105,7 +142,8 @@ hooks never override a host's decision.
 |---|---|---|
 | `AGENTKEEL: ... needs the '<permission>' permission; task '<id>' has ...` | the task's own permissions | when the request grants the action, re-declare with `task.py start ... --allow <full set>`; isolated sessions use the [reopen procedure](task-record.md#changing-permissions) |
 | `AGENTKEEL: refusing to write <path>: it belongs to ...` or `... is not one of task '<id>'s worktrees` | ownership of worktrees and write roots | work in the task's worktree, or add one with `--worktree` |
-| `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the adapter's catalog (exact names, data in `hooks/agentkeel_core/mcp_catalog.json`; adding a service or an operation is a json edit) | the human runs it, or the catalog learns the name in a release |
+| `AGENTKEEL: <service> <name> is not an action agentkeel's <service> adapter knows` | the [MCP catalog](#mcp-catalog) (exact names: the plugin's `mcp_catalog.json`, `~/.agentkeel/mcp_catalog.json`, `agentkeel.json` `"mcp"`) | the human runs it, or lists the name in their catalog layer |
+| `AGENTKEEL: the MCP server <server> (tool <tool>) has no entry in agentkeel's MCP catalog` | `guards.mcp_unknown` set to `block` (or `warn`, as a message) | the human adds the server under `"mcp"` in `agentkeel.json`; `task.py mcp draft <server>` prints a start |
 | `AGENTKEEL: ... targets '<x>', which agentkeel.json does not list` or `... connection is not pinned` | `agentkeel.json` targets and the host's own connection entry | list the target, or pin the connection on the host (`x-posthog-project-id`) |
 | `AGENTKEEL: size large needs an approved boundary` | the human's approval of the page | `task.py approve <task>`, run by the human |
 | `AGENTKEEL: agentkeel cannot read the tool '<name>' and it may write` | a tool name the hooks do not know | a release lists the tool; until then use a tool the hooks read |

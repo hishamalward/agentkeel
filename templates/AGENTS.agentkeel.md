@@ -1,4 +1,4 @@
-## agentkeel (kept between its markers by task.py init or install.py; full text: github.com/hishamalward/agentkeel)
+## agentkeel (managed by task.py init or install.py; full text: github.com/hishamalward/agentkeel)
 
 Three rules govern the workflow; a rule serving none goes.
 1. Bound each write to the request. Do the literal ask; mention adjacent problems, do not fix them.
@@ -45,8 +45,9 @@ shipping, edits to hook config or task state, a third plan gate.
 agentkeel.json "guards" sets each (task, secret, plan_gate, plan_size, fix) to block, warn
 or off. One-command overrides (logged): AGENTKEEL_ALLOW_DESTRUCTIVE=1, AGENTKEEL_SHOW_SECRETS=1.
 task.py verify runs a check: hooks record a pass, a failure records itself; Codex passes stay
-unrecorded; CI ships. task.py status --html writes a status page.
+unrecorded; CI ships. Status page: task.py status --html.
 
 **Limits**: hooks miss shell writes inside scripts or redirects (task.py open adds a
-sandbox; Claude's temp folder is shared). Other MCP servers and browser writes are
-unsupported. The record is scope, not consent.
+sandbox; Claude's temp folder is shared). Uncatalogued MCP servers pass
+(guards.mcp_unknown: pass|warn|block); add one in agentkeel.json "mcp". Browser writes
+are unsupported. The record is scope, not consent.

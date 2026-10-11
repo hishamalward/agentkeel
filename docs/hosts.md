@@ -30,7 +30,7 @@ The guards read events, not tool names (`hooks/agentkeel_core/host.py`). Each ro
 
 The task guard receives every tool (`*`) on both hosts. In `host.py`, file edits, shell commands and dispatches are judged; known reads, planning, messaging and scheduling tools pass. Codex's hosted web tool is recognized by its exact names `webrun`, `web.run` and `web__run`. Unknown script-running tools remain refused. A scheduled prompt runs later as ordinary, judged tool calls.
 
-MCP calls go through the [service adapters](enforcement-design.md#part-3-mcp-calls-with-consequences). Servers without an adapter remain unsupported. Any other tool whose name suggests a write (`write_stdin` among them) is refused as a visible gap.
+MCP calls go through the [service adapters](enforcement-design.md#part-3-mcp-calls-with-consequences). A server with no catalog entry follows `guards.mcp_unknown` (pass by default) and is added in `agentkeel.json` ([MCP catalog](guardrails.md#mcp-catalog)). Any other tool whose name suggests a write (`write_stdin` among them) is refused as a visible gap.
 
 ## PostHog: one active connection, one known project
 

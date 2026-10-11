@@ -40,7 +40,7 @@ It writes `~/.agentkeel/tasks/<session-id>.json` (`AGENTKEEL_HOME` moves it). Th
 | `distribution-build` | `eas build`, `xcodebuild archive`, `fastlane gym` and similar |
 | `store-submission` | `eas submit`, `eas update`, `npm publish`, `fastlane deliver/pilot/supply`; MCP calls that change or submit products in the app stores (RevenueCat `submit_products_to_store` and its product store state operations), on a listed target |
 | `paid-job` | the command patterns a repository lists in `agentkeel.json`; MCP calls that bill per call (DataForSEO `/live` and `task_post`, Sentry Seer analysis, which also needs its organization listed under `mcp`) |
-| `remote-write` | MCP calls that change a guarded service (RevenueCat, PostHog, Sentry), only on a target `agentkeel.json` lists for it; a git push permission does not cover them, and `remote-write` never publishes or submits |
+| `remote-write` | MCP calls that change a cataloged service (RevenueCat, PostHog, Sentry, or any server added in `agentkeel.json`, its `unclassified` tools included), only on a target the catalog lists for it; a git push permission does not cover them, and `remote-write` never publishes or submits |
 | `publish` | MCP calls that make something live for end users at once or send to them: a RevenueCat paywall published or unpublished, an experiment started or resumed; PostHog's publish, launch, ship, enable, roll-out and batch-run tools; on a listed target |
 
 ## Rules
@@ -93,13 +93,24 @@ does not close the existing task. This is a limit of the current isolated workfl
   "protected_branches": ["main", "release"],
   "commands": { "paid-job": ["^npx tsx scripts/eval-"] },
   "writable": ["~/.npm"],
-  "mcp": { "revenuecat": { "targets": ["proj1a2b3c"] }, "sentry": { "targets": ["my-org"] } }
+  "mcp": { "revenuecat": { "targets": ["proj1a2b3c"] }, "sentry": { "targets": ["my-org"] },
+           "linear": { "target_arg": "teamId", "targets": ["TEAM1"],
+                       "read": ["list_issues"], "write": ["create_issue"] } },
+  "guards": { "mcp_unknown": "warn" }
 }
 ```
 
 `writable` adds caches that a session opened with `task.py open` may write besides its clone and
-scratch folder. `guards` sets each guard's mode: `{"guards": {"task": "warn"}}` (see [guard modes](guardrails.md#guard-modes)). `mcp` lists, per guarded service, the targets a `remote-write` task may change
-and a `paid-job` call may name (`"*"` for any) and, under `"servers"`, other names the host gives that service's server.
+scratch folder. `guards` sets each guard's mode: `{"guards": {"task": "warn"}}` (see [guard modes](guardrails.md#guard-modes)). `mcp` is the project's layer of the [MCP catalog](guardrails.md#mcp-catalog), over the plugin's
+entries and the human's `~/.agentkeel/mcp_catalog.json`. Per service it lists the targets a
+`remote-write` task may change and a `paid-job` call may name (`"*"` for any), under `"servers"`
+other names the host gives that service's server, and any tools the layers below do not list
+(`read`, `write`, `paid`, `publish`, `store`, `unclassified`). A service the plugin does not ship
+is added the same way, with `target_arg` naming the argument that carries its target.
+`guards.mcp_unknown` (`pass` by default, `warn`, `block`) decides a call on a server with no entry.
+The guard notes each such tool once per task in the scratch folder (`mcp-unseen.jsonl`, argument
+names only); `task.py mcp draft <server>` prints an entry from it, every tool `unclassified`, ready
+to sort and paste here.
 
 `commands` adds regular expressions to a permission's built-in list. They match the command's
 words, both as typed and with `npx`/`bunx` removed.

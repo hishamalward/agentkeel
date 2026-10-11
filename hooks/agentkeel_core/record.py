@@ -25,8 +25,12 @@ import time
 SIZES = ("small", "large")
 SIZE_ALIASES = {"medium": "small"}  # accepted for one release; two sizes since 0.9, and the smaller one wins
 KINDS = ("feature", "fix", "review", "docs", "chore")
-GUARDS = ("task", "secret", "plan_gate", "plan_size", "fix")
+GUARDS = ("task", "secret", "plan_gate", "plan_size", "fix", "mcp_unknown")
 MODES = ("block", "warn", "off")
+# a guard with modes of its own, and its default when agentkeel.json sets none: an MCP server with
+# no catalog entry passes, as in 0.9.0, so the host's own servers keep working
+GUARD_MODES = {"mcp_unknown": ("pass", "warn", "block")}
+GUARD_DEFAULTS = {"mcp_unknown": "pass"}
 PERMISSIONS = ("review", "implement", "merge", "push", "distribution-build", "store-submission",
                "paid-job", "remote-write", "publish")
 DEFAULT_PROTECTED = ("main", "master")
@@ -241,10 +245,10 @@ def policy(root):
         if k in commands and isinstance(v, list):
             commands[k] += [str(x) for x in v]
     mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else {}
-    guards = {g: "block" for g in GUARDS}
+    guards = {g: GUARD_DEFAULTS.get(g, "block") for g in GUARDS}
     for k, v in (data.get("guards") or {}).items() if isinstance(data.get("guards"), dict) else []:
-        if k in guards and v in MODES:
-            guards[k] = v
+        if k in guards:
+            guards[k] = v if v in GUARD_MODES.get(k, MODES) else "block"  # an unknown value blocks
     return {"protected": protected, "commands": commands, "mcp": mcp, "guards": guards,
             "require_check": str(data.get("require_check_before_push") or "")}
 
@@ -262,11 +266,11 @@ def guard_mode(name, cwd):
 
 def soften(name, text, cwd):
     """Apply a guard's mode to a refusal: block writes `text` to stderr and returns 2; warn lets
-    the call through and shows the text to the human and the agent as a systemMessage; off is
-    silent. The text carries the guard's own prefix (AGENTKEEL:, SECRET GUARD:, ...)."""
+    the call through and shows the text to the human and the agent as a systemMessage; off (pass,
+    for mcp_unknown) is silent. The text carries the guard's own prefix (AGENTKEEL:, SECRET GUARD:, ...)."""
     import sys
     mode = guard_mode(name, cwd)
-    if mode == "off":
+    if mode in ("off", "pass"):
         return 0
     if mode == "warn":
         sys.stdout.write(json.dumps({"systemMessage": "(warn mode, the call ran) " + text.rstrip()}) + "\n")

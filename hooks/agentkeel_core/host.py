@@ -22,7 +22,7 @@ from . import patch as patchmod
 # Tools that write no repository file: reads, planning, messaging, scheduling (a scheduled prompt
 # runs later as ordinary tool calls, which are judged then). Everything else whose name suggests a
 # write is a gap and refused. MCP tools become mcp events: guarded servers are judged by their
-# adapter (mcp.py), and every other server passes, reported as unsupported.
+# adapter (mcp.py), and a server with no catalog entry follows guards.mcp_unknown (default pass).
 NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite", "TaskList",
                  "TaskGet", "TaskCreate", "TaskUpdate", "TaskStop", "TaskOutput", "ToolSearch",
                  "Skill", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "SendMessage",
