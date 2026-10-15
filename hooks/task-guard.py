@@ -7,9 +7,6 @@ record (hooks/task.py) and judges every operation in the tool call against it:
   file edits (Write, Edit, NotebookEdit)
     - agentkeel state, hook configuration and agentkeel.json are never edited by the agent
     - a task must be declared for this session
-    - the agent cannot create, change or delete a page's approval (the human's `task.py approve`),
-      nor rename or delete an approved page; a large task writes nothing outside docs/ until its
-      state page's boundary is approved, then only the approved boundary's Changes list
     - the task's --write-root folders (report folders outside any repository) are writable
     - otherwise the target must be inside one of the task's own linked worktrees (never the
       shared checkout), the task must have `implement`, and the branch must not be protected
@@ -21,26 +18,24 @@ record (hooks/task.py) and judges every operation in the tool call against it:
     - a protected branch moves locally (commit on it, merge, ff, reset, update-ref, fetch x:main):
       needs `merge`
     - every push to a remote: needs `push`; `gh pr merge` needs `merge` and `push`
-    - in a repository with "docs": "html", main moves (a push, or a local move whose new commit is
-      known) only to a commit whose docs check passes: no Working section, approved boundaries
     - force push, reset --hard, whole-tree checkout or restore, clean -f, branch -D, stash
       drop/clear/pop: refused unless the command itself carries AGENTKEEL_ALLOW_DESTRUCTIVE=1
     - distribution builds, store submissions, deploy commands and paid jobs: need their own
       permission (classes and patterns in agentkeel_core/record.py, extended by agentkeel.json)
-    - `task.py approve` is the human's command and is refused here
 
 Exit 0 allows; exit 2 blocks with the reason on stderr. A payload that is not JSON allows: a
 broken guard must never stop work on its own. What this cannot see is in the README's capability
 table: shell writes that are not git, commands inside scripts, and anything outside this host.
 """
 import json
+import time
 import os
 import re
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import checks, evidence, gitops, host, mcp, mcp_catalog, mcp_connection, pages, patch as patchmod, record, shell  # noqa: E402
+from agentkeel_core import checks, evidence, gitops, host, mcp, mcp_catalog, mcp_connection, record, shell  # noqa: E402
 
 CONFIG_NAMES = ("agentkeel.json", ".mcp.json")  # .mcp.json: a project MCP entry the guard may read as a pin
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
@@ -103,7 +98,7 @@ TASK_CMD = 'python3 "%s"' % os.path.join(os.path.dirname(os.path.abspath(__file_
 NO_TASK = (
     "no task is declared for this session.\n\n"
     "Declare it in one command, from your reading of the human's request, then retry:\n"
-    f"  {TASK_CMD} start <task-id> --size small|large --allow <permissions> [--kind fix|feature|review|docs|chore]\n\n"
+    f"  {TASK_CMD} start <task-id> --size no-code|small|large --allow <permissions> --deliverable <outside-repo.html> [--write-root <outside-repo-folder>] [--kind fix|feature|review|docs|chore]\n\n"
     "Permissions: review (write only --write-root folders), implement, merge, push,\n"
     "distribution-build, store-submission, paid-job, remote-write, publish. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
@@ -111,23 +106,6 @@ NO_TASK = (
 
 
 # ---- file edits -----------------------------------------------------------------------------
-
-def new_content(ev):
-    """The whole new text of the edited file when it can be known, else None."""
-    if ev.full_text is not None:
-        return ev.full_text
-    if ev.change is not None:
-        if ev.change.kind == "delete":
-            return None
-        return patchmod.apply(record.read(ev.source_path or ev.path), ev.change)
-    if ev.edit:
-        old = record.read(ev.path)
-        if old is None:
-            return None
-        a, b = str(ev.edit.get("old_string") or ""), str(ev.edit.get("new_string") or "")
-        return old.replace(a, b) if ev.edit.get("replace_all") else old.replace(a, b, 1)
-    return None
-
 
 def judge_edit(ev, rec, environ):
     target = ev.path
@@ -143,10 +121,6 @@ def judge_edit(ev, rec, environ):
     root = os.path.realpath(root) if root else None
     rel = os.path.relpath(target, root).replace(os.sep, "/") if root else None
     perms = set(rec.get("permissions") or [])
-    # Page approval and a large task's blast radius hold everywhere, write roots included.
-    if rel and re.match(r"^docs/[^/]+\.html$", rel) or ev.source_path and re.search(r"/docs/[^/]+\.html$", ev.source_path):
-        judge_page_edit(ev, rel or target)
-    large = bool(rel) and rec.get("size") == "large" and not rel.startswith("docs/")
     if root is None:
         # Write roots are report folders outside any repository. Inside a repository they grant
         # nothing: source is written only through the task's own worktree, by the rules below.
@@ -166,15 +140,14 @@ def judge_edit(ev, rec, environ):
     if not own_clone and gitops.is_primary(root) and (not owned_repos or gitops.common_dir(root) in owned_repos):
         raise Block(
             f"refusing to write {target}: {root} is the repository's shared checkout.\n"
-            "Every code task, small ones included, works in its own worktree, so the shared checkout\n"
-            "stays free for other agents' merges:\n"
-            f"  git worktree add ../{os.path.basename(root)}-{rec.get('task')} -b feat/{rec.get('task')}\n"
-            "then work there (the new worktree is recorded as this task's automatically).")
+            "Every code task, small ones included, works in its own managed worktree, so the shared checkout\n"
+            "stays free for other agents' merges. Start a code task with task.py; it creates and records the worktree:\n"
+            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable <outside-repo.html>")
     if root not in (rec.get("worktrees") or []):
         raise Block(
             f"refusing to write {target}: it belongs to another worktree ({root}).\n"
             "Another agent may own it. Work only in this task's worktrees; if this one is yours,\n"
-            "re-declare with --worktree <path>.")
+            "start a task with task.py so it creates and records the worktree.")
     if "implement" not in perms:
         raise Block(
             f"task '{rec.get('task')}' has permissions {', '.join(sorted(perms))}: it writes only its\n"
@@ -184,13 +157,12 @@ def judge_edit(ev, rec, environ):
     if branch in pol["protected"]:
         raise Block(
             f"this worktree is on the protected branch '{branch}'. Every code task works on its own\n"
-            "branch in its own worktree:\n"
-            f"  git worktree add ../<repo>-{rec.get('task')} -b feat/{rec.get('task')}\n"
-            "then work there (the new worktree is recorded as this task's automatically).")
-    if large:
-        judge_large_path(rel, root, rec)
+            "branch in its own managed worktree. Start the task with task.py so it creates and records one:\n"
+            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable <outside-repo.html>")
     if rec.get("kind") == "fix" and rel and not rel.startswith("docs/"):
         judge_fix(rec, environ)
+    rec["code_changed_at"] = time.time()
+    record.save(rec, environ)
 
 
 def judge_fix(rec, environ):
@@ -234,157 +206,6 @@ def own_scratch(target, rec, environ):
     return str(rec.get("session_id")) in target.split(os.sep)
 
 
-def judge_page_edit(ev, rel):
-    """The same rule on every host: a page's approval metadata is the human's. The agent edits a
-    page freely, boundary included (a changed boundary keeps main from moving until approved
-    again), but cannot create, change or remove the approval, or rename or delete an approved
-    page. A patch is judged on the text it produces."""
-    before = record.read(ev.source_path or ev.path)
-    held = pages.approval_metas(before)
-    deleting = ev.change is not None and ev.change.kind == "delete"
-    if held and (deleting or ev.source_path):
-        raise Block(
-            f"refusing to {'delete' if deleting else 'rename'} {rel}: its boundary is approved, and dropping\n"
-            "that approval is the human's decision. Stop and tell them.")
-    if deleting:
-        return
-    text = new_content(ev)
-    if text is None:
-        if held:
-            raise Block(
-                f"refusing this edit to {rel}: its result cannot be read, and the page carries an approval\n"
-                "that must stay unchanged. Make the edit with Write, Edit or a patch that fits.")
-        return
-    if pages.approval_metas(text) != held:
-        raise Block(
-            f"refusing to {'change' if held else 'add'} the approval of {rel}: approval is the human's ruling\n"
-            "(gate G1). Ask them to approve the boundary; they run, in their own terminal:\n"
-            f"  {TASK_CMD} approve {rel}")
-
-
-def repo_common(root):
-    """The repository's identity: its git common dir, which every worktree of it shares."""
-    return gitops.common_dir(root) or os.path.realpath(root)
-
-
-def repo_name(common):
-    """The repository's name in `<repository>:<path>` entries, from its common dir: the folder that
-    holds `.git`, a bare repository's folder without `.git`, a submodule's own folder."""
-    base = os.path.basename(common)
-    if base == ".git":
-        return os.path.basename(os.path.dirname(common))
-    return base[:-len(".git")] if base.endswith(".git") else base
-
-
-def task_repos(root, rec):
-    """{name: {common dirs}} for the repositories of the task's worktrees and of `root`. A name with
-    two common dirs is ambiguous: its prefixed Changes entries grant nothing (large_limits)."""
-    out = {}
-    for w in [root, *(rec.get("worktrees") or [])]:
-        if os.path.isdir(w):
-            common = repo_common(w)
-            out.setdefault(repo_name(common), set()).add(common)
-    return out
-
-
-def state_pages(root, task):
-    import glob
-    return sorted(glob.glob(os.path.join(root, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{task}-state.html")))
-
-
-def approved_boundary(root, rec):
-    """(page name, the approved boundary's HTML, the page's repository root) for a large task, else
-    Block with the reason. A task that spans repositories keeps one boundary: when `root` has no
-    state page for the task, the page is looked for in the task's other worktrees, and its lists
-    name the other repository's paths as `<repository>:<path>` (large_limits). When the page's
-    boundary was edited after approval, the approved version (kept by approve in AGENTKEEL_HOME)
-    still sets the limits: a widened draft grants nothing."""
-    task = rec.get("task", "")
-    found = state_pages(root, task)
-    page_root = root
-    if not found:
-        # two worktrees of one repository carry the same committed page: it is one page
-        seen = {}
-        for w in rec.get("worktrees") or []:
-            if os.path.isdir(w) and os.path.realpath(w) != os.path.realpath(root):
-                for f in state_pages(w, task):
-                    seen.setdefault((repo_common(w), os.path.basename(f)), (w, f))
-        found = [f for _, f in seen.values()]
-        if len(seen) == 1:
-            page_root = next(iter(seen.values()))[0]
-    ask = (f"Approval is the human's: they run\n  {TASK_CMD} approve {task}\n"
-           "Edits under docs/ are allowed meanwhile.")
-    if len(found) != 1:
-        raise Block(
-            f"size large needs an approved boundary before any edit outside docs/. There is "
-            f"{'no' if not found else 'more than one'} state page for '{task}'\n"
-            f"(docs/YYMMDD-{task}-state.html, in this repository or in another worktree of the task).\n"
-            f"Start it with: {TASK_CMD} new state {task}\n" + ask)
-    name, text = os.path.basename(found[0]), record.read(found[0]) or ""
-    state, why = pages.boundary_state(name, text)
-    if state == "approved":
-        return name, pages.sections(text, "boundary")[0], page_root
-    got = pages.approval(text) if state == "changed" else None
-    if got:
-        kept = record.read(record.approved_boundary_path(got[0]))
-        if kept is not None and pages.digest(name, kept) == got[0]:
-            return name, kept, page_root
-    raise Block(f"size large needs an approved boundary before any edit outside docs/.\n"
-                f"docs/{name}: {why or 'it has no boundary section'}.\n" + ask)
-
-
-def scoped(patterns, here, home, names):
-    """The patterns that apply in the repository named `here`: `<repository>:<path>` entries for
-    it, and plain entries only when it is the page's own repository (`home`). A prefix is a
-    repository only when it is one of the task's repository `names`; otherwise the entry is plain."""
-    out = []
-    for p in patterns:
-        repo, sep, path = p.partition(":")
-        if sep and repo in names:
-            if repo == here and path:
-                out.append(path)
-        elif home:
-            out.append(p)
-    return out
-
-
-def large_limits(root, rec):
-    """(page name, changes, must_not) from the approved boundary, for the repository of `root`.
-    An empty or missing Changes list grants nothing: wide access is a pattern the human approved
-    (`*`), never an omission. The page's own repository is the one with the same common dir, never
-    the same name; a name two of the task's repositories share grants nothing under Changes, and
-    its Must-not entries apply in both."""
-    name, boundary, page_root = approved_boundary(root, rec)
-    common = repo_common(root)
-    here, home = repo_name(common), common == repo_common(page_root)
-    repos = task_repos(root, rec)
-    shared = len(repos.get(here, ())) > 1
-    changes, must_not = pages.blast_radius(boundary)
-    changes = scoped(changes, None if shared else here, home, repos)
-    must_not = scoped(must_not, here, home, repos)
-    if not changes:
-        if shared:
-            where = (f" for repository '{here}' (the name is ambiguous: two of the task's repositories are\n"
-                     f"named '{here}', so its `{here}:<path>` entries grant nothing)")
-        else:
-            where = "" if home else f" for repository '{here}' (its entries read `{here}:<path>`)"
-        raise Block(
-            f"the approved boundary of {name} lists no paths under Changes{where}, so this large task may\n"
-            "change nothing outside docs/ here. List the paths (<ul data-keel-changes><li><code>src/x/</code></li></ul>;\n"
-            "`*` means every path) and ask the human to approve the boundary again.")
-    return name, changes, must_not
-
-
-def judge_large_path(rel, root, rec):
-    name, changes, must_not = large_limits(root, rec)
-    if record.matches(rel, must_not):
-        raise Block(f"{rel} is listed under 'Must not change' in the approved boundary of {name}.")
-    if not record.matches(rel, changes):
-        raise Block(
-            f"{rel} is outside the Changes list of the approved boundary of {name} ({', '.join(changes)}).\n"
-            "Stop and tell the human: the blast radius grew, and re-scoping is theirs.")
-
-
 # ---- shell commands -------------------------------------------------------------------------
 
 def normalise(argv):
@@ -402,17 +223,13 @@ def normalise(argv):
 
 
 def human_task_command(argv):
-    """'approve', 'open', 'import', 'release' or 'reopen' when the line runs one of task.py's human-only commands, else None."""
+    """Human-only task commands that this guard still reserves."""
     for i, tok in enumerate(argv):
         if os.path.basename(tok) == "task.py":
-            for word in ("approve", "open", "import", "release", "reopen"):
+            for word in ("open", "import", "release", "reopen"):
                 if word in argv[i + 1:i + 4]:
                     return word
     return None
-
-
-def is_task_approve(argv):
-    return human_task_command(argv) == "approve"
 
 
 def need(rec, perm, what):
@@ -476,15 +293,11 @@ def judge_git(sc, rec, environ, session, line):
 def judge_git_ops(call, ops, root, pol, rec, environ, line):
     protected = pol["protected"]
     for op in ops:
-        if op.kind == "worktree" and rec and not os.path.lexists(op.path):
-            # the worktree does not exist yet (PreToolUse); resolve its parent the way git will
-            path = os.path.join(os.path.realpath(nearest_dir(op.path + os.sep + "x")), "") \
-                if os.path.exists(op.path) else \
-                os.path.join(os.path.realpath(os.path.dirname(op.path)), os.path.basename(op.path))
-            path = path.rstrip(os.sep)
-            if path not in rec.get("worktrees", []):
-                rec.setdefault("worktrees", []).append(path)
-                record.save(rec, environ)
+        if op.kind == "worktree":
+            raise Block(
+                "refusing manual `git worktree add`: its new tree would not have a Keel ownership manifest.\n"
+                "Use task.py start from the repository checkout; it creates the branch and linked worktree,\n"
+                "records ownership, and keeps task writes inside that tree.")
         elif op.kind == "commit":
             if not rec:
                 raise Block(NO_TASK)
@@ -500,28 +313,20 @@ def judge_git_ops(call, ops, root, pol, rec, environ, line):
                     "refusing a commit that does not name its paths.\n"
                     "A bare `git commit` (or -a) commits whatever is staged, including another agent's\n"
                     "work. Name the paths: git commit -m '...' -- <path> [<path>...]")
-            if rec.get("size") == "large" and root and not all(p.startswith("docs/") for p in op.paths):
-                large_limits(root, rec)
         elif op.kind == "move":
             need(rec, "merge", f"moving the protected branch '{op.targets[0] if op.targets else '?'}' ({op.name})")
-            dst = op.targets[0] if op.targets else "main"
-            if op.source and root and docs_on(root, dst):
-                sha = bound_source(call, op.source, dst, line)
-                docs_gate(root, sha, dst, None, environ)
         elif op.kind == "push":
             hits = [t for t in op.targets if t in protected or t == "*"]
             if op.local:
                 if hits:
                     need(rec, "merge", f"moving '{hits[0]}' with a local push")
-                    for dst in hits:
-                        if dst != "*" and root and docs_on(root, dst):
-                            sha = bound_source(call, op.sources.get(dst) or "HEAD", dst, line)
-                            docs_gate(root, sha, dst, None, environ)
                 else:
                     need(rec, "implement", "a local push between branches")
             else:
                 where = (hits[0] if hits[0] != "*" else "every branch") if hits else ", ".join(op.targets)
                 need(rec, "push", f"a push to '{where}'")
+                if hits:
+                    need(rec, "merge", f"moving the protected branch '{where}' with a remote push")
                 if hits and pol["require_check"]:
                     if line.get("earlier"):
                         raise Block(
@@ -542,67 +347,6 @@ def judge_git_ops(call, ops, root, pol, rec, environ, line):
                                 "commit sent. Push the tested commit by its full SHA: git push origin <full-sha>:main")
                         sha = gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
                         require_green(root, op.remote, sha, pol["require_check"], dst, environ)
-                        docs_gate(root, sha, dst, op.remote, environ)
-                elif hits and root and any(docs_on(root, d) for d in hits):
-                    if "*" in hits:
-                        raise Block("refusing a push whose destination is not named (--all, a wildcard, a variable or\n"
-                                    "a $(...)): it may reach main, and the docs check needs the commit that lands.\n"
-                                    "Name both ends: git push origin <full-sha>:main")
-                    for dst in hits:
-                        if dst == "*":
-                            continue
-                        sha = bound_source(call, op.sources.get(dst) or "HEAD", dst, line)
-                        docs_gate(root, sha, dst, op.remote, environ)
-
-
-def docs_on(root, dst):
-    """The docs check guards `dst` when the working tree or `dst` itself opted in."""
-    if pages.enabled(pages.FsTree(root)):
-        return True
-    b = gitops.run_git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{dst}^{{commit}}")
-    return bool(b) and pages.enabled(pages.GitTree(root, b))
-
-
-def bound_source(call, src, dst, line):
-    """The commit a docs-gated move installs, bound so the commit checked is the commit that lands:
-    the source is a literal full SHA, and nothing earlier in the call can move a ref first."""
-    if line.get("earlier"):
-        raise Block(
-            f"refusing to move '{dst}' in a call that runs other commands first: an earlier command can\n"
-            "move a branch after this check reads it, so the commit checked would not be the commit that\n"
-            "lands. Run the move alone, in its own call.")
-    if not FULL_SHA_RE.match(src or ""):
-        raise Block(
-            f"refusing to move '{dst}' to '{src}': a branch name or HEAD can move between this check and the\n"
-            "move (another agent or worktree shares the branches). Name the checked commit by its full SHA:\n"
-            f"  git merge --ff-only <full-sha>   or   git push . <full-sha>:{dst}")
-    return gitops.run_git(call, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")
-
-
-def docs_gate(root, sha, dst, remote, environ):
-    """In a repository with "docs": "html", main moves only to a commit whose docs check passes,
-    judged against what main holds now (the remote's copy when pushing). The same check runs in
-    CI (agentkeel-required); this one stops the agent before its own push or local move."""
-    if not sha:
-        if pages.enabled(pages.FsTree(root)):
-            raise Block(f"cannot tell which commit would land on '{dst}', so its docs check cannot run.\n"
-                        "Name the commit: git push origin <full-sha>:main")
-        return
-    try:
-        cand = pages.GitTree(root, sha)
-    except ValueError as exc:
-        raise Block(f"cannot read commit {sha[:12]} for its docs check ({exc}); refusing to move '{dst}'.")
-    base = None
-    for ref in ([f"refs/remotes/{remote}/{dst}"] if remote and remote != "." else []) + [f"refs/heads/{dst}"]:
-        b = gitops.run_git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
-        if b:
-            base = pages.GitTree(root, b)
-            break
-    problems = pages.check(cand, base)
-    if problems:
-        shown = "\n".join(f"  - {p}" for p in problems[:8]) + (f"\n  ... and {len(problems) - 8} more" if len(problems) > 8 else "")
-        raise Block(f"refusing to move '{dst}' to {sha[:12]}: its docs check fails.\n{shown}\n"
-                    f"Run `{TASK_CMD} check --rev {sha[:12]}` to see it; fix the pages, commit, and ship that commit.")
 
 
 FULL_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -659,10 +403,6 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             continue
         judge_session_claim(sc, session)
         human = human_task_command(sc.argv)
-        if human == "approve":
-            raise Block(
-                "`task.py approve` is the human's command (gate G1): an approval the agent can\n"
-                "produce is not the human's consent. Ask the human to run it in their own terminal.")
         if human == "open":
             raise Block(
                 "`task.py open` is the human's command: it sets the write boundary of a new session,\n"
@@ -744,10 +484,6 @@ def decide(payload, environ=os.environ):
                     "or tell the human this tool needs an adapter.")
     except Block as b:
         return record.soften(b.guard, "AGENTKEEL: " + str(b), cwd)
-    try:
-        evidence.start(rec, payload, environ)
-    except Exception as exc:  # recording must never block the call
-        sys.stderr.write(f"task-guard: verify start not recorded: {exc}\n")
     return 0
 
 

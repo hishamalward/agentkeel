@@ -14,7 +14,8 @@
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
       },
-      "category": "Productivity"
+      "category": "Productivity",
+      "description": "Claude Code and Codex guardrails for declared tasks, linked worktrees, persistent HTML checkpoints, and permissioned shipping. Acts only in opted-in repositories."
     }
   ]
 }

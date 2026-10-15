@@ -77,12 +77,8 @@ def render(out, rec, pol, others):
     ev = t.get("evidence") or []
     parts.append("<h2>Checks on record</h2>" + ("<table><tr><th>When</th><th>Command</th><th>Result</th><th>Why</th></tr>" + _rows([
         (time.strftime("%H:%M", time.localtime(int(e.get("at") or 0))), e.get("command"), e.get("result"), e.get("reason")) for e in ev[-12:]]) + "</table>" if ev else "<p>none yet (task.py verify -- &lt;command&gt;)</p>"))
-    parts.append("<h2>Other task records</h2><p>The hooks cannot tell a live session from one that ended; a record that holds a worktree or a slot after its session is gone is cleared by the human: <code>rm &lt;path&gt;</code>.</p>"
+    parts.append("<h2>Other task records</h2><p>The hooks cannot tell a live session from one that ended; a record that holds a worktree or a slot after its session is gone must be resumed or explicitly cancelled; preserve its ownership record until cleanup finishes.</p>"
                  + ("<table><tr><th>Task</th><th>Size, kind</th><th>Age (h)</th><th>Worktrees that exist</th><th>Record</th></tr>" + _rows([
                      (o["task"], f"{o['size']}, {o['kind']}", o["hours"], ", ".join(o["worktrees"]) or "none", o["path"]) for o in others]) + "</table>" if others else "<p>none</p>"))
-    pg = out.get("pages") or []
-    if pg:
-        parts.append("<h2>State pages</h2><table><tr><th>Page</th><th>State now</th></tr>" + _rows([
-            (p["page"], "; ".join(f"{k}: {v}" for k, v in p.get("state_now") or [])) for p in pg]) + "</table>")
     parts.append("</body></html>")
     return "\n".join(parts)

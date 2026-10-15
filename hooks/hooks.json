@@ -1,5 +1,5 @@
 {
-  "description": "agentkeel: task record, git boundary, secrets and plan-gate guards. Acts only in repositories with an agentkeel.json.",
+  "description": "agentkeel: task record and secret guards. Acts only in repositories with an agentkeel.json.",
   "hooks": {
     "SessionStart": [
       {
@@ -19,26 +19,6 @@
         "matcher": "^Bash$",
         "hooks": [
           { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" secret-guard.py --plugin", "timeout": 30 }
-        ]
-      },
-      {
-        "matcher": "^(Agent|.*spawn_agent)$",
-        "hooks": [
-          { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" plan-gate-guard.py --plugin", "timeout": 30 }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "^(apply_patch|Edit|Write)$",
-        "hooks": [
-          { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" plan-size-guard.sh --plugin", "timeout": 30 }
-        ]
-      },
-      {
-        "matcher": "^Bash$",
-        "hooks": [
-          { "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/run.sh\" verify-record.py --plugin", "timeout": 30 }
         ]
       }
     ],

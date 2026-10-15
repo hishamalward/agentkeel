@@ -38,18 +38,6 @@ def state_page(changes=("cli.py", "tests/"), must_not=("cli_legacy.py",), bounda
             f"<section id=\"behavior\"><p>Current behavior.</p></section>\n{b}{w}{extra}</body></html>\n")
 
 
-def approve_file(path, home, by="hisham", on="2026-10-05"):
-    """What the human's task.py approve does: write the approval meta and keep the boundary."""
-    from agentkeel_core import pages, record
-    with open(path, encoding="utf-8") as fh:
-        text = pages.with_approval(os.path.basename(path), fh.read(), by, on)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    b = pages.sections(text, "boundary")[0]
-    record.save_approved_boundary(pages.digest(os.path.basename(path), b), b, {"AGENTKEEL_HOME": home})
-    return text
-
-
 def git(repo, *args):
     subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True,
                    env={**os.environ, **GIT_ENV})

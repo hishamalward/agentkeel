@@ -22,10 +22,10 @@ import re
 import tempfile
 import time
 
-SIZES = ("small", "large")
+SIZES = ("no-code", "small", "large")
 SIZE_ALIASES = {"medium": "small"}  # accepted for one release; two sizes since 0.9, and the smaller one wins
 KINDS = ("feature", "fix", "review", "docs", "chore")
-GUARDS = ("task", "secret", "plan_gate", "plan_size", "fix", "mcp_unknown")
+GUARDS = ("task", "secret", "fix", "mcp_unknown")
 MODES = ("block", "warn", "off")
 # a guard with modes of its own, and its default when agentkeel.json sets none: an MCP server with
 # no catalog entry passes, as in 0.9.0, so the host's own servers keep working
@@ -277,21 +277,6 @@ def soften(name, text, cwd):
         return 0
     sys.stderr.write(text.rstrip() + "\n")
     return 2
-
-
-# ---- approved boundaries ---------------------------------------------------------------------
-
-def approved_boundary_path(digest, environ=os.environ):
-    return os.path.join(home(environ), "approvals", re.sub(r"[^0-9a-f]", "", digest) + ".html")
-
-
-def save_approved_boundary(digest, boundary_src, environ=os.environ):
-    """Kept when the human approves, so pre-action limits (a large task's Changes list) use the
-    approved boundary even after the draft on the page is edited."""
-    path = approved_boundary_path(digest, environ)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(boundary_src)
 
 
 def read(path):

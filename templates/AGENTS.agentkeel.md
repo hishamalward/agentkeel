@@ -1,53 +1,36 @@
-## agentkeel (managed by task.py init or install.py; full text: github.com/hishamalward/agentkeel)
+## AgentKeel (managed by task.py init)
 
-Three rules govern the workflow; a rule serving none goes.
-1. Bound each write to the request. Do the literal ask; mention adjacent problems, do not fix them.
-2. Give evidence for claims: run the check before claiming success. Report a failed check;
-   never widen the scope or narrow the check.
-3. Cap loops: one plan gate per plan, one review round per scope, one verification pass per
-   claim. Only the human re-opens a loop.
+Declare the task from the user's request before writing:
+    python3 "<task.py path>" start <task-id> --size no-code|small|large --allow <permissions> --deliverable <absolute-report.html>
+Use the path printed at session start. Size grants no permission. Medium aliases small.
+No-code owns report folders only. Every coding task gets its own worktree, created by Keel.
+Change into the printed worktree. Optional --path, --branch and --base select its location and base.
+Do not write code in canonical main. Cancel preserves unfinished work and ownership records.
 
-**Declare the task before the first write.** The guards read the record, not this text.
-    python3 "<task.py path>" start <task-id> --size small|large --allow <permissions> [--kind <kind>] [--deliverable <page>]
-Use the path printed at session start (.claude/hooks/task.py in a project install); run it
-as shown. State your reading of the request in the first update and proceed. Ask only for missing
-information, unclear intent or an action beyond scope. Size and kind grant nothing.
-- Small: own worktree, no plan or subagents, one check, short report (medium = small).
-- Large: approved boundary, plan gated once, reviews.
-- Kind: feature (default), fix, review, docs, chore. Fix: no code edit before a failed check
-  (task.py verify -- <cmd>) and a cause line (task.py cause "X causes Y because Z") are on
-  record; the fourth edit-then-fail cycle waits for the human's task.py reopen. Skill: debugging.
-- Permissions: review (report folders); implement (edits, explicit-path commits, local
-  checks, feature-branch pushes); merge (move a protected branch); push (remote pushes,
-  deploys); distribution-build; store-submission; paid-job; remote-write, publish (MCP;
-  need targets).
-- Code belongs in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>
-  records it) or its clone from the human's task.py open. Temp files: the task's printed
-  scratch folder.
-When in doubt, pick the smaller size. If it grows, stop and let the human re-scope.
-The main agent declares the task; subagents use it (a Codex subagent's shell has its own id:
-run task.py from the main agent). An opened session is bound automatically.
+Keep one coherent HTML report outside disposable worktrees. Include plans, progress, evidence,
+limitations and useful mockups. Rewrite it after feedback; no template or page schema is required.
+The report folder is a write root; --write-root can name additional external report folders.
+Run handoff to check report freshness. Missing/stale HTML blocks one normal Stop continuation;
+explicit handoff and finish refuse until current. Cancelling marks the task incomplete.
 
-**Gates**
-- G1 Boundary, human: task.py approve <feature> in the human's terminal.
-- G2 Plan, AI, once: plan reviewer plus scope auditor. Claude prompts use [plan-gate] and
-  the page path; Codex task_name plan_gate*.
-- G3 Review, AI: each task, then the whole branch; one round per scope.
-- G4 Ship, human decides: one PR per change; ready PRs test each new head. Fetch main, rebase
-  if needed, test, fast-forward. A PR grants nothing.
-**Docs** (agentkeel.json sets "docs": "html"): flat docs/, one HTML page each;
-task.py new starts one, task.py context reads it; plan and progress go in Working. The user is
-a very visual person: present findings, reviews and progress as HTML pages, with mockups where
-they help; the plain keel.css look is for the canon page only. Before main moves, rewrite the page's Outcome and run task.py finish. A gated
-move names the full checked SHA, alone in its call: git merge --ff-only <full-sha>.
-**Guards** refuse writes outside the task, protected-branch edits, bare commits, unpermitted
-shipping, edits to hook config or task state, a third plan gate.
-agentkeel.json "guards" sets each (task, secret, plan_gate, plan_size, fix) to block, warn
-or off. One-command overrides (logged): AGENTKEEL_ALLOW_DESTRUCTIVE=1, AGENTKEEL_SHOW_SECRETS=1.
-task.py verify runs a check: hooks record a pass, a failure records itself; Codex passes stay
-unrecorded; CI ships. Status page: task.py status --html.
+Permissions: review, implement, merge, push, distribution-build, store-submission, paid-job,
+remote-write, publish. Declare only what the user authorized; re-declaration is not consent.
+For fix tasks, use --kind fix. Record a failing check with verify and a cause with cause before
+editing code. After three failed edit/check cycles, report the evidence; only the human reopens.
 
-**Limits**: hooks miss shell writes inside scripts or redirects (task.py open adds a
-sandbox; Claude's temp folder is shared). Uncatalogued MCP servers pass
-(guards.mcp_unknown: pass|warn|block); add one in agentkeel.json "mcp". Browser writes
-are unsupported. The record is scope, not consent.
+Run verify -- <command> at the worktree root. It records foreground exit and code identity.
+Use the repository's required checks. A passing check on different code is stale.
+Run pr --title <title> --body-file <file> to push the tested commit and open the PR.
+Run ship --pr <number> after review/checks: exact commit push, then pull --ff-only in clean
+canonical main. Dirty, ahead, diverged or busy main stays sync_pending; never reset or autostash.
+Refresh the HTML with the ship result, then finish. Finish releases optional Slots resources,
+checks ownership/preservation/processes, and removes the worktree. Refresh the final HTML and
+retry if report_pending. --keep retains a preview explicitly. Failed stages remain retryable.
+AgentSlots is optional: dependencies and requested runtime only. No runtime means no Slots call.
+
+Use the smallest change that solves the request, reuse existing code, and test meaningful behavior.
+When Ponytail is active, its coding principles replace these general coding preferences.
+The debugging skill and task/ownership/HTML checks still apply.
+Hooks catch supported tool operations; shell scripts and browser side effects can escape them.
+The human-only open/import/release commands retain the stronger independent-clone boundary.
+Status --html shows derived facts; it does not replace the task's review report.

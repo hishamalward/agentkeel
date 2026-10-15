@@ -6,13 +6,11 @@ a protected branch (then it can be removed) or how many commits are not, and how
 changed or untracked. For a session opened with task.py open: its clone, and whether release
 would accept it now (isolation.release_problems), or why not.
 
-It is a report and nothing else. It never deletes or changes a resource, never blocks the stop and
-never makes the host continue the turn: the text goes out as "systemMessage", which both hosts
-show to the human, and the exit status is 0, also on its own failure. Repositories are read with
+It never deletes or changes a resource. An incomplete declared HTML deliverable blocks one Stop
+attempt so the agent can update it; an active retry and a cancelled lifecycle are never blocked.
+Other state is reported through "systemMessage" when it changes. Repositories are read with
 repostate, which runs nothing a repository's config names; a worktree that cannot be read is
-reported as unreadable, never as clean. It speaks only when the report differs from the last one
-it gave this session (a hash in AGENTKEEL_HOME/stop-reports/), and it is silent when the session
-has no task or the repository did not opt in.
+reported as unreadable, never as clean.
 """
 import hashlib
 import json
@@ -20,7 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import isolation, record, repostate  # noqa: E402
+from agentkeel_core import delivery, isolation, record, repostate  # noqa: E402
 
 
 def _plural(n, word):
@@ -71,7 +69,7 @@ def clone_line(opened):
     return f"  clone {opened['clone']} (branch {opened.get('branch')}): ready to release (task.py release {opened['task']})"
 
 
-def report(session_id, environ=os.environ):
+def report(session_id, environ=os.environ, delivery_issues=None):
     """The report text, or None when this session's task holds nothing that still exists."""
     rec = record.load(session_id, environ)
     if not rec:
@@ -83,19 +81,17 @@ def report(session_id, environ=os.environ):
     for w in rec.get("worktrees") or []:
         if os.path.isdir(w) and not (opened and w == opened.get("clone")):
             lines.append(worktree_line(w))
-    d = rec.get("deliverable")
-    if d:
-        if not os.path.exists(d):
-            lines.append(f"  deliverable {d}: declared, not written yet")
-        elif os.path.getmtime(d) < int(rec.get("declared_at") or 0):
-            lines.append(f"  deliverable {d}: exists, but unchanged since the task was declared")
+    if rec.get("deliverable") or rec.get("version") == 2:
+        problems = delivery_issues if delivery_issues is not None else delivery.problems(rec)
+        state = "incomplete: " + "; ".join(problems) if problems else "current HTML checkpoint"
+        lines.append(f"  deliverable {rec['deliverable']}: {state}")
     if not lines:
         return None
-    return (f"agentkeel: task '{rec.get('task')}' still holds (a report only; nothing was removed):\n"
+    return (f"agentkeel: task '{rec.get('task')}' still holds (nothing was removed):\n"
             + "\n".join(lines))
 
 
-def first_time(session_id, text, environ=os.environ):
+def first_time(session_id, text, rec=None, problems=None, environ=os.environ):
     """True unless this exact report was the last one given to this session. The hash is kept
     best-effort: if it cannot be written, the report is given anyway."""
     path = os.path.join(record.home(environ), "stop-reports", record._safe(session_id) + ".json")
@@ -107,7 +103,8 @@ def first_time(session_id, text, environ=os.environ):
     except Exception:
         pass
     try:
-        record.atomic_write_json(path, {"hash": digest})
+        checkpoint = delivery.checkpoint(rec) if rec and rec.get("deliverable") else None
+        record.atomic_write_json(path, {"hash": digest, "incomplete": bool(problems), "checkpoint": checkpoint})
     except Exception:
         pass
     return True
@@ -122,8 +119,20 @@ def main():
         if not isinstance(payload, dict) or record.plugin_inactive(sys.argv, payload):
             return 0
         sid = payload.get("session_id")
-        text = report(sid) if sid else None
-        if text and first_time(sid, text):
+        rec = record.load(sid) if sid else None
+        needs_delivery = rec and (rec.get("version") == 2 or rec.get("deliverable"))
+        issues = delivery.problems(rec) if needs_delivery else []
+        text = report(sid, delivery_issues=issues) if rec else None
+        active = bool(payload.get("stop_hook_active"))
+        cancelled = rec.get("lifecycle") == "cancelled" if rec else False
+        if issues and not active and not cancelled:
+            if text:
+                first_time(sid, text, rec, issues)
+            reason = "AGENTKEEL: HTML checkpoint incomplete for this handoff: " + "; ".join(issues)
+            if text:
+                reason += "\n\n" + text
+            sys.stdout.write(json.dumps({"decision": "block", "reason": reason}) + "\n")
+        elif text and first_time(sid, text, rec, issues):
             sys.stdout.write(json.dumps({"systemMessage": text}) + "\n")
     except Exception as exc:  # a report is never worth a blocked stop
         sys.stderr.write(f"stop-report: internal error, no report: {exc}\n")

@@ -1,58 +1,14 @@
 #!/usr/bin/env python3
-"""agentkeel task: declare what this session's task is, before the first write.
+"""AgentKeel: declare a task, own its worktree, keep current HTML, and finish safely.
 
-  task.py init                     opt this repository in: create agentkeel.json if it is missing
-                                   (never overwrite it), register the opt-in, report each host
-  task.py open <task-id> --host claude|codex --size S --allow P [--base B] [--branch BR] [--path DIR]
-               [--print]           HUMAN ONLY: make the task's own clone and scratch folder, and
-                                   start the host in the clone with this session's sandbox boundary
-  task.py import <task-id> --sha <full id>
-                                   HUMAN ONLY: bring the clone's branch into the shared repository as
-                                   refs/agentkeel/accepted/<task-id>, only if it is exactly that commit
-  task.py release <task-id> [--discard]
-                                   HUMAN ONLY: delete the clone, scratch and records once nothing in the
-                                   clone is unpreserved (--discard deletes it anyway)
-  task.py start <task-id> --size small|large --allow <permissions> [--kind fix|feature|review|docs|chore] [--deliverable <page>]
-  task.py cause "X causes Y because Z"       the one-line cause a fix task records before its first code edit
-  task.py reopen <task-id>                    human only: after three failed fixes, re-open the loop
-  task.py status --html [--open]              the status page, in the task scratch folder
-  task.py mcp draft <server>                  a catalog entry for an MCP server with none, from the
-                                              calls this task has seen, to paste under agentkeel.json "mcp"
-                [--write-root PATH]... [--worktree PATH]... [--resource NAME]...
-  task.py show                     the record for this session
-  task.py status [--json]          derived facts, read-only, with or without a session: this task's
-                                   worktrees, tasks in their own clones, other worktrees, and each
-                                   state page's State now with its claims
-  task.py verify -- <command...>   run a check; the hooks record its result against HEAD and the tree
-  task.py end                      drop the record (the task is finished or abandoned)
-  task.py approve <task-id|page>   HUMAN ONLY: approve the boundary of a docs/ page
-
-Documentation (repositories with "docs": "html" in agentkeel.json; see docs/ in agentkeel):
-  task.py new <kind> <family> [--qualifier Q] [--title T] [--boundary]
-                                   start a page from the starter: kind is state, reference,
-                                   audit, mockup, or project (the one project canon)
-  task.py context <page>           the page as plain structured text, for reading
-  task.py finish <page>            remove the page's Working section before main moves
-  task.py check [--rev R] [--base B]   the docs check main moves on (the working folder by default)
-  task.py index [--full]           write the derived docs/index.html (never committed) and print
-                                   it as text; --full lists every legacy file
-
-Permissions (comma separated, any combination): review, implement, merge, push,
-distribution-build, store-submission, paid-job, remote-write (changes on a guarded MCP service,
-within the targets agentkeel.json lists), publish (an MCP call that makes something live for end
-users or sends to them; store-submission covers the app stores). Size never grants a permission: they are
-separate answers to separate questions. "merge and push" in the human's request means
---allow implement,merge,push; a distribution build is never implied by shipping.
-
-The record is bound to this session (CLAUDE_CODE_SESSION_ID in Claude Code, CODEX_THREAD_ID in
-Codex, AGENTKEEL_SESSION_ID given inline for other hosts or when both are set) and stored in
-AGENTKEEL_HOME (default ~/.agentkeel). A second session cannot use it: the guard refuses an
-AGENTKEEL_SESSION_ID that is not the caller's own id.
-`approve` is refused when an agent runs it through its shell tool; the human runs it in a
-terminal of their own, outside the agent session.
+start requires --size no-code|small|large, --allow and --deliverable. Medium aliases small.
+Coding tasks create their own linked worktree; no-code tasks only own report folders.
+verify records a foreground check against unchanged code. handoff validates free-form HTML.
+pr opens a pull request; ship sends the exact verified commit then pulls canonical main.
+finish releases owned resources/worktree and validates the final HTML. cancel preserves work.
+Legacy human-only open/import/release retain independent-clone containment.
 """
 import argparse
-import datetime
 import shlex
 import json
 import os
@@ -62,7 +18,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, mcp, pages, record, starters  # noqa: E402
+from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, mcp, record, delivery, workspace, shipping  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -79,91 +35,62 @@ def realpath(p, cwd):
 def start(args, environ):
     session = record.session_from_env(environ)
     if not session:
-        return fail("no session id: cannot tell which session runs this. Run it from the agent\n"
-                    "session (Claude Code sets CLAUDE_CODE_SESSION_ID, Codex sets CODEX_THREAD_ID). If both are set and the\n"
-                    "running agent cannot be found, give your own id inline, as printed at session start:\n"
-                    "  AGENTKEEL_SESSION_ID=<id> python3 task.py ...")
+        return fail("no session id; use the identity printed by your host at session start")
     if not args.task or set(args.task) - TASK_ID_CHARS:
-        return fail("task id must be kebab-case (a-z, 0-9, -), e.g. json-flag")
-    perms = [p.strip() for p in (args.allow or "").split(",") if p.strip()]
-    unknown = [p for p in perms if p not in record.PERMISSIONS]
-    if not perms or unknown:
-        return fail(f"--allow needs one or more of: {', '.join(record.PERMISSIONS)}"
-                    + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
+        return fail("task id must be kebab-case (a-z, 0-9, -)")
+    perms = sorted(set(p.strip() for p in args.allow.split(",") if p.strip()))
+    if not perms or set(perms) - set(record.PERMISSIONS):
+        return fail("unknown or empty permission; choose from " + ", ".join(record.PERMISSIONS))
     size = record.SIZE_ALIASES.get(args.size, args.size)
-    if size != args.size:
-        sys.stderr.write(f"agentkeel: size '{args.size}' is '{size}' now: two sizes since 0.9, small or large.\n")
-    args.size = size
     cwd = os.getcwd()
-    top = gitops.toplevel(cwd)
-    shared = bool(top) and gitops.is_primary(top)
-    worktrees = [os.path.realpath(top)] if top and not shared else []
-    worktrees += [realpath(p, cwd) for p in args.worktree or []]
-    roots = [realpath(p, cwd) for p in args.write_root or []]
-    too_wide = {"/", os.path.realpath(os.path.expanduser("~")), record.home(environ)}
-    for r in roots:
-        if r in too_wide or r.startswith(record.home(environ) + os.sep):
-            return fail(f"--write-root {r} is too wide or is agentkeel's own state")
-        inside = gitops.toplevel(r if os.path.isdir(r) else os.path.dirname(r) or "/")
-        if inside:
-            return fail(f"--write-root {r} is inside the repository {inside}.\n"
-                        "Write roots are report folders outside any repository. To change files in a\n"
-                        "repository, use --allow implement in the task's own worktree.")
-    if "review" in perms and "implement" not in perms and not roots:
-        sys.stderr.write("agentkeel: note: a review task writes only to its --write-root folders; none given,\n"
-                         "so every write will be refused.\n")
-
-    prev = record.load(session, environ)
-    now = int(time.time())
-    kind = getattr(args, "kind", None) or "feature"
-    deliverable = realpath(args.deliverable, cwd) if getattr(args, "deliverable", None) else None
-    rec = {"version": 1, "task": args.task, "session_id": session, "size": args.size, "kind": kind,
-           "permissions": sorted(set(perms)), "worktrees": [], "write_roots": [],
-           "resources": sorted(set(args.resource or [])), "declared_at": now, "evidence": [],
-           "history": [], "deliverable": deliverable, "cause": None, "fix": {"cycles": 0, "edited": False}}
-    if prev and prev.get("task") == args.task:
-        rec["deliverable"] = deliverable or prev.get("deliverable")
-        rec["cause"] = prev.get("cause")
-        rec["fix"] = prev.get("fix") or rec["fix"]
-        rec["declared_at"] = prev.get("declared_at") or now
-        rec["history"] = (prev.get("history") or []) + [
-            {k: prev.get(k) for k in ("size", "permissions", "declared_at")}]
-        rec["worktrees"] = prev.get("worktrees") or []
-        rec["write_roots"] = prev.get("write_roots") or []
-        rec["resources"] = sorted(set(rec["resources"]) | set(prev.get("resources") or []))
-        rec["evidence"] = prev.get("evidence") or []
-        widened = sorted(set(perms) - set(prev.get("permissions") or []))
-        if widened:
-            sys.stderr.write(f"agentkeel: permissions widened for '{args.task}': +{', +'.join(widened)}.\n"
-                             "This is your reading of the human's request; say so in your next update.\n")
-        if prev.get("size") != args.size:
-            sys.stderr.write(f"agentkeel: re-declared size {prev.get('size')} -> {args.size}. "
-                             "A task never grows on its own; the human decides re-scoping.\n")
-    for w in worktrees:
-        if w not in rec["worktrees"]:
-            rec["worktrees"].append(w)
-    for r in roots:
-        if r not in rec["write_roots"]:
-            rec["write_roots"].append(r)
-    import tempfile
-    rec["scratch"] = os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch",
-                                  record._safe(session))
-    os.makedirs(rec["scratch"], exist_ok=True)
-    path = record.save(rec, environ)
-    print(f"agentkeel: task '{args.task}', size {args.size}, kind {kind}, permissions {', '.join(rec['permissions'])}")
-    print(f"  worktrees: {', '.join(rec['worktrees']) or '(none)'}")
-    if rec.get("deliverable"):
-        print(f"  deliverable: {rec['deliverable']} (the stop report says when it is missing)")
-    if kind == "fix":
-        print("  kind fix: before the first code edit, record a failed check (task.py verify -- <cmd>)\n"
-              "  and the cause (task.py cause \"...\"); three edit-then-fail cycles stop the loop.")
-    if rec["write_roots"]:
-        print(f"  write roots: {', '.join(rec['write_roots'])}")
-    print(f"  scratch: {rec['scratch']}")
-    if shared and "implement" in rec["permissions"]:
-        print(f"  note: {top} is the shared checkout. Code edits happen in this task's own worktree:\n"
-              f"    git worktree add ../{os.path.basename(top)}-{args.task} -b feat/{args.task}")
-    print(f"  record: {path}")
+    deliverable = realpath(args.deliverable, cwd)
+    roots = [realpath(p, cwd) for p in args.write_root or [os.path.dirname(deliverable)]]
+    for root in roots:
+        if root in ("/", os.path.realpath(os.path.expanduser("~")), record.home(environ)) or root.startswith(record.home(environ) + os.sep):
+            return fail("report root is too wide or inside AgentKeel state: " + root)
+        probe = root
+        while not os.path.isdir(probe):
+            probe = os.path.dirname(probe)
+        if gitops.toplevel(probe):
+            return fail("report root is inside a repository; choose a persistent folder outside it")
+    if not any(deliverable.startswith(root + os.sep) for root in roots):
+        return fail("--deliverable must be inside a declared --write-root")
+    if not deliverable.lower().endswith((".html", ".htm")):
+        return fail("--deliverable must name an HTML file")
+    with record.locked(record.record_path(session, environ)):
+        prev = record.load(session, environ)
+        if prev and prev.get("task") != args.task:
+            if prev.get("lifecycle") != "complete" or prev.get("worktrees"):
+                return fail("finish the existing task before replacing its ownership record")
+            archive = os.path.join(record.home(environ), "completed", record._safe(session), prev["task"] + ".json")
+            record.atomic_write_json(archive, prev)
+            prev = None
+        if prev and size == "no-code" and prev.get("worktrees"):
+            return fail("a task with a worktree cannot become no-code; finish it first")
+        rec = prev or {"version": 2, "task": args.task, "session_id": session,
+                       "worktrees": [], "write_roots": [], "resources": [], "declared_at": time.time(),
+                       "evidence": [], "history": [], "cause": None, "fix": {"cycles": 0, "edited": False}}
+        if prev:
+            rec["history"].append({k: prev.get(k) for k in ("size", "permissions", "declared_at")})
+            widened = sorted(set(perms) - set(prev.get("permissions") or []))
+            if widened:
+                print("agentkeel: permissions widened: " + ", ".join(widened) + "; state the authorization in your update")
+        if size != "no-code" and not rec.get("worktrees"):
+            try:
+                owned = workspace.create(cwd, args.task, session, path=args.path, branch=args.branch, base=args.base)
+            except (ValueError, OSError, workspace.WorkspaceError) as exc:
+                return fail(str(exc))
+            rec["workspace"] = owned
+            rec["worktrees"] = [owned["path"]]
+        rec.update(size=size, kind=args.kind, permissions=perms, deliverable=deliverable,
+                   write_roots=sorted(set(roots) | set(rec["write_roots"])), lifecycle="active")
+        rec["scratch"] = os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch", record._safe(session))
+        os.makedirs(rec["scratch"], exist_ok=True)
+        record.save(rec, environ)
+    print(f"agentkeel: task '{args.task}', {size}; permissions {', '.join(perms)}")
+    print("  worktree: " + (rec["worktrees"][0] if rec["worktrees"] else "none (no-code)"))
+    print("  deliverable: " + deliverable)
+    print("  scratch: " + rec["scratch"])
     return 0
 
 
@@ -229,33 +156,34 @@ def show(args, environ):
 
 
 def verify(args, environ):
-    """Run a check. The hooks, not this command, record its result: the guard notes the start
-    (HEAD and the working tree), and the PostToolUse hook the completion the host reports. A
-    record the agent's own command writes would prove nothing."""
     cmd = list(args.cmd or [])
-    if cmd and cmd[0] == "--":
-        cmd = cmd[1:]
-    if not cmd:
-        return fail("usage: task.py verify -- <command...>")
-    code = subprocess.call(cmd)
-    if code != 0:
-        # A failure needs no hook to be trusted: the command ran under task.py and did not pass.
-        # Only a pass is recorded by the hooks (exit 0 on unchanged code).
-        rec = record.load(record.session_from_env(environ), environ)
-        if rec:
-            head, tree = evidence.code_state(os.getcwd())
-            rec["evidence"] = (rec.get("evidence") or [])[-(evidence.KEEP - 1):] + [{
-                "command": " ".join(cmd)[:300], "result": "failed", "reason": f"exit {code}, recorded by task.py verify",
-                "head": head, "tree": tree, "at": int(time.time()), "seconds": 0}]
-            fix = rec.get("fix") or {"cycles": 0, "edited": False}
-            if rec.get("kind") == "fix" and fix.get("edited"):
-                fix["cycles"] = int(fix.get("cycles") or 0) + 1
-                fix["edited"] = False
-                sys.stderr.write(f"agentkeel: fix cycle {fix['cycles']} of 3 failed (an edit, then a failed check).\n")
-            rec["fix"] = fix
-            record.save(rec, environ)
-    sys.stderr.write(f"agentkeel: `{' '.join(cmd)}` exited {code}; "
-                     + ("recorded as failed" if code != 0 else "the hooks record a pass") + " (task.py show)\n")
+    if cmd[:1] == ["--"]:
+        cmd.pop(0)
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec or not cmd:
+        return fail("declare a task, then run verify -- <command...>")
+    cwd = os.path.realpath(os.getcwd())
+    if cwd not in rec.get("worktrees", []) and rec.get("size") != "no-code":
+        return fail("run verify at this task's worktree root")
+    before, started = evidence.code_state(cwd), time.time()
+    try:
+        code = subprocess.call(cmd, env=environ)
+    except OSError as exc:
+        return fail(str(exc))
+    after = evidence.code_state(cwd)
+    result = "failed" if code else "passed" if before[1] and before == after else "stale"
+    # Reload: the check may have triggered a host hook while it ran.
+    rec = record.load(rec["session_id"], environ)
+    rec["evidence"] = (rec.get("evidence") or [])[-(evidence.KEEP - 1):] + [{
+        "command": shlex.join(cmd)[:300], "result": result, "reason": f"exit {code}; foreground verification",
+        "head": before[0], "tree": before[1], "at": time.time(), "seconds": time.time() - started}]
+    fix = rec.get("fix") or {"cycles": 0, "edited": False}
+    if code and rec.get("kind") == "fix" and fix.get("edited"):
+        fix.update(cycles=int(fix.get("cycles") or 0) + 1, edited=False)
+        sys.stderr.write(f"agentkeel: fix cycle {fix['cycles']} of 3 failed\n")
+    rec["fix"] = fix
+    record.save(rec, environ)
+    print(f"agentkeel: check {result} (exit {code})")
     return code
 
 
@@ -296,149 +224,63 @@ def reopen(args, environ):
     return 0
 
 
-def end(args, environ):
-    session = record.session_from_env(environ)
-    rec = record.load(session, environ)
-    if not rec:
-        print("agentkeel: no task declared for this session")
-        return 0
-    os.remove(record.record_path(session, environ))
-    print(f"agentkeel: task '{rec.get('task')}' ended. It owned:")
-    for w in rec.get("worktrees") or []:
-        print(f"  worktree {w}")
-    for r in rec.get("write_roots") or []:
-        print(f"  write root {r}")
-    for r in rec.get("resources") or []:
-        print(f"  resource {r}")
-    return 0
-
-
-def find_page(target, top):
-    """A page path from a path or a feature name (its state page)."""
-    if target.endswith(".html"):
-        return realpath(target, os.getcwd())
-    import glob
-    found = sorted(glob.glob(os.path.join(top, "docs", f"[0-9][0-9][0-9][0-9][0-9][0-9]-{target}-state.html")))
-    return found[0] if len(found) == 1 else None
-
-
-def approve(args, environ):
-    cwd = os.getcwd()
-    top = gitops.toplevel(cwd) or cwd
-    path = find_page(args.target, top)
-    text = record.read(path) if path else None
-    if text is None:
-        return fail(f"no page for '{args.target}': give a docs/ page path, or a feature with one state page")
-    who = gitops.run_git(cwd, "config", "user.name") or os.environ.get("USER", "")
-    today = datetime.date.today().isoformat()
-    name = os.path.basename(path)
-    try:
-        new = pages.with_approval(name, text, who, today)
-    except ValueError as exc:
-        return fail(str(exc))
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(new)
-    boundary = pages.sections(new, "boundary")[0]
-    record.save_approved_boundary(pages.digest(name, boundary), boundary, environ)
-    print(f"agentkeel: the boundary of {os.path.relpath(path, top)} is approved by {who} on {today}.\n"
-          "Later edits to it keep main from moving until it is approved again.")
-    return 0
-
-
-def own_page_folder(environ, what):
-    """(record, repository top) when this session may write docs here, else (None, message)."""
+def handoff(args, environ):
     rec = record.load(record.session_from_env(environ), environ)
-    top = gitops.toplevel(os.getcwd())
     if not rec:
-        return None, "no task declared for this session; declare one with task.py start"
-    if "implement" not in (rec.get("permissions") or []):
-        return None, f"{what} writes a docs/ page: it needs the 'implement' permission"
-    if not top or os.path.realpath(top) not in (rec.get("worktrees") or []):
-        return None, (f"{what} writes in this task's own worktree; run it there "
-                      f"({', '.join(rec.get('worktrees') or []) or 'none recorded'})")
-    return rec, os.path.realpath(top)
-
-
-def new(args, environ):
-    rec, top = own_page_folder(environ, "task.py new")
-    if rec is None:
-        return fail(top)
-    if args.kind not in ("state", "reference", "audit", "mockup", "project"):
-        return fail("kind is one of: state, reference, audit, mockup, project")
-    family = "project" if args.kind == "project" else args.family
-    if not family or set(family) - TASK_ID_CHARS or (args.qualifier and set(args.qualifier) - TASK_ID_CHARS):
-        return fail("family and qualifier are kebab-case (a-z, 0-9, -)")
-    import glob
-    docs = os.path.join(top, "docs")
-    kind = "reference" if args.kind == "project" else args.kind
-    if kind == "state" or args.kind == "project":
-        existing = glob.glob(os.path.join(docs, f"[0-9][0-9][0-9][0-9][0-9][0-9]-{family}-{kind}.html"))
-        if existing:
-            return fail(f"{os.path.relpath(existing[0], top)} already exists: a feature has one state page "
-                        "and a repository one canon. Edit it.")
-    today = datetime.date.today()
-    date = family_date(docs, family) or today.strftime("%y%m%d")
-    name = f"{date}-{family}{'-' + args.qualifier if args.qualifier else ''}-{kind}.html"
-    path = os.path.join(docs, name)
-    if os.path.exists(path):
-        return fail(f"{os.path.relpath(path, top)} already exists")
-    title = args.title or ("Project canon" if args.kind == "project" else family.replace("-", " ").capitalize())
-    boundary = args.boundary or (args.kind == "state" and rec.get("size") == "large")
-    os.makedirs(docs, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(starters.page(args.kind, title, today.isoformat(), boundary=boundary))
-    css = os.path.join(docs, "keel.css")
-    if not os.path.exists(css):
-        with open(css, "w", encoding="utf-8") as fh:
-            fh.write(starters.KEEL_CSS)
-        print(f"agentkeel: wrote {os.path.relpath(css, top)}")
-    print(f"agentkeel: wrote {os.path.relpath(path, top)}"
-          + (" (with a boundary for the human to approve)" if boundary else ""))
+        return fail("no task declared for this session")
+    problems = delivery.problems(rec)
+    if problems:
+        return fail("HTML handoff pending: " + "; ".join(problems))
+    rec["html_checkpoint"] = delivery.checkpoint(rec)
+    rec["lifecycle"] = "handoff"
+    record.save(rec, environ)
+    print("agentkeel: HTML handoff current: " + rec["deliverable"])
     return 0
 
 
-def family_date(docs, family):
-    """The date prefix a family already uses: every page of one feature shares its first date, so
-    the files sort together. The family's state page sets it, else a page named for the family alone."""
-    names = sorted(os.listdir(docs)) if os.path.isdir(docs) else []
-    for kinds in (("state",), pages.KINDS):
-        for name in names:
-            m = pages.NAME_RE.match(name)
-            if m and m.group(2) == family and m.group(3) in kinds:
-                return m.group(1)
-    return None
-
-
-def context(args, environ):
-    text = record.read(realpath(args.page, os.getcwd()))
-    if text is None:
-        return fail(f"cannot read {args.page}")
-    sys.stdout.write(pages.context(text))
+def cancel(args, environ):
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec:
+        return fail("no task declared for this session")
+    rec["lifecycle"] = "cancelled"
+    record.save(rec, environ)
+    print("agentkeel: cancelled, incomplete; worktree, resources and task record retained")
     return 0
 
 
 def finish(args, environ):
-    rec, top = own_page_folder(environ, "task.py finish")
-    if rec is None:
-        return fail(top)
-    path = realpath(args.page, os.getcwd())
-    text = record.read(path)
-    if text is None or not path.startswith(top + os.sep):
-        return fail(f"{args.page} is not a page in this task's worktree")
-    if not pages.sections(text, "working"):
-        print("agentkeel: no Working section; nothing to remove")
-        return 0
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(pages.without_working(text))
-    print(f"agentkeel: removed the Working section of {os.path.relpath(path, top)}.\n"
-          "Anything still unfinished belongs in Remaining scope or Current limitations.")
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec:
+        return fail("no task declared for this session")
+    try:
+        shipping.finish(rec, environ, keep=args.keep)
+    except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
+        return fail(str(exc))
+    print("agentkeel: " + rec["lifecycle"] + "; report: " + rec["deliverable"])
     return 0
 
 
-def check(args, environ):
-    top = gitops.toplevel(os.getcwd()) or os.getcwd()
-    return pages.main(["check", "--root", top] + (["--rev", args.rev] if args.rev else [])
-                      + (["--base", args.base] if args.base else []))
+def pr(args, environ):
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec:
+        return fail("no task declared for this session")
+    try:
+        print(shipping.pr(rec, args.title, args.body_file, environ))
+    except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
+        return fail(str(exc))
+    return 0
+
+
+def ship(args, environ):
+    rec = record.load(record.session_from_env(environ), environ)
+    if not rec:
+        return fail("no task declared for this session")
+    try:
+        shipping.ship(rec, args.pr, environ)
+    except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
+        return fail(str(exc))
+    print("agentkeel: merged and canonical main synchronized; refresh HTML then run finish")
+    return 0
 
 
 def record_interpreter(environ):
@@ -533,8 +375,6 @@ def init(args, environ):
     rows.append(("in force", "protected branches: " + ", ".join(sorted(pol["protected"]))
                  + "; every write needs a declared task and its own worktree; shipping needs its permission"))
     off = []
-    if data.get("docs") != "html":
-        off.append('HTML work records ("docs": "html")')
     if not pol["require_check"]:
         off.append('the push gate ("require_check_before_push": "<check name>", see docs/required-checks.md)')
     if off:
@@ -586,11 +426,6 @@ def init(args, environ):
     for k, v in rows:
         print(f"  {k.ljust(width)}  {v}")
     return 0
-
-
-def index(args, environ):
-    top = os.path.realpath(gitops.toplevel(os.getcwd()) or os.getcwd())
-    return pages.main(["index", "--root", top] + (["--full"] if args.full else []))
 
 
 def _worktree_list(top):
@@ -658,7 +493,7 @@ def status(args, environ):
     protected = sorted(pol["protected"], key=lambda b: (b != "main", b))
     rec = record.load(record.session_from_env(environ), environ)
     mine = [w for w in (rec.get("worktrees") or []) if os.path.isdir(w)] if rec else []
-    out = {"repository": top, "task": None, "worktrees": [], "opened": [], "others": [], "pages": []}
+    out = {"repository": top, "task": None, "worktrees": [], "opened": [], "others": []}
     if rec:
         out["task"] = {"id": rec.get("task"), "size": rec.get("size"), "kind": rec.get("kind") or "feature",
                        "permissions": rec.get("permissions") or [], "deliverable": rec.get("deliverable"),
@@ -678,16 +513,6 @@ def status(args, environ):
             continue
         out["others"].append({"path": path, "branch": branch, "shared": i == 0,
                               "task": owners.get(path)})
-    docs = os.path.join(top, "docs")
-    for name in sorted(os.listdir(docs)) if os.path.isdir(docs) else []:
-        m = pages.NAME_RE.match(name)
-        if not (m and m.group(3) == "state"):
-            continue
-        text = record.read(os.path.join(docs, name)) or ""
-        out["pages"].append({"page": "docs/" + name, "state_now": [list(p) for p in pages.state_now(text)],
-                             "claims": [{"label": label, "claim": claim, "result": r[0], "why": r[1]}
-                                        for label, claim, commit, ref in pages.claims(text)
-                                        for r in [pages.judge(top, commit, ref, "HEAD")]]})
     if args.json:
         print(json.dumps(out, indent=2))
         return 0
@@ -731,13 +556,6 @@ def status(args, environ):
         print(f"  {o['path']}  branch {o['branch'] or '?'}  "
               + (f"foreign: task {o['task']}" if o["task"] else "no task record")
               + ("  (shared checkout)" if o["shared"] else "") + ("  (here)" if o["path"] == top else ""))
-    print("state pages:" if out["pages"] else "state pages: none")
-    for pg in out["pages"]:
-        print(f"  {pg['page']}")
-        for k, v in pg["state_now"]:
-            print(f"    {k}: {v}")
-        for c in pg["claims"]:
-            print(f"    claim '{c['claim']}': {c['result']} ({c['why']})")
     return 0
 
 
@@ -766,10 +584,11 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--size", required=True, choices=record.SIZES + tuple(record.SIZE_ALIASES))
     s.add_argument("--allow", required=True)
     s.add_argument("--kind", choices=record.KINDS, default="feature")
-    s.add_argument("--deliverable")
+    s.add_argument("--deliverable", required=True)
     s.add_argument("--write-root", action="append")
-    s.add_argument("--worktree", action="append")
-    s.add_argument("--resource", action="append")
+    s.add_argument("--path")
+    s.add_argument("--branch")
+    s.add_argument("--base", default="main")
     o = sub.add_parser("open")
     o.add_argument("task")
     o.add_argument("--host", required=True, choices=isolation.HOSTS)
@@ -790,21 +609,15 @@ def main(argv=None, environ=os.environ):
     sub.add_parser("init")
     v = sub.add_parser("verify")
     v.add_argument("cmd", nargs=argparse.REMAINDER)
-    sub.add_parser("end")
-    a = sub.add_parser("approve")
-    a.add_argument("target")
-    n = sub.add_parser("new")
-    n.add_argument("kind")
-    n.add_argument("family", nargs="?", default="")
-    n.add_argument("--qualifier")
-    n.add_argument("--title")
-    n.add_argument("--boundary", action="store_true")
-    for name in ("context", "finish"):
-        sub.add_parser(name).add_argument("page")
-    c = sub.add_parser("check")
-    c.add_argument("--rev")
-    c.add_argument("--base")
-    sub.add_parser("index").add_argument("--full", action="store_true")
+    sub.add_parser("cancel")
+    sub.add_parser("handoff")
+    f = sub.add_parser("finish")
+    f.add_argument("--keep", action="store_true", help="retain the worktree and runtime for a preview")
+    prp = sub.add_parser("pr")
+    prp.add_argument("--title", required=True)
+    prp.add_argument("--body-file", required=True)
+    sp = sub.add_parser("ship")
+    sp.add_argument("--pr", type=int, required=True)
     st = sub.add_parser("status")
     st.add_argument("--json", action="store_true")
     st.add_argument("--html", action="store_true")
@@ -819,8 +632,9 @@ def main(argv=None, environ=os.environ):
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd, "start": start, "show": show, "verify": verify, "end": end, "approve": approve, "new": new,
-                "context": context, "finish": finish, "check": check, "index": index, "status": status,
+    handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd,
+                "start": start, "show": show, "verify": verify, "cancel": cancel,
+                "handoff": handoff, "finish": finish, "pr": pr, "ship": ship, "status": status,
                 "cause": cause, "reopen": reopen, "mcp": mcp_cmd}
     if args.action not in handlers:
         p.print_help()
@@ -838,10 +652,9 @@ def selftest():
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         run = lambda *a: subprocess.run([sys.executable, here, *a], cwd=repo, env=env,
                                         capture_output=True, text=True).returncode
-        ok = [run("start", "json-flag", "--size", "medium", "--allow", "implement") == 0,
-              run("start", "json-flag", "--size", "huge", "--allow", "implement") != 0,
-              run("start", "json-flag", "--size", "small", "--allow", "deploy") != 0,
-              run("show") == 0, run("end") == 0, run("show") == 1]
+        report = os.path.join(tmp, "reports", "result.html")
+        ok = [run("start", "json-flag", "--size", "no-code", "--allow", "review", "--deliverable", report) == 0,
+              run("show") == 0, run("handoff") != 0, run("cancel") == 0, run("show") == 0]
     print("task.py selftest:", "PASS" if all(ok) else f"FAIL {ok}")
     return 0 if all(ok) else 1
 

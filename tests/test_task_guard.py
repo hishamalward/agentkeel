@@ -4,13 +4,14 @@ import os
 import subprocess
 import unittest
 
-from helpers import HOOKS, approve_file, state_page, GIT_ENV, SESSION, RepoCase, git
+from helpers import HOOKS, GIT_ENV, SESSION, RepoCase, git
 
 
 class NoTask(RepoCase):
     def test_write_without_task_blocked(self):
         code, err = self.hook(self.write("src/a.py"))
         self.assertEqual(code, 2); self.assertIn("no task is declared", err)
+        self.assertIn("--deliverable", err); self.assertIn("no-code|small|large", err)
 
     def test_docs_write_without_task_blocked_too(self):
         self.assertEqual(self.hook(self.write("docs/x.md"))[0], 2)
@@ -114,13 +115,13 @@ class Branches(RepoCase):
         self.declare(); self.branch("feat/x")
         self.assertEqual(self.hook(self.write("src/a.py"))[0], 0)
 
-    def test_worktree_add_is_recorded_as_owned(self):
+    def test_manual_worktree_add_does_not_claim_or_create_a_tree(self):
         self.declare()
         wt = os.path.join(self.tmp, "repo-x")
-        self.assertEqual(self.hook(self.bash(f"git worktree add {wt} -b feat/x"))[0], 0)
-        self.assertIn(wt, self.record()["worktrees"])
-        git(self.repo, "worktree", "add", "-q", wt, "-b", "feat/x")
-        self.assertEqual(self.hook(self.write(os.path.join(wt, "src.py")))[0], 0)
+        code, err = self.hook(self.bash(f"git worktree add {wt} -b feat/x"))
+        self.assertEqual(code, 2); self.assertIn("ownership manifest", err)
+        self.assertNotIn(wt, self.record()["worktrees"])
+        self.assertFalse(os.path.exists(wt))
 
     def test_protected_branches_from_policy_file(self):
         with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
@@ -318,178 +319,24 @@ class CommandClasses(RepoCase):
         self.assertEqual(self.hook(self.bash("npx tsx scripts/eval-run.ts"))[0], 0)
 
 
-class LargeAndBoundaryApproval(RepoCase):
-    """A large task's limits come from its state page's approved boundary; approval is the human's."""
-    PAGE = "docs/261005-json-flag-state.html"
+class LargeCheckpoint(RepoCase):
+    """Large records keep authorization and worktree checks without an HTML path grammar."""
 
     def setUp(self):
         super().setUp()
         self.declare(size="large", task="json-flag"); self.branch("feat/json-flag")
         os.makedirs(os.path.join(self.repo, "docs"))
-        self.path = os.path.join(self.repo, self.PAGE)
 
-    def put(self, text):
-        with open(self.path, "w") as fh:
-            fh.write(text)
-        return text
+    def test_free_form_checkpoint_and_any_owned_path_are_writable(self):
+        page = os.path.join(self.repo, "docs", "261015-json-flag-state.html")
+        self.assertEqual(self.hook(self.write(page, content="free form checkpoint"))[0], 0)
+        self.assertEqual(self.hook(self.write("src/unlisted.py"))[0], 0)
+        self.assertEqual(self.hook(self.bash("git commit -m code -- src/unlisted.py"))[0], 0)
 
-    def approved(self, **kw):
-        self.put(state_page(**kw))
-        return approve_file(self.path, self.home)
-
-    def test_no_page_blocks_code_but_not_docs(self):
-        code, err = self.hook(self.write("cli.py"))
-        self.assertEqual(code, 2); self.assertIn("no state page", err)
-        self.assertEqual(self.hook(self.write(self.PAGE, content=state_page()))[0], 0)
-
-    def test_unapproved_or_malformed_boundary_blocks_code(self):
-        self.put(state_page())
-        code, err = self.hook(self.write("cli.py"))
-        self.assertEqual(code, 2); self.assertIn("not been approved", err)
-        self.put(state_page().replace("</head>", '<meta name="keel-approval" content="sha256:zz by x on soon"></head>'))
-        code, err = self.hook(self.write("cli.py"))
-        self.assertEqual(code, 2); self.assertIn("malformed", err)
-        self.put(state_page(boundary=False))
-        self.assertIn("no boundary section", self.hook(self.write("cli.py"))[1])
-
-    def test_agent_cannot_write_the_approval(self):
-        draft = self.put(state_page())
-        forged = state_page()
-        from agentkeel_core import pages
-        forged = pages.with_approval(os.path.basename(self.path), forged, "me", "2026-10-05")
-        code, err = self.hook(self.write(self.PAGE, content=forged))
-        self.assertEqual(code, 2); self.assertIn("human's ruling", err)
-        meta = forged[forged.index("<meta name=\"keel-approval\""):forged.index("</head>")]
-        edit = {"tool_name": "Edit", "cwd": self.repo, "session_id": SESSION,
-                "tool_input": {"file_path": self.path, "old_string": "</head>", "new_string": meta + "</head>"}}
-        self.assertEqual(self.hook(edit)[0], 2)
-        self.assertEqual(self.hook(self.bash(".claude/hooks/task.py approve json-flag"))[0], 2)
-        self.assertEqual(self.hook(self.bash(f"python3 hooks/task.py approve {self.PAGE}"))[0], 2)
-        self.assertEqual(self.hook(self.bash("python3 -B hooks/task.py approve json-flag"))[0], 2)
-        with open(self.path) as fh:
-            self.assertEqual(draft, fh.read())
-
-    def test_agent_cannot_remove_or_change_an_approval(self):
-        text = self.approved()
-        meta = text[text.index("<meta name=\"keel-approval\""):text.index("</head>")]
-        for new in ("", meta.replace("hisham", "agent")):
-            edit = {"tool_name": "Edit", "cwd": self.repo, "session_id": SESSION,
-                    "tool_input": {"file_path": self.path, "old_string": meta, "new_string": new}}
-            self.assertEqual(self.hook(edit)[0], 2, new)
-
-    def test_approved_boundary_bounds_writes_to_its_changes_list(self):
-        self.approved()
-        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-        self.assertEqual(self.hook(self.write("tests/test_cli.py"))[0], 0)
-        code, err = self.hook(self.write("src/other.py"))
-        self.assertEqual(code, 2); self.assertIn("Changes list", err)
-        code, err = self.hook(self.write("cli_legacy.py"))
-        self.assertEqual(code, 2); self.assertIn("Must not change", err)
-
-    def test_one_boundary_bounds_a_task_that_spans_two_repositories(self):
-        """The second repository (Markdown docs, no page of its own) is a worktree of the same task;
-        the page's lists name its paths as `<repository>:<path>`, by the main checkout's folder name."""
-        from helpers import git
-        other_primary = os.path.join(self.tmp, "tools")
-        other = os.path.join(self.tmp, "tools-feat")
-        subprocess.run(["git", "init", "-q", "-b", "main", other_primary], check=True)
-        git(other_primary, "commit", "-q", "--allow-empty", "-m", "init")
-        git(other_primary, "worktree", "add", "-q", other, "-b", "feat/json-flag")
-        os.makedirs(os.path.join(other, "docs"))
-        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
-        # no page anywhere: code is blocked in both, and docs/ (the other repository's Markdown) is not
-        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
-        self.assertEqual(code, 2); self.assertIn("no state page", err); self.assertIn("another worktree", err)
-        self.assertEqual(self.hook(self.write(os.path.join(other, "docs", "guide.md"), cwd=other))[0], 0)
-        # the page here lists nothing for the other repository: its code stays blocked, with the spelling
-        self.approved()
-        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
-        self.assertEqual(code, 2); self.assertIn("tools:<path>", err)
-        # entries for the other repository apply only there; plain entries apply only here
-        self.approved(changes=("cli.py", "tools:hooks/", "tools:README.md"), must_not=("tools:hooks/secret.py",))
-        self.assertEqual(self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))[0], 0)
-        self.assertEqual(self.hook(self.write(os.path.join(other, "README.md"), cwd=other))[0], 0)
-        code, err = self.hook(self.write(os.path.join(other, "hooks", "secret.py"), cwd=other))
-        self.assertEqual(code, 2); self.assertIn("Must not change", err)
-        code, err = self.hook(self.write(os.path.join(other, "cli.py"), cwd=other))
-        self.assertEqual(code, 2); self.assertIn("Changes list", err)
-        code, err = self.hook(self.write("hooks/x.py"))
-        self.assertEqual(code, 2); self.assertIn("Changes list", err)
-        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-        # a repository's own page comes first: the other repository's unapproved page shadows this one
-        with open(os.path.join(other, "docs", "261005-json-flag-state.html"), "w") as fh:
-            fh.write(state_page(changes=("*",)))
-        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
-        self.assertEqual(code, 2, err); self.assertIn("has not been approved", err)
-
-    def other_repo(self, primary, worktree):
-        """A second repository of the task: `primary` (a checkout, or a bare `*.git`) and its worktree."""
-        from helpers import git
-        if primary.endswith(".git"):
-            git(self.tmp, "clone", "-q", "--bare", self.primary, primary)
-        else:
-            subprocess.run(["git", "init", "-q", "-b", "main", primary], check=True)
-            git(primary, "commit", "-q", "--allow-empty", "-m", "init")
-        git(primary, "worktree", "add", "-q", worktree, "-b", "feat/json-flag-tools")
-        return worktree
-
-    def test_a_folder_name_shared_by_two_repositories_widens_nothing(self):
-        """`primary` names this repository and another one: plain entries stay here, and the
-        shared name's prefixed entries grant nothing, with the reason."""
-        other = self.other_repo(os.path.join(self.tmp, "elsewhere", "primary"), os.path.join(self.tmp, "primary-feat"))
-        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
-        self.approved(changes=("*", "primary:hooks/"), must_not=("primary:hooks/secret.py",))
-        code, err = self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))
-        self.assertEqual(code, 2, err); self.assertIn("ambiguous", err)
-        code, err = self.hook(self.write("hooks/secret.py"))
-        self.assertEqual(code, 2, err); self.assertIn("Must not change", err)
-        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-
-    def test_a_bare_repository_is_named_without_its_git_suffix(self):
-        other = self.other_repo(os.path.join(self.tmp, "tools.git"), os.path.join(self.tmp, "tools-feat"))
-        self.declare(size="large", task="json-flag", worktrees=[self.repo, other])
-        self.approved(changes=("cli.py", "tools:hooks/"))
-        self.assertEqual(self.hook(self.write(os.path.join(other, "hooks", "x.py"), cwd=other))[0], 0)
-
-    def test_one_committed_page_in_two_worktrees_of_a_repository_is_one_page(self):
-        tools = os.path.join(self.tmp, "tools")
-        subprocess.run(["git", "init", "-q", "-b", "main", tools], check=True)
-        os.makedirs(os.path.join(tools, "docs"))
-        page = os.path.join(tools, self.PAGE)
-        with open(page, "w") as fh:
-            fh.write(state_page(changes=("hooks/", "primary:cli.py")))
-        approve_file(page, self.home)
-        git(tools, "add", "docs"); git(tools, "commit", "-q", "-m", "page")
-        trees = [os.path.join(self.tmp, f"tools-{n}") for n in ("a", "b")]
-        for n, t in zip("ab", trees):
-            git(tools, "worktree", "add", "-q", t, "-b", f"feat/json-flag-{n}")
-        self.declare(size="large", task="json-flag", worktrees=[self.repo, *trees])
-        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-        code, err = self.hook(self.write("src/x.py"))
-        self.assertEqual(code, 2, err); self.assertIn("Changes list", err)
-
-    def test_a_colon_that_names_no_repository_of_the_task_is_part_of_the_path(self):
-        self.approved(changes=("*",), must_not=("secrets:prod.yml",))
-        code, err = self.hook(self.write("secrets:prod.yml"))
-        self.assertEqual(code, 2, err); self.assertIn("Must not change", err)
-
-    def test_editing_the_boundary_is_allowed_and_grants_nothing(self):
-        text = self.approved()
-        widened = text.replace("<li><code>tests/</code></li>", "<li><code>tests/</code></li><li><code>src/</code></li>")
-        self.assertEqual(self.hook(self.write(self.PAGE, content=widened))[0], 0)  # drafting stays open
-        self.put(widened)
-        self.assertEqual(self.hook(self.write("src/b.py"))[0], 2)    # the approved copy still rules
-        self.assertEqual(self.hook(self.write("cli.py"))[0], 0)
-        import shutil
-        shutil.rmtree(os.path.join(self.home, "approvals"))
-        code, err = self.hook(self.write("cli.py"))                 # approved copy gone: no limits known
-        self.assertEqual(code, 2); self.assertIn("changed since it was approved", err)
-
-    def test_commit_outside_docs_waits_for_approval(self):
-        self.assertEqual(self.hook(self.bash(f"git commit -m page -- {self.PAGE}"))[0], 0)
-        self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 2)
-        self.approved()
-        self.assertEqual(self.hook(self.bash("git commit -m code -- cli.py"))[0], 0)
+    def test_size_does_not_grant_write_or_checkout_access(self):
+        self.declare(size="large", allow=("review",), worktrees=[])
+        self.assertEqual(self.hook(self.write("src/unlisted.py"))[0], 2)
+        self.assertEqual(self.hook(self.write(os.path.join(self.primary, "src", "x.py")))[0], 2)
 
 
 class ReviewFindings(RepoCase):
@@ -511,8 +358,9 @@ class ReviewFindings(RepoCase):
         self.blocked("git --work-tree && git push origin main")
         self.blocked("git -C\ngit push origin main")
 
-    def test_worktree_add_of_an_existing_directory_grants_nothing(self):
-        self.assertEqual(self.hook(self.bash(f"git worktree add {self.other}"))[0], 0)
+    def test_manual_worktree_add_of_an_existing_directory_is_refused(self):
+        code, err = self.hook(self.bash(f"git worktree add {self.other}"))
+        self.assertEqual(code, 2); self.assertIn("task.py start", err)
         self.assertNotIn(self.other, self.record()["worktrees"])
         self.assertEqual(self.hook(self.write(os.path.join(self.other, "b.py")))[0], 2)
 
@@ -567,6 +415,12 @@ class StageReviewFindings(RepoCase):
         report = os.path.join(self.tmp, "report"); os.makedirs(report)
         self.declare(allow=("review",), write_roots=[report])
         self.assertEqual(self.code(self.bash("git push origin feat/example")), 2)
+        self.declare(allow=("implement", "push"))
+        self.assertEqual(self.code(self.bash("git push origin main")), 2)  # also needs merge
+        self.declare(allow=("implement", "merge"))
+        self.assertEqual(self.code(self.bash("git push origin main")), 2)  # also needs push
+        self.declare(allow=("implement", "merge", "push"))
+        self.assertEqual(self.code(self.bash("git push origin main")), 0)
         self.declare(allow=("implement",))
         self.assertEqual(self.code(self.bash("git push origin feat/example")), 2)
         self.assertEqual(self.code(self.bash("git push . feat/x:feat/y")), 0)  # a local ref move
@@ -580,25 +434,15 @@ class StageReviewFindings(RepoCase):
         self.assertEqual(self.code(self.bash("gh pr merge 123 --merge")), 0)
         self.assertEqual(self.code(self.bash("git push origin main")), 0)
 
-    def test_write_roots_keep_the_approval_checks(self):
+    def test_html_checkpoint_has_no_special_write_approval(self):
         docs = os.path.join(self.repo, "docs"); os.makedirs(docs)
         page = os.path.join(docs, "261005-x-state.html")
         with open(page, "w") as fh:
-            fh.write(state_page())
-        from agentkeel_core import pages
-        forged = pages.with_approval(os.path.basename(page), state_page(), "h", "2026-10-04")
+            fh.write("<not-html>free form checkpoint")
         for allow in (("review",), ("implement",)):
-            self.declare(allow=allow, write_roots=[docs])
-            self.assertEqual(self.code(self.write(page, content=forged)), 2, allow)
-        self.assertEqual(self.code(self.write(page, content=state_page(title="Edited"))), 0)
-        approve_file(page, self.home)
-        with open(page) as fh:
-            approved = fh.read()
-        self.assertEqual(self.code(self.write(page, content=approved.replace("on 2026-10-05", "on 2026-10-06"))), 2)
-
-    def test_write_root_inside_a_large_task_keeps_the_blast_radius(self):
-        self.declare(size="large", task="json-flag", write_roots=[os.path.join(self.repo, "src")])
-        self.assertEqual(self.code(self.write("src/a.py")), 2)
+            self.declare(allow=allow)
+            code, _ = self.hook(self.write(page, content="any HTML or free-form checkpoint"))
+            self.assertEqual(code, 0 if "implement" in allow else 2, allow)
 
     def test_write_root_never_reaches_repository_source(self):
         shared_src = os.path.join(self.primary, "src")
@@ -641,199 +485,6 @@ if a[:1] == ["api"]:
     print(json.dumps({"check_runs": runs})); sys.exit(0)
 sys.exit(1)
 """
-
-
-class DocsGate(RepoCase):
-    """In a repository with "docs": "html", main moves only to a commit whose docs check passes."""
-
-    def setUp(self):
-        super().setUp()
-        self.declare(allow=("implement", "merge", "push"))
-        os.makedirs(os.path.join(self.repo, "docs"))
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"docs": "html"}, fh)
-        self.page = os.path.join(self.repo, "docs", "261005-x-state.html")
-        self.put(state_page(boundary=False))
-        self.main = self.commit("main")
-        self.branch("feat/x")
-
-    def put(self, text):
-        with open(self.page, "w") as fh:
-            fh.write(text)
-
-    def commit(self, msg):
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "--allow-empty", "-m", msg)
-        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-
-    def test_a_working_section_keeps_main_still(self):
-        self.put(state_page(boundary=False, working=True))
-        bad = self.commit("wip")
-        for cmd in (f"git push origin {bad}:main", f"git push . {bad}:main",
-                    f"git -C {self.repo} fetch . {bad}:main", f"git update-ref refs/heads/main {bad}"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertIn("docs check fails", err); self.assertIn("Working section", err)
-        for cmd in ("git push origin feat/x:main", "git push . feat/x:main"):  # a branch name can move
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertIn("full SHA", err)
-        self.put(state_page(boundary=False))
-        good = self.commit("finish")
-        self.assertEqual(self.hook(self.bash(f"git push origin {good}:main"))[0], 0)
-        self.assertEqual(self.hook(self.bash(f"git push . {good}:main"))[0], 0)
-        self.assertEqual(self.hook(self.bash("git push origin feat/x"))[0], 0)  # a feature branch is not main
-
-    def test_a_computed_source_or_destination_is_still_judged(self):
-        # found live: `$(git rev-parse HEAD):main` was read as a push to a branch named `$`
-        self.put(state_page(boundary=False, working=True))
-        self.commit("wip")
-        for cmd in ("git push origin $(git rev-parse HEAD):main", "git push origin `git rev-parse HEAD`:main",
-                    "git push origin HEAD:$(echo main)", "B=main; git push origin HEAD:$B"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertNotIn("internal error", err)
-
-    def test_local_fast_forward_on_main_is_checked(self):
-        self.put(state_page())  # an unapproved boundary
-        sha = self.commit("boundary")
-        git(self.repo, "checkout", "-q", "main")
-        code, err = self.hook(self.bash(f"git merge --ff-only {sha}"))
-        self.assertEqual(code, 2); self.assertIn("not been approved", err)
-        self.assertEqual(self.hook(self.bash(f"AGENTKEEL_ALLOW_DESTRUCTIVE=1 git reset --hard {sha}"))[0], 2)
-
-    def test_dropping_an_approved_page_is_refused(self):
-        git(self.repo, "checkout", "-q", "main")
-        self.put(state_page()); approve_file(self.page, self.home)
-        self.commit("approved"); git(self.repo, "checkout", "-q", "feat/x"); git(self.repo, "merge", "-q", "main")
-        os.remove(self.page)
-        gone = self.commit("drop")
-        code, err = self.hook(self.bash(f"git push origin {gone}:main"))
-        self.assertEqual(code, 2); self.assertIn("removes or renames", err)
-
-    def test_disabling_in_the_candidate_does_not_escape(self):
-        os.remove(os.path.join(self.repo, "agentkeel.json"))
-        self.put(state_page(working=True))
-        bad = self.commit("wip")
-        self.assertEqual(self.hook(self.bash(f"git push origin {bad}:main"))[0], 2)
-
-    def test_not_enabled_means_no_docs_gate(self):
-        git(self.repo, "checkout", "-q", "main")
-        os.remove(os.path.join(self.repo, "agentkeel.json"))
-        self.commit("never opted in")
-        git(self.repo, "checkout", "-q", "-B", "feat/y")
-        self.put(state_page(working=True))
-        bad = self.commit("wip")
-        self.assertEqual(self.hook(self.bash(f"git push origin {bad}:main"))[0], 0)
-
-
-class StageTwoBReviewFindings(RepoCase):
-    """The independent Stage 2b review at 5d17846: one regression per confirmed finding."""
-
-    def setUp(self):
-        super().setUp()
-        self.declare(allow=("implement", "merge", "push"))
-        os.makedirs(os.path.join(self.repo, "docs"))
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"docs": "html"}, fh)
-        self.page = os.path.join(self.repo, "docs", "261005-x-state.html")
-        self.put(state_page(boundary=False))
-        self.clean = self.commit("clean")
-        self.branch("feat/x")
-
-    def put(self, text, path=None):
-        with open(path or self.page, "w") as fh:
-            fh.write(text)
-
-    def commit(self, msg):
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "--allow-empty", "-m", msg)
-        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-
-    def test_an_html_asset_never_opens_the_gate(self):
-        # finding 1: an -asset.html crashed the check, and the guard allowed the move on its own error
-        self.put(state_page(boundary=False, working=True))
-        self.put("<!doctype html><title>preview</title><p>x</p>", os.path.join(self.repo, "docs", "261005-preview-asset.html"))
-        bad = self.commit("wip plus an html asset")
-        git(self.repo, "checkout", "-q", "main")
-        for cmd in (f"git push origin {bad}:main", f"git merge --ff-only {bad}"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertNotIn("allowing", err); self.assertIn("Working section", err)
-
-    def test_a_validator_failure_refuses_the_move(self):
-        # finding 1: whatever the check raises, a protected move is refused, never allowed
-        import importlib.util
-        from unittest import mock
-        spec = importlib.util.spec_from_file_location("ak_guard_2b", os.path.join(HOOKS, "task-guard.py"))
-        guard = importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
-        git(self.repo, "checkout", "-q", "main")
-        env = {**os.environ, **self.env}
-        with mock.patch.object(guard.pages, "check", side_effect=IndexError("no such group")):
-            for cmd in (f"git push origin {self.clean}:main", f"git merge --ff-only {self.clean}"):
-                self.assertEqual(guard.decide(self.bash(cmd), env), 2, cmd)
-
-    def test_a_local_move_lands_the_commit_it_checked(self):
-        # finding 2: the guard resolved `candidate`, then the line moved it before the merge ran
-        self.put(state_page(boundary=False, working=True))
-        bad = self.commit("wip")
-        git(self.repo, "branch", "candidate", self.clean)
-        git(self.repo, "checkout", "-q", "main")
-        for cmd in (f"git update-ref refs/heads/candidate {bad} && git merge --ff-only candidate",
-                    f"git branch -f candidate {bad}; git push . candidate:main",
-                    f"git update-ref refs/heads/candidate {bad} && git merge --ff-only {self.clean}",
-                    "git merge --ff-only candidate", "git push . candidate:main", "git fetch . candidate:main",
-                    "git reset --hard candidate", "git update-ref refs/heads/main candidate"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertNotIn("allowing", err)
-        for cmd in (f"git merge --ff-only {self.clean}", f"cd {self.repo} && git merge --ff-only {self.clean}",
-                    f"git push . {self.clean}:main", f"git update-ref refs/heads/main {self.clean}"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 0, f"{cmd}: {err}")
-        for cmd in (f"git merge --ff-only {bad}", f"git push . {bad}:main", f"git fetch . {bad}:main",
-                    f"AGENTKEEL_ALLOW_DESTRUCTIVE=1 git reset --hard {bad}", f"git update-ref refs/heads/main {bad}"):
-            code, err = self.hook(self.bash(cmd))
-            self.assertEqual(code, 2, cmd); self.assertIn("Working section", err)
-
-    def test_a_repo_without_html_docs_keeps_its_branch_merges(self):
-        os.remove(os.path.join(self.repo, "agentkeel.json")); self.commit("off")
-        git(self.repo, "checkout", "-q", "main"); git(self.repo, "merge", "-q", "feat/x")
-        git(self.repo, "checkout", "-q", "feat/x")
-        self.commit("more")
-        git(self.repo, "checkout", "-q", "main")
-        self.assertEqual(self.hook(self.bash("git merge --ff-only feat/x"))[0], 0)
-
-
-class EmptyChangesList(RepoCase):
-    """Finding 3 of the Stage 2b review: an approved boundary with no Changes list grants no source."""
-    PAGE = "docs/261005-json-flag-state.html"
-
-    def setUp(self):
-        super().setUp()
-        self.declare(size="large", task="json-flag"); self.branch("feat/json-flag")
-        os.makedirs(os.path.join(self.repo, "docs"))
-        self.path = os.path.join(self.repo, self.PAGE)
-
-    def approved(self, text):
-        with open(self.path, "w") as fh:
-            fh.write(text)
-        approve_file(self.path, self.home)
-
-    def test_empty_or_missing_changes_grant_no_source(self):
-        empty = state_page(changes=())
-        missing = empty.replace("<ul data-keel-changes></ul>", "")
-        prose = empty.replace("<ul data-keel-changes></ul>", "<ul data-keel-changes><li>src, mostly</li></ul>")
-        for text in (empty, missing, prose):
-            self.approved(text)
-            code, err = self.hook(self.write("src/unrelated.py"))
-            self.assertEqual(code, 2, text); self.assertIn("lists no paths", err)
-            self.assertEqual(self.hook(self.bash("git commit -m code -- src/unrelated.py"))[0], 2)
-            with open(self.path) as fh:
-                self.assertEqual(self.hook(self.write(self.PAGE, content=fh.read() + " "))[0], 0)  # drafting stays open
-
-    def test_listed_paths_pass_and_must_not_refuses(self):
-        self.approved(state_page(changes=("src/allowed.py",), must_not=("src/allowed_not.py",)))
-        self.assertEqual(self.hook(self.write("src/allowed.py"))[0], 0)
-        self.assertEqual(self.hook(self.write("src/unrelated.py"))[0], 2)
-        self.approved(state_page(changes=("*",), must_not=("src/auth/",)))  # broad access is explicit
-        self.assertEqual(self.hook(self.write("src/unrelated.py"))[0], 0)
-        self.assertEqual(self.hook(self.write("src/auth/key.py"))[0], 2)
 
 
 class PushGate(RepoCase):

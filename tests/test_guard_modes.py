@@ -45,20 +45,6 @@ class GuardModes(RepoCase):
         self.modes(task="warn")  # the task guard's mode does not soften the secret guard
         self.assertEqual(run_hook("secret-guard.py", self.bash("cat .env"), env=self.env)[0], 2)
 
-    def test_plan_size_guard_follows_its_mode(self):
-        docs = os.path.join(self.repo, "docs"); os.makedirs(docs, exist_ok=True)
-        page = os.path.join(docs, "261005-x-state.html")
-        with open(page, "w") as fh:
-            fh.write('<section data-keel-transient="working">' + "<p>t</p>\n" * 301 + "</section>")
-        payload = {"tool_name": "Write", "cwd": self.repo, "tool_input": {"file_path": page}}
-        self.assertEqual(run_hook("plan-size-guard.sh", payload, env=self.env)[0], 2)
-        self.modes(plan_size="warn")
-        out = subprocess.run(["bash", os.path.join(HOOKS, "plan-size-guard.sh")], input=json.dumps(payload),
-                             text=True, capture_output=True, env={**os.environ, **self.env})
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("PLAN SIZE GUARD", json.loads(out.stdout)["systemMessage"])
-        self.modes(plan_size="off")
-        self.assertEqual(run_hook("plan-size-guard.sh", payload, env=self.env)[0], 0)
 
 
 if __name__ == "__main__":
