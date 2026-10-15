@@ -69,7 +69,7 @@ def render(out, rec, pol, others):
         parts.append("<h2>This session's task</h2><p>none declared</p>")
     parts.append("<h2>Guard modes</h2><table><tr><th>Guard</th><th>Mode</th></tr>" + "".join(
         f"<tr><td>{_e(g)}</td><td><span class=\"pill{' no' if m in ('off', 'pass') else ' warn' if m == 'warn' else ''}\">{_e(m)}</span></td></tr>"
-        for g, m in sorted((pol.get("guards") or {}).items())) + "</table><p>Set in agentkeel.json, <code>\"guards\": {\"task\": \"warn\"}</code>; missing means block, except mcp_unknown, which passes.</p>")
+        for g, m in sorted((pol.get("guards") or {}).items())) + "</table><p>Set in agentkeel.json, <code>\"guards\": {\"task\": \"warn\"}</code>; missing means block. MCP policy is managed by MCPClerk.</p>")
     ws = out.get("worktrees") or []
     parts.append("<h2>Worktrees of this task</h2>" + ("<table><tr><th>Path</th><th>Branch</th><th>State</th><th>Changed files</th></tr>" + _rows([
         (w.get("path"), w.get("branch"), w.get("error") or (f"{w.get('ahead')} commit(s) not in {w.get('protected')}, " + ("merged" if w.get("merged") else "not merged") if "ahead" in w else "no protected branch to compare with"), w.get("changed", ""))

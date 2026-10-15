@@ -363,9 +363,9 @@ class ConfiguredRoute(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             for cfg in self.CONFIGS:
                 for tool, want in (("write_file_v2", 2), ("write_stdin", 2), ("Read", 0), ("CronCreate", 0),
-                                   ("TaskCreate", 0), ("mcp__fs__write_file", 0)):
+                                   ("TaskCreate", 0), ("mcp__fs__write_file", 2)):
                     routed = any(self.matches(m, tool) for m in self.task_guard_matchers(cfg))
                     self.assertTrue(routed, (cfg, tool))
                     code, err = run_hook("task-guard.py", {"tool_name": tool, "cwd": home, "session_id": "s",
-                                                           "tool_input": {}}, env={"AGENTKEEL_HOME": home})
+                                                           "tool_input": {}}, env={"AGENTKEEL_HOME": home, "AGENTKEEL_MCPCLERK": "/nonexistent/mcpclerk"})
                     self.assertEqual(code, want, (cfg, tool, err))

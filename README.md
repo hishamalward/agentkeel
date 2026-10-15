@@ -11,7 +11,7 @@
   <a href="#install-and-opt-in"><img src="https://img.shields.io/badge/python-3.10%2B-2f5bd3" alt="Python 3.10+"></a>
 </p>
 
-AgentKeel is a guardrail plugin for Claude Code and Codex. Before writing, an agent declares a task, its permissions, a persistent HTML report, and (for code work) gets a linked worktree. Hooks check supported edits, commands and MCP calls against that scope. The core uses Python's standard library.
+AgentKeel is a guardrail plugin for Claude Code and Codex. Before writing, an agent declares a task, its permissions, a persistent HTML report, and (for code work) gets a linked worktree. Hooks check supported edits, commands and intercepted MCP calls against that scope. The core uses Python's standard library.
 
 ## What it does
 
@@ -19,14 +19,14 @@ AgentKeel is a guardrail plugin for Claude Code and Codex. Before writing, an ag
 - Coding tasks get a linked worktree created by AgentKeel. The session-start message prints its path; the agent must change into it before editing. A `no-code` task has no worktree.
 - Every task names a free-form HTML deliverable in a persistent folder outside the repository and disposable worktrees. Handoff and Stop checks require a current, readable report with real `html`, `title` and `body` tags and content. There is no page template or content schema.
 - `fix` tasks require a recorded failed check and cause before code edits. The guard limits repeated edit/fail cycles; see [Debugging](skills/debugging/SKILL.md).
-- Each guard can be set to `block`, `warn` or `off` in `agentkeel.json`; MCP unknown-server handling also accepts `pass`.
+- Task, secret and fix guards can be set to `block`, `warn` or `off` in `agentkeel.json`. MCPClerk policy is separate and fail-closed.
 - Shipping is permissioned. `pr` creates a pull request, `ship` verifies and fast-forwards the exact candidate, and `finish` releases owned worktree resources after synchronization. If cleanup changes the code snapshot, finish reports `report_pending`; refresh the HTML and run finish again.
-- MCP adapters currently check supported calls for RevenueCat, PostHog, Sentry and DataForSEO. This is an interim implementation pending the Clerk phase; other servers and access through shell/browser paths have the limits described in [guardrails](docs/guardrails.md).
+- Intercepted MCP calls are checked by the MCPClerk bridge. Missing or refusing MCPClerk blocks that MCP call; it does not block ordinary coding, and AgentKeel task guard settings cannot soften a Clerk refusal. Host-native permissions and trust remain separate. Calls made through shell, scripts or browsers are outside this check; see [guardrails](docs/guardrails.md).
 - `review-page` helps write a useful human review report. Ponytail provides coding preferences; the debugging skill remains the workflow for fixes.
 
 ## Install and opt in
 
-Install AgentKeel through the host's plugin marketplace, then opt each repository in. Python 3.10+, git, and bash 3.2+ are required.
+Install AgentKeel through the host's plugin marketplace, then opt each repository in. Python 3.10+, git, and bash 3.2+ are required. Version 0.10.0 removes AgentKeel's former MCP catalog and adapter; MCP policy now requires MCPClerk.
 
 Claude Code:
 
@@ -42,9 +42,13 @@ codex plugin marketplace add hishamalward/agentkeel
 codex plugin add agentkeel@agentkeel
 ```
 
-In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.9.1/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
+In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.10.0/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
 
-The default `{}` policy protects `main` and `master`. Every write needs a declared task. Configure optional protected branches, command rules, MCP catalog entries and `require_check_before_push` in `agentkeel.json`; see [the policy guide](docs/task-record.md#repository-policy).
+The default `{}` policy protects `main` and `master`. Every write needs a declared task. Configure optional protected branches, command rules and `require_check_before_push` in `agentkeel.json`; see [the policy guide](docs/task-record.md#repository-policy). MCPClerk owns MCP catalog and tool policy.
+
+### MCPClerk bridge
+
+Install MCPClerk separately. AgentKeel uses an executable named by the absolute `AGENTKEEL_MCPCLERK` override, then `~/.local/bin/mcpclerk`, then a fixed system search path. MCPClerk stores user policy in `~/.mcpclerk/mcp_catalog.json` (or `$MCPCLERK_HOME/mcp_catalog.json`) and project policy in `mcpclerk.json`. To move old AgentKeel policy, explicitly run `mcpclerk migrate-keel --scope project --file agentkeel.json --project /path/to/project` and `mcpclerk migrate-keel --scope user --file /path/to/old-user-catalog.json`, review each result, and keep its backup. Then remove the legacy `mcp` and `guards.mcp_unknown` keys from `agentkeel.json` and remove `mcp_catalog.json` from `AGENTKEEL_HOME` (default `~/.agentkeel`); the bridge refuses MCP calls while those legacy files or keys remain. MCPClerk's judge is independent of native host permissions and task guard modes.
 
 ## A task from start to finish
 

@@ -14,7 +14,7 @@ The human-operated legacy `open`, `import` and `release` commands use a separate
 
 ## MCP calls
 
-The current MCP adapter uses a catalog to classify supported operations by permission and target. It currently includes RevenueCat, PostHog, Sentry and DataForSEO, with user/project configuration layered over plugin defaults. Unknown server behavior is controlled by `mcp_unknown`. This adapter implementation is interim pending the Clerk phase. It guards intercepted MCP calls only; it cannot prevent using the same credentials through shell, scripts or browsers.
+AgentKeel sends intercepted MCP calls to the MCPClerk bridge for a fail-closed judge decision. MCPClerk owns user/project catalogs and policy; AgentKeel task guard modes cannot override its refusal. If the bridge is missing or returns invalid data, the MCP call is blocked while ordinary coding work can continue. Older AgentKeel MCP policy must be explicitly migrated with `mcpclerk migrate-keel`, backed up, and removed from `agentkeel.json` and the user catalog under `AGENTKEEL_HOME` (default `~/.agentkeel`) before calls are allowed. Host-native permissions and trust remain separate. The bridge observes only intercepted calls and cannot prevent the same credentials being used through shell, scripts or browsers.
 
 ## Evidence and boundaries
 

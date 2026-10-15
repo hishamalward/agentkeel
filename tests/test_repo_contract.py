@@ -50,7 +50,7 @@ class RepoContract(unittest.TestCase):
 
 class ProductDocs(unittest.TestCase):
     """AgentKeel's own docs are Markdown that GitHub renders (README.md and docs/*.md). The HTML
-    records AgentKeel creates in an adopting repository are checked by pages.py instead."""
+    records AgentKeel creates in an adopting repository are checked by delivery.py instead."""
 
     @staticmethod
     def slugs(path):

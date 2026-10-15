@@ -10,8 +10,8 @@
       "name": "agentkeel",
       "displayName": "AgentKeel",
       "source": "./",
-      "description": "Claude Code and Codex guardrails for declared tasks, linked worktrees, persistent HTML checkpoints, and permissioned shipping. Acts only in opted-in repositories.",
-      "version": "0.9.1",
+      "description": "Claude Code and Codex task guardrails with a fail-closed MCPClerk bridge; acts only in opted-in repositories.",
+      "version": "0.10.0",
       "author": {
         "name": "Hisham Al-Ward"
       },

@@ -8,4 +8,4 @@ SessionStart prints the current checkout, branch, task and other registered work
 
 The legacy human-operated `open`, `import` and `release` commands launch an isolated clone session. That mode configures host OS sandboxing for shell writes, but evidence is platform-specific and does not establish a universal boundary. See [enforcement design](enforcement-design.md).
 
-Host hooks enforce only supported events. Arbitrary shell/script effects, browser writes and alternate use of credentials may not pass through these hooks. See [guardrails](guardrails.md) for MCP's explicitly interim status and current limits.
+Host hooks enforce only supported events. Arbitrary shell/script effects, browser writes and alternate use of credentials may not pass through these hooks. MCPClerk's call judge is separate from host-native permissions, approvals and trust. See [guardrails](guardrails.md) for the MCP bridge behavior and limits.

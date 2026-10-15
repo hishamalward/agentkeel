@@ -28,6 +28,8 @@ checks ownership/preservation/processes, and removes the worktree. Refresh the f
 retry if report_pending. --keep retains a preview explicitly. Failed stages remain retryable.
 AgentSlots is optional: dependencies and requested runtime only. No runtime means no Slots call.
 
+MCP calls use the separate MCPClerk policy bridge. Missing MCPClerk or a refusal blocks only the MCP call; it does not stop ordinary coding, and task guard settings cannot soften a Clerk decision. Install it as `~/.local/bin/mcpclerk` or set the absolute `AGENTKEEL_MCPCLERK` executable path. Host-native permissions and trust remain separate. MCPClerk owns user `mcp_catalog.json` and project `mcpclerk.json`; migrate old AgentKeel policy explicitly with `mcpclerk migrate-keel`, keep the backup, then remove legacy MCP keys from `agentkeel.json` and the old user catalog before making MCP calls.
+
 Use the smallest change that solves the request, reuse existing code, and test meaningful behavior.
 When Ponytail is active, its coding principles replace these general coding preferences.
 The debugging skill and task/ownership/HTML checks still apply.

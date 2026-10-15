@@ -35,9 +35,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import checks, evidence, gitops, host, mcp, mcp_catalog, mcp_connection, record, shell  # noqa: E402
+from agentkeel_core import checks, clerk, evidence, gitops, host, record, shell  # noqa: E402
 
-CONFIG_NAMES = ("agentkeel.json", ".mcp.json")  # .mcp.json: a project MCP entry the guard may read as a pin
+CONFIG_NAMES = ("agentkeel.json", "mcpclerk.json", ".mcp.json")  # native MCP config changes are human-managed
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
                 (".codex", "hooks.json"), (".codex", "config.toml"), (".codex", "hooks"))
 NPX = {"npx", "bunx", "pnpx"}
@@ -81,6 +81,9 @@ def nearest_dir(path):
 
 def is_config(path, environ):
     if under(path, record.home(environ)):
+        return True
+    clerk_home = environ.get("MCPCLERK_HOME")
+    if clerk_home and under(path, os.path.realpath(clerk_home)):
         return True
     parts = path.split(os.sep)
     if os.path.basename(path) in CONFIG_NAMES:
@@ -437,32 +440,30 @@ def judge_command(command, cwd, rec, environ, session, line=None):
 
 
 def judge_mcp(ev, cwd, rec, payload, environ):
-    """A catalog server's call against the task's permissions and the catalog's targets. A server
-    with no catalog entry is noted in the task's unseen log and follows guards.mcp_unknown."""
-    root = gitops.toplevel(cwd) if cwd and os.path.isdir(cwd) else None
-    pol = record.policy(os.path.realpath(root) if root else None)
-    catalog = mcp_catalog.merged(pol["mcp"], environ)
-    call = mcp.match(ev.tool, catalog)
-    if not call:
-        server, tool = mcp.split(ev.tool)
-        try:
-            mcp.log_unseen(mcp.scratch_of(rec, payload.get("session_id")), server, tool, ev.args)
-        except Exception as exc:  # noting must never block the call
-            sys.stderr.write(f"task-guard: unseen MCP call not noted: {exc}\n")
-        mode = pol["guards"].get("mcp_unknown", "pass")
-        if mode != "pass":
-            raise Block(mcp.unknown_text(server, tool, mode), guard="mcp_unknown")
-        return
-    call.args = ev.args
-
-    def pinned():
-        try:
-            return mcp_connection.pinned_project(call.server, evidence.host_of(payload), cwd, environ)
-        except Exception:
-            return None  # unreadable configuration is "not pinned", and the refusal says how to pin
-    reason = mcp.judge(call, rec, catalog, pinned)
-    if reason:
-        raise Block(reason)
+    """Delegate every intercepted MCP call to the installed MCPClerk judge."""
+    try:
+        host_name = evidence.host_of(payload)
+        project_root = gitops.toplevel(cwd) if cwd and os.path.isdir(cwd) else None
+        project_dir = os.path.realpath(project_root) if project_root else cwd
+        if clerk.has_legacy_policy(cwd, environ):
+            raise Block(
+                "legacy AgentKeel MCP policy found; MCPClerk is the sole MCP policy authority. The human must run "
+                "`mcpclerk migrate-keel`, then remove the project's `mcp` and `guards.mcp_unknown` policy "
+                "and the legacy `~/.agentkeel/mcp_catalog.json`; this MCP call is refused until migration is complete.",
+                guard="mcpclerk")
+        result = clerk.judge(ev.tool, ev.args, host_name, cwd, project_dir,
+                             list((rec or {}).get("permissions") or []), environ)
+    except Block:
+        raise
+    except clerk.ClerkError as error:
+        raise Block(str(error), guard="mcpclerk") from None
+    except Exception:
+        raise Block("MCP policy check failed; refusing this MCP call.", guard="mcpclerk") from None
+    if not result["allowed"]:
+        raise Block(result["reason"], guard="mcpclerk")
+    if (result["classification"] == "unknown" and
+            result["reason"] == "unknown MCP server; warning policy allows it"):
+        sys.stdout.write(json.dumps({"systemMessage": result["reason"]}) + "\n")
 
 
 def decide(payload, environ=os.environ):

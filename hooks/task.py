@@ -18,7 +18,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, mcp, record, delivery, workspace, shipping  # noqa: E402
+from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, record, delivery, workspace, shipping  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -559,23 +559,6 @@ def status(args, environ):
     return 0
 
 
-def mcp_cmd(args, environ):
-    """Print a catalog entry for a server with no entry, from this task's unseen log: every tool
-    unclassified (judged as a write), no target listed. The human sorts it and pastes it in."""
-    session = record.session_from_env(environ)
-    folder = mcp.scratch_of(record.load(session, environ), session)
-    entry = mcp.draft(folder, args.server)
-    if not entry:
-        return fail(f"no call on the MCP server '{args.server}' is in this task's unseen log "
-                    f"({os.path.join(folder or '(no session)', mcp.UNSEEN_LOG)}).\n"
-                    "The guard notes a call there when the server has no catalog entry.")
-    print(json.dumps(entry, indent=2))
-    sys.stderr.write("agentkeel: paste it under \"mcp\" in agentkeel.json. Move each tool from unclassified to read,\n"
-                     "write, paid, publish or store; list the targets, and set \"target_arg\" to the argument that\n"
-                     "names one (without it the operations have no target).\n")
-    return 0
-
-
 def main(argv=None, environ=os.environ):
     p = argparse.ArgumentParser(prog="task.py", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="action")
@@ -624,9 +607,6 @@ def main(argv=None, environ=os.environ):
     st.add_argument("--open", action="store_true")
     sub.add_parser("cause").add_argument("text", nargs="+")
     sub.add_parser("reopen").add_argument("task")
-    m = sub.add_parser("mcp")
-    m.add_argument("op", choices=("draft",))
-    m.add_argument("server")
     if argv is None:
         argv = sys.argv[1:]
     if argv[:1] == ["--selftest"]:
@@ -635,7 +615,7 @@ def main(argv=None, environ=os.environ):
     handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd,
                 "start": start, "show": show, "verify": verify, "cancel": cancel,
                 "handoff": handoff, "finish": finish, "pr": pr, "ship": ship, "status": status,
-                "cause": cause, "reopen": reopen, "mcp": mcp_cmd}
+                "cause": cause, "reopen": reopen}
     if args.action not in handlers:
         p.print_help()
         return 2

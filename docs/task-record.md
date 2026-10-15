@@ -27,12 +27,12 @@ Permissions are `review`, `implement`, `merge`, `push`, `distribution-build`, `s
 - `finish [--keep]` checks delivery and cleanup state. After worktree cleanup it may return `report_pending`; refresh the report to reflect cleanup and rerun `finish`. `--keep` retains the worktree/runtime for a preview.
 - `cancel` marks the task cancelled and keeps its worktree, resources and record.
 - `status [--json|--html]` reads current task/worktree facts. `show` prints this session's record.
-- `init` opts the current repository into the plugin. `cause` and human-only `reopen` support fix tasks. `mcp draft SERVER` prints a catalog entry from this task's unseen-tool log.
+- `init` opts the current repository into the plugin. `cause` and human-only `reopen` support fix tasks.
 
 The legacy human-operated `open`, `import` and `release` commands manage isolated clones. They are separate from the linked-worktree flow and their OS sandbox boundary is platform dependent.
 
 ## Repository policy
 
-`agentkeel.json` configures `protected_branches`, per-guard modes, additional command patterns, MCP service entries and optional `require_check_before_push`. `init` creates `{}` only when the file is absent, preserves existing policy, updates only the managed `AGENTS.md` block and registers the repository outside it. It never commits. The `mcp_unknown` guard defaults to `pass`; other guards default to `block`.
+`agentkeel.json` configures `protected_branches`, task/secret/fix guard modes, additional command patterns and optional `require_check_before_push`. `init` creates `{}` only when the file is absent, preserves existing policy, updates only the managed `AGENTS.md` block and registers the repository outside it. It never commits. MCP catalog and tool policy are managed by MCPClerk; see [guardrails](guardrails.md#mcpclerk-bridge) for explicit migration and legacy cleanup requirements.
 
 The task record is not a security boundary around arbitrary processes. See [guardrails](guardrails.md) and [enforcement design](enforcement-design.md).

@@ -10,7 +10,7 @@ fixtures in tests/fixtures/.
   edit      a file is written: `path` (absolute), and what is known of the new content
   command   a shell command line
   dispatch  a subagent is launched: its readable prompt (if any) and its task name (if any)
-  mcp       an MCP tool call: its name and arguments, for the adapters in mcp.py
+  mcp       an MCP tool call: its name and arguments, for the MCPClerk bridge
   gap       a tool that may write but that agentkeel cannot read: refused, so the gap is visible
 """
 import os
@@ -22,7 +22,7 @@ from . import patch as patchmod
 # Tools that write no repository file: reads, planning, messaging, scheduling (a scheduled prompt
 # runs later as ordinary tool calls, which are judged then). Everything else whose name suggests a
 # write is a gap and refused. MCP tools become mcp events: guarded servers are judged by their
-# adapter (mcp.py), and a server with no catalog entry follows guards.mcp_unknown (default pass).
+# MCPClerk bridge; unknown-server policy belongs to MCPClerk.
 NO_FILE_WRITE = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite", "TaskList",
                  "TaskGet", "TaskCreate", "TaskUpdate", "TaskStop", "TaskOutput", "ToolSearch",
                  "Skill", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "SendMessage",
@@ -111,7 +111,7 @@ def events(payload, cwd):
         return [Event("dispatch", tool, prompt=str(prompt or ""),
                       name=str(ti.get("task_name") or ti.get("description") or ""))]
     if tool.startswith("mcp__"):
-        return [Event("mcp", tool, args=ti)]  # judged by an adapter when the server has one (mcp.py)
+        return [Event("mcp", tool, args=ti)]  # judged once by MCPClerk
     if tool in READ_ONLY or not MAY_WRITE_RE.search(tool):
         return []
     return [Event("gap", tool)]
