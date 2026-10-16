@@ -4,7 +4,9 @@
 start requires --size no-code|small|large, --allow and --deliverable. Medium aliases small.
 Coding tasks create their own linked worktree; no-code tasks only own report folders.
 verify records a foreground check against unchanged code. handoff validates free-form HTML.
-pr opens a pull request; ship checks a PR then pulls the canonical protected branch, or ships locally.
+pr opens a pull request; ship verifies and merges its exact head through GitHub, then pulls the
+canonical protected branch. Explicit --admin permits an authorized missing-review exception.
+ship --local retains the independent local-only path.
 finish releases owned resources/worktree and validates the final HTML. cancel preserves work.
 Legacy human-only open/import/release retain independent-clone containment.
 """
@@ -324,6 +326,8 @@ def pr(args, environ):
 
 
 def ship(args, environ):
+    if args.local and args.admin:
+        return fail("--admin is only valid with --pr")
     rec = record.load(record.session_from_env(environ), environ)
     if not rec:
         return fail("no task declared for this session")
@@ -331,7 +335,7 @@ def ship(args, environ):
         if args.local:
             shipping.ship_local(rec, environ)
         else:
-            shipping.ship(rec, args.pr, environ)
+            shipping.ship(rec, args.pr, environ, admin=args.admin)
     except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
         return fail(str(exc))
     print("agentkeel: canonical protected branch synchronized; refresh HTML then run finish")
@@ -662,6 +666,7 @@ def main(argv=None, environ=os.environ):
     mode = sp.add_mutually_exclusive_group(required=True)
     mode.add_argument("--pr", type=int)
     mode.add_argument("--local", action="store_true", help="fast-forward canonical protected branch without GitHub or network")
+    sp.add_argument("--admin", action="store_true", help="use an explicitly authorized GitHub administrator merge; checks still required")
     st = sub.add_parser("status")
     st.add_argument("--json", action="store_true")
     st.add_argument("--html", action="store_true")

@@ -557,7 +557,7 @@ class PushGate(RepoCase):
     def test_pr_merge_is_refused_even_with_a_green_head(self):
         self.runs("success")
         code, err = self.push("gh pr merge 3 --merge")
-        self.assertEqual(code, 2); self.assertIn("new commit", err)
+        self.assertEqual(code, 2); self.assertIn("task.py ship --pr NUMBER", err)
         self.assertEqual(self.push("gh pr merge 3 --squash")[0], 2)
 
     def test_failed_missing_or_pending_check_refused(self):

@@ -21,8 +21,11 @@ editing code. After three failed edit/check cycles, report the evidence; only th
 Run verify -- <command> at the worktree root. It records foreground exit and code identity.
 Use the repository's required checks. A passing check on different code is stale.
 Run pr --title <title> --body-file <file> to push the tested commit and open the PR.
-Run ship --pr <number> after review/checks: exact commit push, then pull --ff-only in the clean
-canonical checkout's current configured protected branch. Or run ship --local to fast-forward
+Run ship --pr <number> after review/checks: GitHub merges the exact tested PR head, then Keel
+pulls --ff-only in the clean canonical checkout's current configured protected branch. Add --admin
+only for an explicitly authorized administrator exception; requested changes and failed/pending
+checks still refuse. Queued merges stay pending; retry resumes an already-merged matching PR.
+Or run ship --local to fast-forward
 that same branch without network access; it requires merge permission and no configured
 require_check_before_push policy. Use PR shipping when that policy names a check. Dirty, ahead, diverged,
 unconfigured or busy canonical state stays sync_pending; never reset or autostash.

@@ -22,7 +22,7 @@ AgentKeel manages task scope from declaration through delivery for Claude Code a
 - Every task names a free-form HTML deliverable in a persistent folder outside the repository and disposable worktrees. Handoff and finish require a current, readable report with real `html`, `title` and `body` tags and content. Stop uses the same checks when invoked, but live host enforcement remains unverified and internal errors fail open. There is no page template or content schema.
 - `fix` tasks require a recorded failed check and cause before code edits. The guard limits repeated edit/fail cycles; see [Debugging](skills/debugging/SKILL.md).
 - Task, secret and fix guards can be set to `block`, `warn` or `off` in `agentkeel.json`. MCPClerk policy is separate and fail-closed.
-- Shipping is permissioned. `pr` creates a pull request, `ship --pr NUMBER` verifies and fast-forwards the exact candidate after review/checks, and `ship --local` fast-forwards the exact verified candidate into the clean canonical checkout without a remote. Both use its current configured protected branch; local shipping requires `merge` and no configured `require_check_before_push`; repositories with that policy use PR shipping, which also requires `push`. `finish` releases owned worktree resources after synchronization. If cleanup changes the code snapshot, finish reports `report_pending`; refresh the HTML and run finish again.
+- Shipping is permissioned. `pr` creates a pull request, `ship --pr NUMBER` verifies the exact candidate and merges its PR through GitHub after review/checks, and `ship --local` fast-forwards the exact verified candidate into the clean canonical checkout without a remote. Both use its current configured protected branch; local shipping requires `merge` and no configured `require_check_before_push`; repositories with that policy use PR shipping, which also requires `push`. `finish` releases owned worktree resources after synchronization. If cleanup changes the code snapshot, finish reports `report_pending`; refresh the HTML and run finish again.
 - Intercepted MCP calls are checked by the MCPClerk bridge. Missing or refusing MCPClerk blocks that MCP call; it does not block ordinary coding, and AgentKeel task guard settings cannot soften a Clerk refusal. Host-native permissions and trust remain separate. Calls made through shell, scripts or browsers are outside this check; see [guardrails](docs/guardrails.md).
 - `review-page` helps write a useful human review report. Ponytail provides coding preferences; the debugging skill remains the workflow for fixes.
 
@@ -44,7 +44,7 @@ codex plugin marketplace add hishamalward/agentkeel
 codex plugin add agentkeel@agentkeel
 ```
 
-In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.10.0/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
+In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.10.1/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
 
 The default `{}` policy protects `main` and `master`. Every write needs a declared task. Configure optional protected branches, command rules and `require_check_before_push` in `agentkeel.json`; see [the policy guide](docs/task-record.md#repository-policy). MCPClerk owns MCP catalog and tool policy.
 
@@ -64,6 +64,7 @@ python3 "$TASK" verify -- python3 -m unittest discover -s tests -q
 python3 "$TASK" handoff
 python3 "$TASK" pr --title "Add JSON output" --body-file /path/to/pr-body.txt
 python3 "$TASK" ship --pr 123
+# For an explicitly authorized administrator exception, add --admin.
 # Or, when no require_check_before_push is configured, deliver locally:
 python3 "$TASK" ship --local
 # Update the report to describe the shipped result, then:

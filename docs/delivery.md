@@ -8,7 +8,7 @@ The report must be an absolute `.html` or `.htm` file inside a declared write ro
 
 `finish` can clean up a shipped task's worktree before the final checkpoint. It may then return `report_pending`; update the report to describe the final state and rerun `finish`.
 
-Shipping can use a reviewed remote PR (`ship --pr NUMBER`) or local-only fast-forward (`ship --local`). Both require the exact verified commit and a current HTML report. The local path makes no network calls and only advances a clean canonical checkout already on its configured protected branch; it requires `merge` and no configured `require_check_before_push`. Repositories requiring that check use PR shipping, which also requires `push` and the configured review/check gates.
+Shipping can merge a remote PR through GitHub (`ship --pr NUMBER`, with `--admin` only for an explicitly authorized administrator exception) or local-only fast-forward (`ship --local`). Both require the exact verified commit and a current HTML report. The local path makes no network calls and only advances a clean canonical checkout already on its configured protected branch; it requires `merge` and no configured `require_check_before_push`. Repositories requiring that check use PR shipping, which also requires `push` and the configured review/check gates. Administrator shipping permits missing review only; requested changes and failed/pending checks still refuse. An already-merged matching PR resumes synchronization on retry. A queued merge is not completion.
 
 A report is not proof of authorization or a code security boundary. Keep sensitive information out of it and verify claims against the referenced source, commands and checks.
 
