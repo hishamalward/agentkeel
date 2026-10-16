@@ -219,13 +219,17 @@ def _rollback(repo, branch, base_sha, stage, target, owned_gitdir, stage_identit
     return errors
 
 
-def create(repo, task, session, path=None, branch=None, base="HEAD"):
+def create(repo, task, session, path=None, branch=None, base=None):
     """Create a branch and linked worktree; only this call's branch/tree are rolled back."""
     if not isinstance(task, str) or not task or not isinstance(session, str) or not session:
         raise WorkspaceError("task and session must be nonempty strings")
     source = _top(repo)
     common = _common(source)
     primary = _primary(source, common)
+    if base is None:
+        base = _git(primary, "symbolic-ref", "--short", "HEAD").stdout.strip()
+        if base not in record.policy(primary)["protected"]:
+            raise WorkspaceError("canonical checkout is not on a protected branch; select an explicit --base")
     branch = branch or f"feat/{task}"
     if _git(source, "check-ref-format", "--branch", branch, check=False).returncode:
         raise WorkspaceError(f"invalid branch name: {branch}")
@@ -307,7 +311,7 @@ def _has_untracked_or_ignored(path):
         return bool(shadow.git("ls-files", "--others", "--ignored", "--exclude-standard", "-z"))
 
 
-def _release_problems(manifest):
+def _release_problems(manifest, discard_ignored=False, discard=False):
     path = manifest["path"]
     try:
         state = repostate.inspect(path)
@@ -315,24 +319,26 @@ def _release_problems(manifest):
         raise WorkspaceError(f"worktree could not be inspected: {error}") from error
     if state["top"] != path:
         raise WorkspaceError("workspace is not the root of its own Git worktree")
-    if state["changed"]:
+    if state["changed"] and not discard:
         raise WorkspaceError(f"workspace has {len(state['changed'])} changed or untracked file(s)")
     for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
         if os.path.lexists(os.path.join(manifest["gitdir"], marker)):
             raise WorkspaceError(f"workspace has an unfinished Git operation ({marker})")
     repo = repostate.locate(path)
-    if _has_untracked_or_ignored(path):
-        raise WorkspaceError("workspace contains ignored files")
-    protected = _protected(manifest["primary"])
+    if not (discard_ignored or discard):
+        with repostate.Shadow(repo) as shadow:
+            ignored = shadow.git("ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0")
+        # Ignored does not mean disposable: retain secrets/data, allow only common regenerated caches.
+        caches = {"__pycache__", ".pytest_cache", "node_modules"}
+        unknown = [p for p in ignored if p and p.split("/")[-1] != ".DS_Store"
+                   and not caches.intersection(p.split("/")[:-1])]
+        if unknown:
+            raise WorkspaceError("workspace contains ignored local files: " + ", ".join(unknown[:5])
+                                 + "; preserve them or explicitly use finish --discard-ignored")
     branch_ref = f"refs/heads/{manifest['branch']}"
     tip = state["branches"].get(branch_ref)
-    if not tip or not _ancestor(repo, tip, protected):
+    if not tip or (not discard and not _ancestor(repo, tip, _protected(manifest["primary"]))):
         raise WorkspaceError(f"branch {manifest['branch']} is not preserved in a protected branch")
-    for reflog in ("HEAD", branch_ref):
-        entries = _git(path, "reflog", "show", "--format=%H", reflog).stdout.splitlines()
-        for sha in entries:
-            if not _ancestor(repo, sha, protected):
-                raise WorkspaceError(f"{reflog} contains an unpreserved commit {sha[:12]}")
     try:
         active = active_processes(path)
     except Exception as error:
@@ -356,8 +362,8 @@ def prepare_release(manifest):
             return dict(current)
 
 
-def release(manifest):
-    """Remove only a clean, preserved, inactive worktree created by this manifest."""
+def release(manifest, discard_ignored=False, discard=False):
+    """Remove an owned inactive tree; only an explicit human discard waives work preservation."""
     current = _validate(manifest)
     common_lock = os.path.join(current["common_dir"], "agent-lifecycle.lock")
     with _file_lock(common_lock):
@@ -371,9 +377,9 @@ def release(manifest):
             if current["state"] == "active":
                 _write_manifest(_gitpath(current["path"], "agent-workspace.json"), pending)
             # Recheck after publishing disposal_pending while the shared lifecycle lock is held.
-            release_state = _release_problems(pending)
+            release_state = _release_problems(pending, discard_ignored, discard)
             try:
-                _git(current["primary"], "worktree", "remove", current["path"])
+                _git(current["primary"], "worktree", "remove", *(["--force"] if discard else []), current["path"])
             except WorkspaceError as error:
                 raise WorkspaceError(f"worktree removal failed; disposal remains pending for retry: {error}") from error
             branch_removed = False
@@ -385,8 +391,8 @@ def release(manifest):
                     tip = _git(current["primary"], "rev-parse", ref, check=False)
                     expected = release_state["branches"].get(ref)
                     if tip.returncode == 0 and expected == tip.stdout.strip() and \
-                            _ancestor(repostate.locate(current["primary"]), expected,
-                                      _protected(current["primary"])):
+                            (discard or _ancestor(repostate.locate(current["primary"]), expected,
+                                                  _protected(current["primary"]))):
                         _git(current["primary"], "update-ref", "-d", ref, expected)
                         branch_removed = True
             except WorkspaceError:

@@ -170,6 +170,61 @@ class Workspace(RepoCase):
             workspace.release(manifest)
         self.assertTrue(os.path.isdir(self.path))
 
+    def test_release_allows_ignored_regenerable_caches_but_preserves_local_data(self):
+        from pathlib import Path
+        Path(self.repo, ".gitignore").write_text("__pycache__/\n.pytest_cache/\nnode_modules/\n.DS_Store\n.env\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore local files")
+        manifest = self.create()
+        for folder in ("__pycache__", ".pytest_cache", "node_modules"):
+            Path(self.path, folder).mkdir()
+            Path(self.path, folder, "generated").write_text("cache")
+        Path(self.path, ".DS_Store").write_text("cache")
+        Path(self.path, ".env").write_text("local data")
+        with self.assertRaises(workspace.WorkspaceError):
+            self.release(manifest)
+        self.assertEqual(Path(self.path, ".env").read_text(), "local data")
+        Path(self.path, ".env").unlink()
+        self.assertEqual(self.release(manifest)["state"], "released")
+
+    def test_release_accepts_merged_tip_after_amend_and_rebase(self):
+        from pathlib import Path
+        for operation in ("amend", "rebase"):
+            with self.subTest(operation=operation):
+                manifest = self.create()
+                Path(self.path, "work").write_text(operation)
+                git(self.path, "add", "work")
+                git(self.path, "commit", "-qm", "original")
+                if operation == "amend":
+                    git(self.path, "commit", "--amend", "-qm", "revised")
+                else:
+                    Path(self.repo, "other").write_text("base advance")
+                    git(self.repo, "add", "other")
+                    git(self.repo, "commit", "-qm", "base advance")
+                    git(self.path, "rebase", "main")
+                git(self.repo, "merge", "--ff-only", "feat/task-x")
+                self.assertEqual(self.release(manifest)["state"], "released")
+
+    def test_explicit_ignored_disposal_keeps_process_and_tip_checks(self):
+        from pathlib import Path
+        Path(self.repo, ".gitignore").write_text(".env\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore local env")
+        manifest = self.create()
+        Path(self.path, ".env").write_text("private")
+        with patch.object(workspace, "active_processes", return_value=["123"]):
+            with self.assertRaises(workspace.WorkspaceError):
+                workspace.release(manifest, discard=True)
+        self.assertTrue(Path(self.path, ".env").exists())
+        Path(self.path, "work").write_text("unmerged")
+        git(self.path, "add", "work")
+        git(self.path, "commit", "-qm", "work")
+        with patch.object(workspace, "active_processes", return_value=[]):
+            with self.assertRaises(workspace.WorkspaceError):
+                workspace.release(manifest, discard_ignored=True)
+            git(self.repo, "merge", "--ff-only", "feat/task-x")
+            self.assertEqual(workspace.release(manifest, discard_ignored=True)["state"], "released")
+
     def test_release_of_merged_tree_ignores_other_worktrees_branch_stash_and_files(self):
         first = self.create()
         second_path = os.path.join(self.tmp, "task-worktree-b")

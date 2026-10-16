@@ -14,7 +14,7 @@ python3 task.py start <kebab-case-id> --size no-code|small|large --allow <permis
 
 `--deliverable` is required. Its parent is the default write root; otherwise the report must be within a repeated `--write-root`. Roots cannot be a repository, the filesystem root, a home directory or AgentKeel state. The HTML must be persistent and outside any disposable worktree.
 
-For `small` and `large`, AgentKeel creates and records a linked worktree and prints its path. Change into that path before editing. `no-code` records no worktree. `size` describes process, not authority. `medium` remains a temporary alias for `small`.
+Without `--base`, creation uses the canonical checkout’s current configured protected branch. For `small` and `large`, AgentKeel creates and records a linked worktree and prints its path. Change into that path before editing. `no-code` records no worktree. `size` describes process, not authority. `medium` remains a temporary alias for `small`.
 
 Permissions are `review`, `implement`, `merge`, `push`, `distribution-build`, `store-submission`, `paid-job`, `remote-write` and `publish`. Each action requires its own permission. `kind` describes the task; `fix` enables the debugging guards.
 
@@ -23,9 +23,11 @@ Permissions are `review`, `implement`, `merge`, `push`, `distribution-build`, `s
 - `verify -- <command...>` runs a foreground check and records its result against the worktree's code state.
 - `handoff` validates the current HTML and saves a checkpoint. A later code change with an unchanged report makes the checkpoint stale; update the report and hand off again.
 - `pr --title TITLE --body-file FILE` opens a pull request for the task's candidate.
-- `ship --pr NUMBER` checks the ready PR and successful checks against the exact candidate, pushes that SHA to `main`, and synchronizes the canonical checkout. It requires `merge` and `push`.
-- `finish [--keep]` checks delivery and cleanup state. After worktree cleanup it may return `report_pending`; refresh the report to reflect cleanup and rerun `finish`. `--keep` retains the worktree/runtime for a preview.
-- `cancel` marks the task cancelled and keeps its worktree, resources and record.
+- `ship --pr NUMBER` checks the ready PR and successful checks against the exact candidate, pushes that SHA to the PR's configured protected base, and synchronizes the canonical checkout. It requires `merge` and `push`.
+- `ship --local` verifies the exact committed candidate and current HTML, then fast-forwards the clean canonical checkout's current configured protected branch without network access. It requires `merge`.
+- `finish [--keep] [--discard-ignored]` checks delivery and cleanup state. After worktree cleanup it may return `report_pending`; refresh the report to reflect cleanup and rerun `finish`. `--keep` retains the worktree/runtime for a preview. Ignored generated caches (`__pycache__`, `.pytest_cache`, `node_modules`, `.DS_Store`) may be removed with the owned tree; other ignored local files block cleanup. `--discard-ignored` explicitly discards those ignored files and logs the choice; it never waives clean tracked/untracked state, tip preservation or process checks.
+- `cancel` marks the task cancelled and keeps its worktree, resources and record. Starting another task archives the cancelled ownership in the task directory; status continues to show it.
+- Human-only `discard TASK --worktree PATH` releases resources and removes that cancelled owned worktree, including ignored files and unmerged changes. It records the explicit discard and refuses an active task, changed identity or active process. It can find both current and archived cancelled records.
 - `status [--json|--html]` reads current task/worktree facts. `show` prints this session's record.
 - `init` opts the current repository into the plugin. `cause` and human-only `reopen` support fix tasks.
 

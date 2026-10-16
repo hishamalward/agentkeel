@@ -229,7 +229,7 @@ def human_task_command(argv):
     """Human-only task commands that this guard still reserves."""
     for i, tok in enumerate(argv):
         if os.path.basename(tok) == "task.py":
-            for word in ("open", "import", "release", "reopen"):
+            for word in ("open", "import", "release", "reopen", "discard"):
                 if word in argv[i + 1:i + 4]:
                     return word
     return None
@@ -316,6 +316,8 @@ def judge_git_ops(call, ops, root, pol, rec, environ, line):
                     "refusing a commit that does not name its paths.\n"
                     "A bare `git commit` (or -a) commits whatever is staged, including another agent's\n"
                     "work. Name the paths: git commit -m '...' -- <path> [<path>...]")
+            rec["code_changed_at"] = time.time()
+            record.save(rec, environ)
         elif op.kind == "move":
             need(rec, "merge", f"moving the protected branch '{op.targets[0] if op.targets else '?'}' ({op.name})")
         elif op.kind == "push":
@@ -406,6 +408,9 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             continue
         judge_session_claim(sc, session)
         human = human_task_command(sc.argv)
+        if human == "discard":
+            raise Block("`task.py discard` is the human's command: it deletes cancelled task work, including unmerged changes. "
+                        "Report the exact task and worktree path for the human to discard explicitly.")
         if human == "open":
             raise Block(
                 "`task.py open` is the human's command: it sets the write boundary of a new session,\n"

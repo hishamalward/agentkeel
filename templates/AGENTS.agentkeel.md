@@ -5,7 +5,7 @@ Declare the task from the user's request before writing:
 Use the path printed at session start. Size grants no permission. Medium aliases small.
 No-code owns report folders only. Every coding task gets its own worktree, created by Keel.
 Change into the printed worktree. Optional --path, --branch and --base select its location and base.
-Do not write code in canonical main. Cancel preserves unfinished work and ownership records.
+Do not write code in the canonical shared checkout. Cancel preserves unfinished work and ownership records.
 
 Keep one coherent HTML report outside disposable worktrees. Include plans, progress, evidence,
 limitations and useful mockups. Rewrite it after feedback; no template or page schema is required.
@@ -21,8 +21,10 @@ editing code. After three failed edit/check cycles, report the evidence; only th
 Run verify -- <command> at the worktree root. It records foreground exit and code identity.
 Use the repository's required checks. A passing check on different code is stale.
 Run pr --title <title> --body-file <file> to push the tested commit and open the PR.
-Run ship --pr <number> after review/checks: exact commit push, then pull --ff-only in clean
-canonical main. Dirty, ahead, diverged or busy main stays sync_pending; never reset or autostash.
+Run ship --pr <number> after review/checks: exact commit push, then pull --ff-only in the clean
+canonical checkout's current configured protected branch. Or run ship --local to fast-forward
+that same branch without network access; it requires merge permission. Dirty, ahead, diverged,
+unconfigured or busy canonical state stays sync_pending; never reset or autostash.
 Refresh the HTML with the ship result, then finish. Finish releases optional Slots resources,
 checks ownership/preservation/processes, and removes the worktree. Refresh the final HTML and
 retry if report_pending. --keep retains a preview explicitly. Failed stages remain retryable.

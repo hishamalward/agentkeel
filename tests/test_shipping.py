@@ -53,9 +53,9 @@ class ShippingGit(unittest.TestCase):
 
     def test_sync_pulls_remote_advance_and_accepts_already_synced(self):
         head = self.remote_commit()
-        self.assertEqual(shipping.sync_main(self.primary, head, self.env), head)
+        self.assertEqual(shipping.sync_branch(self.primary, head, "main", self.env), head)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), head)
-        self.assertEqual(shipping.sync_main(self.primary, self.initial, self.env), head)
+        self.assertEqual(shipping.sync_branch(self.primary, self.initial, "main", self.env), head)
 
     def test_sync_refuses_dirty_local_ahead_and_diverged_without_changing_bytes(self):
         head = self.remote_commit()
@@ -63,7 +63,7 @@ class ShippingGit(unittest.TestCase):
         with open(dirty, "wb") as fh:
             fh.write(b"keep me\x00\n")
         with self.assertRaisesRegex(shipping.FinishError, "dirty"):
-            shipping.sync_main(self.primary, head, self.env)
+            shipping.sync_branch(self.primary, head, "main", self.env)
         with open(dirty, "rb") as fh:
             self.assertEqual(fh.read(), b"keep me\x00\n")
         os.unlink(dirty)
@@ -72,7 +72,7 @@ class ShippingGit(unittest.TestCase):
         ahead = git(self.primary, "rev-parse", "HEAD")
         before = git(self.primary, "status", "--porcelain")
         with self.assertRaises(shipping.FinishError):
-            shipping.sync_main(self.primary, head, self.env)
+            shipping.sync_branch(self.primary, head, "main", self.env)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), ahead)
         self.assertEqual(git(self.primary, "status", "--porcelain"), before)
 
@@ -82,7 +82,7 @@ class ShippingGit(unittest.TestCase):
         git(self.primary, "commit", "--allow-empty", "-m", "diverged local")
         divergent = git(self.primary, "rev-parse", "HEAD")
         with self.assertRaises(shipping.FinishError):
-            shipping.sync_main(self.primary, self.initial, self.env)
+            shipping.sync_branch(self.primary, self.initial, "main", self.env)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), divergent)
 
     def test_sync_refuses_busy_operations_without_touching_repository(self):
@@ -92,13 +92,18 @@ class ShippingGit(unittest.TestCase):
         with open(lock, "wb") as fh:
             fh.write(b"owner bytes")
         with self.assertRaisesRegex(shipping.FinishError, "busy"):
-            shipping.sync_main(self.primary, head, self.env)
+            shipping.sync_branch(self.primary, head, "main", self.env)
         with open(lock, "rb") as fh:
             self.assertEqual(fh.read(), b"owner bytes")
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.initial)
 
     def test_ship_retry_after_sync_failure_does_not_push_twice(self):
         # A task-owned linked tree whose exact committed state has passed local verification.
+        git(self.primary, "branch", "-m", "release")
+        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
+        git(self.primary, "add", "agentkeel.json")
+        git(self.primary, "commit", "-m", "configure protected branch")
+        git(self.primary, "push", "origin", "release")
         owned = workspace.create(self.primary, "ship", "session", path=os.path.join(self.root, "task"))
         task = owned["path"]
         git(task, "config", "user.name", "test")
@@ -131,6 +136,10 @@ class ShippingGit(unittest.TestCase):
             self.assertTrue(rec["shipping"]["pushed"])
             self.assertEqual(rec["lifecycle"], "sync_pending")
             self.assertEqual(Path(dirty).read_bytes(), b"preserve")
+            git(self.primary, "checkout", "main")
+            with self.assertRaisesRegex(shipping.FinishError, "protected branch changed"):
+                shipping.ship(rec, 1, fake_env)
+            git(self.primary, "checkout", "release")
             self.assertEqual(Path(pushes).read_text(), "x")
             os.unlink(dirty)
             shipping.ship(rec, 1, fake_env)
@@ -138,6 +147,94 @@ class ShippingGit(unittest.TestCase):
             self.assertEqual(Path(pushes).read_text(), "x")
             self.assertEqual(git(self.primary, "rev-parse", "HEAD"), sha)
             self.assertEqual(reviewed.call_count, 2)  # initial gate and final pre-push recheck
+            self.assertEqual(reviewed.call_args.args[-1], "release")
+            self.assertEqual(subprocess.run(["git", "--git-dir", self.bare, "rev-parse", "refs/heads/release"],
+                                            check=True, capture_output=True, text=True).stdout.strip(), sha)
+
+    def test_ship_local_fast_forwards_verified_candidate_without_remote_access(self):
+        git(self.primary, "branch", "-m", "release")
+        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
+        git(self.primary, "add", "agentkeel.json")
+        git(self.primary, "commit", "-m", "configure protected branch")
+        owned = workspace.create(self.primary, "local-ship", "session",
+                                 path=os.path.join(self.root, "local-task"))
+        task = owned["path"]
+        git(task, "config", "user.name", "test")
+        git(task, "config", "user.email", "test@example.invalid")
+        with open(os.path.join(task, "change.txt"), "w") as fh:
+            fh.write("candidate\n")
+        git(task, "add", "change.txt")
+        git(task, "commit", "-m", "candidate")
+        sha, tree = evidence.code_state(task)
+        report = os.path.join(self.root, "local-report.html")
+        with open(report, "w") as fh:
+            fh.write("<html><title>Report</title><body>Done</body></html>")
+        rec = {"session_id": "session", "task": "local-ship", "permissions": ["merge"],
+               "workspace": owned, "worktrees": [task], "write_roots": [self.root],
+               "deliverable": report, "evidence": [{"result": "passed", "head": sha, "tree": tree}],
+               "shipping": {}}
+        fake_env = {**self.env, "AGENTKEEL_HOME": os.path.join(self.root, "home")}
+        dirty = Path(self.primary, "preserve.txt")
+        dirty.write_bytes(b"keep")
+        with self.assertRaisesRegex(shipping.FinishError, "dirty"):
+            shipping.ship_local(rec, fake_env)
+        self.assertEqual(dirty.read_bytes(), b"keep")
+        self.assertEqual(rec["lifecycle"], "sync_pending")
+        dirty.unlink()
+        shipping.ship_local(rec, fake_env)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), sha)
+        self.assertTrue(rec["shipping"]["synced"])
+        self.assertEqual(rec["shipping"]["mode"], "local")
+        self.assertEqual(rec["shipping"]["target_branch"], "release")
+        self.assertEqual(rec["lifecycle"], "cleanup_pending")
+        shipping.ship_local(rec, fake_env)  # already synced is a no-op even though ship outcome aged the HTML
+        rec["shipping"]["target_branch"] = "another-branch"
+        with self.assertRaisesRegex(shipping.FinishError, "protected branch changed"):
+            shipping.ship_local(rec, fake_env)
+        self.assertEqual(subprocess.run(["git", "--git-dir", self.bare, "rev-parse", "refs/heads/main"],
+                                        check=True, capture_output=True, text=True).stdout.strip(), self.initial)
+
+    def test_ship_local_requires_merge_permission_and_configured_canonical_branch(self):
+        owned = workspace.create(self.primary, "local-deny", "session",
+                                 path=os.path.join(self.root, "denied-task"))
+        git(self.primary, "branch", "-m", "topic")
+        rec = {"permissions": [], "workspace": owned, "shipping": {}}
+        with self.assertRaisesRegex(shipping.FinishError, "lacks permission: merge"):
+            shipping.ship_local(rec, self.env)
+        rec["permissions"] = ["merge"]
+        with self.assertRaisesRegex(shipping.FinishError, "not configured as protected"):
+            shipping.ship_local(rec, self.env)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.initial)
+
+    def test_pr_uses_canonical_configured_protected_branch_as_base(self):
+        git(self.primary, "branch", "-m", "release")
+        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
+        git(self.primary, "add", "agentkeel.json")
+        git(self.primary, "commit", "-m", "configure protected branch")
+        owned = workspace.create(self.primary, "base-test", "session",
+                                 path=os.path.join(self.root, "base-task"))
+        task = owned["path"]
+        git(task, "config", "user.name", "test")
+        git(task, "config", "user.email", "test@example.invalid")
+        Path(task, "change.txt").write_text("candidate\n")
+        git(task, "add", "change.txt")
+        git(task, "commit", "-m", "candidate")
+        sha, tree = evidence.code_state(task)
+        report = Path(self.root, "base-report.html")
+        report.write_text("<html><title>Report</title><body>Done</body></html>")
+        body = Path(self.root, "pr-body.txt")
+        body.write_text("body")
+        args_file = Path(self.root, "gh-args")
+        gh = Path(self.root, "gh")
+        gh.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{args_file}'\nprintf 'https://example.invalid/pr/2\\n'\n")
+        gh.chmod(0o755)
+        rec = {"session_id": "session", "task": "base-test", "permissions": ["push"],
+               "workspace": owned, "write_roots": [self.root], "deliverable": str(report),
+               "evidence": [{"result": "passed", "head": sha, "tree": tree}]}
+        env = {**self.env, "AGENTKEEL_GH": str(gh)}
+        self.assertEqual(shipping.pr(rec, "title", str(body), env), "https://example.invalid/pr/2")
+        self.assertIn("release", args_file.read_text().splitlines())
+        self.assertIn("--base", args_file.read_text().splitlines())
 
     def test_finish_without_slots_preserves_pending_then_releases_and_requires_final_report(self):
         owned = workspace.create(self.primary, "finish", "session")

@@ -18,6 +18,6 @@ AgentKeel sends intercepted MCP calls to the MCPClerk bridge for a fail-closed j
 
 ## Evidence and boundaries
 
-Hooks operate on host-delivered events and parsed commands. A shell script, unparsed side effect, browser action, another process or untrusted environment can fall outside those events. The `verify` command runs in the foreground and records its exit status and code snapshot on both hosts; shell-hook observations are supplementary rather than authoritative. Shipping also checks exact PR evidence and any configured required check. Host permission prompts, branch protection and human review remain separate controls.
+Hooks operate on host-delivered events and parsed commands. A shell script, unparsed side effect, browser action, another process or untrusted environment can fall outside those events. The `verify` command runs in the foreground and records its exit status and code snapshot on both hosts; shell-hook observations are supplementary rather than authoritative. PR shipping checks exact PR evidence and any configured required check; local shipping requires the exact verified commit and fast-forwards only the canonical checkout's already-selected configured protected branch. Host permission prompts, branch protection and human review remain separate controls.
 
 These limits describe what the current mechanisms observe. They are not promises that all writes or external effects are contained.

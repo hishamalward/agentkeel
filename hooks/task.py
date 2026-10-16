@@ -4,7 +4,7 @@
 start requires --size no-code|small|large, --allow and --deliverable. Medium aliases small.
 Coding tasks create their own linked worktree; no-code tasks only own report folders.
 verify records a foreground check against unchanged code. handoff validates free-form HTML.
-pr opens a pull request; ship sends the exact verified commit then pulls canonical main.
+pr opens a pull request; ship checks a PR then pulls the canonical protected branch, or ships locally.
 finish releases owned resources/worktree and validates the final HTML. cancel preserves work.
 Legacy human-only open/import/release retain independent-clone containment.
 """
@@ -59,11 +59,18 @@ def start(args, environ):
         return fail("--deliverable must name an HTML file")
     with record.locked(record.record_path(session, environ)):
         prev = record.load(session, environ)
+        retained = None
         if prev and prev.get("task") != args.task:
-            if prev.get("lifecycle") != "complete" or prev.get("worktrees"):
+            cancelled = prev.get("lifecycle") == "cancelled"
+            if not cancelled and (prev.get("lifecycle") != "complete" or prev.get("worktrees")):
                 return fail("finish the existing task before replacing its ownership record")
-            archive = os.path.join(record.home(environ), "completed", record._safe(session), prev["task"] + ".json")
-            record.atomic_write_json(archive, prev)
+            if cancelled:
+                identity = (prev.get("workspace") or {}).get("identity") or str(prev["declared_at"])
+                archive = os.path.join(record.home(environ), "tasks",
+                                       record._safe(session) + "--cancelled--" + prev["task"] + "--" + identity + ".json")
+            else:
+                archive = os.path.join(record.home(environ), "completed", record._safe(session), prev["task"] + ".json")
+            retained = (archive, prev)
             prev = None
         if prev and size == "no-code" and prev.get("worktrees"):
             return fail("a task with a worktree cannot become no-code; finish it first")
@@ -86,6 +93,8 @@ def start(args, environ):
                    write_roots=sorted(set(roots) | set(rec["write_roots"])), lifecycle="active")
         rec["scratch"] = os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch", record._safe(session))
         os.makedirs(rec["scratch"], exist_ok=True)
+        if retained:
+            record.atomic_write_json(*retained)
         record.save(rec, environ)
     print(f"agentkeel: task '{args.task}', {size}; permissions {', '.join(perms)}")
     print("  worktree: " + (rec["worktrees"][0] if rec["worktrees"] else "none (no-code)"))
@@ -248,12 +257,55 @@ def cancel(args, environ):
     return 0
 
 
+def discard(args, environ):
+    """Human-only cleanup of one cancelled task, including archived retained ownership."""
+    target = os.path.realpath(args.worktree)
+    folder = os.path.join(record.home(environ), "tasks")
+    hits = []
+    for name in os.listdir(folder) if os.path.isdir(folder) else []:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            with open(path) as stream:
+                rec = json.load(stream)
+            if rec.get("task") == args.task and (rec.get("workspace") or {}).get("path") == target:
+                hits.append(path)
+        except (OSError, ValueError, AttributeError):
+            continue
+    if len(hits) != 1:
+        return fail("one matching task/worktree ownership record is required")
+    path = hits[0]
+    try:
+        with record.locked(path):
+            with open(path) as stream:
+                rec = json.load(stream)
+            if (rec.get("task") != args.task or rec.get("lifecycle") != "cancelled"
+                    or (rec.get("workspace") or {}).get("path") != target):
+                return fail("cancel this task before explicitly discarding its work")
+            owned = workspace.prepare_release(rec["workspace"])
+            record.log_override("discard", "task.py discard " + args.task + " --worktree " + target,
+                                rec["session_id"], environ)
+            if os.path.lexists(workspace.runtime_path(target)):
+                shipping.run(owned["primary"], [environ.get("AGENTKEEL_SLOTS", "agent-slots"),
+                                               "release", "--worktree", target], environ)
+            rec["workspace"] = workspace.release(owned, discard=True)
+            rec.update(worktrees=[], outcome_at=time.time())
+            record.atomic_write_json(path, rec)
+    except (workspace.WorkspaceError, shipping.FinishError, OSError, ValueError) as exc:
+        return fail(str(exc))
+    print("agentkeel: discarded cancelled task worktree; report and ownership history retained")
+    return 0
+
+
 def finish(args, environ):
     rec = record.load(record.session_from_env(environ), environ)
     if not rec:
         return fail("no task declared for this session")
     try:
-        shipping.finish(rec, environ, keep=args.keep)
+        if args.discard_ignored:
+            record.log_override("discard-ignored", "task.py finish --discard-ignored", rec["session_id"], environ)
+        shipping.finish(rec, environ, keep=args.keep, discard_ignored=args.discard_ignored)
     except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
         return fail(str(exc))
     print("agentkeel: " + rec["lifecycle"] + "; report: " + rec["deliverable"])
@@ -276,10 +328,13 @@ def ship(args, environ):
     if not rec:
         return fail("no task declared for this session")
     try:
-        shipping.ship(rec, args.pr, environ)
+        if args.local:
+            shipping.ship_local(rec, environ)
+        else:
+            shipping.ship(rec, args.pr, environ)
     except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
         return fail(str(exc))
-    print("agentkeel: merged and canonical main synchronized; refresh HTML then run finish")
+    print("agentkeel: canonical protected branch synchronized; refresh HTML then run finish")
     return 0
 
 
@@ -571,7 +626,7 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--write-root", action="append")
     s.add_argument("--path")
     s.add_argument("--branch")
-    s.add_argument("--base", default="main")
+    s.add_argument("--base", help="base ref; defaults to the canonical checkout's protected branch")
     o = sub.add_parser("open")
     o.add_argument("task")
     o.add_argument("--host", required=True, choices=isolation.HOSTS)
@@ -593,14 +648,20 @@ def main(argv=None, environ=os.environ):
     v = sub.add_parser("verify")
     v.add_argument("cmd", nargs=argparse.REMAINDER)
     sub.add_parser("cancel")
+    d = sub.add_parser("discard", help="human-only: discard one cancelled task's owned worktree and unmerged work")
+    d.add_argument("task")
+    d.add_argument("--worktree", required=True)
     sub.add_parser("handoff")
     f = sub.add_parser("finish")
     f.add_argument("--keep", action="store_true", help="retain the worktree and runtime for a preview")
+    f.add_argument("--discard-ignored", action="store_true", help="explicitly discard ignored local files during owned cleanup")
     prp = sub.add_parser("pr")
     prp.add_argument("--title", required=True)
     prp.add_argument("--body-file", required=True)
     sp = sub.add_parser("ship")
-    sp.add_argument("--pr", type=int, required=True)
+    mode = sp.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--pr", type=int)
+    mode.add_argument("--local", action="store_true", help="fast-forward canonical protected branch without GitHub or network")
     st = sub.add_parser("status")
     st.add_argument("--json", action="store_true")
     st.add_argument("--html", action="store_true")
@@ -613,7 +674,7 @@ def main(argv=None, environ=os.environ):
         return selftest()
     args = p.parse_args(argv)
     handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd,
-                "start": start, "show": show, "verify": verify, "cancel": cancel,
+                "start": start, "show": show, "verify": verify, "cancel": cancel, "discard": discard,
                 "handoff": handoff, "finish": finish, "pr": pr, "ship": ship, "status": status,
                 "cause": cause, "reopen": reopen}
     if args.action not in handlers:

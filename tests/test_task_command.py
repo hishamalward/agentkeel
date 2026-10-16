@@ -369,11 +369,12 @@ class SessionBanner(RepoCase):
         other = os.path.join(self.tmp, "other")
         git(self.primary, "worktree", "add", "-q", other, "-b", "feat/other")
         self.assertEqual(self.task("start", "other-task", "--size", "small", "--allow", "implement",
+                                   "--base", "main",
                                    session="session-b", cwd=other).returncode, 0)
         other_record = json.load(open(os.path.join(self.home, "tasks", "session-b.json")))
         other_owned = other_record["worktrees"][0]
         self.assertEqual(self.task("start", "mine", "--size", "small", "--allow", "implement,merge",
-                                   "--branch", "feat/mine").returncode, 0)
+                                   "--branch", "feat/mine", "--base", "main").returncode, 0)
         mine_record = self.record()
         mine_owned = mine_record["worktrees"][0]
         out = self.banner(mine_owned)

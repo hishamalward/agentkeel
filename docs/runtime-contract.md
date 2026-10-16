@@ -30,6 +30,10 @@ removes only resources and configuration it owns, then removes the marker. It ne
 the Git worktree or branch. Pausing retains the marker, data and worktree.
 
 Keel then takes the lock again and rechecks identity, absent runtime claim, preserved task
-commits, files and processes before removing the tree. An unknown process, ignored file or
-unpreserved work is a reason to retain it. Other tasks' shared Git branches and stashes remain
+branch tip, files and processes before removing the tree. An unknown process, unpreserved tip or ignored local data is a reason to retain it.
+Amend/rebase history is not an extra preservation gate once the tip is merged. Ignored
+`__pycache__`, `.pytest_cache`, `node_modules` and `.DS_Store` are treated as regenerated
+artifacts; other ignored files need preservation or explicit `finish --discard-ignored`.
+Human-only `discard TASK --worktree PATH` can waive work preservation for a cancelled task,
+but always retains identity, runtime-release and active-process checks. Other tasks' shared Git branches and stashes remain
 untouched. Retaining a preview is explicit and keeps both ownership records.

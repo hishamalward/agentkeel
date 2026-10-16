@@ -29,6 +29,12 @@ class NoTask(RepoCase):
 
 
 class SessionBinding(RepoCase):
+    def test_allowed_commit_marks_report_due_and_discard_is_human_only(self):
+        self.declare(); self.branch("feat/x")
+        self.assertEqual(self.hook(self.bash("git commit -m message -- file.py"))[0], 0)
+        self.assertGreater(self.record().get("code_changed_at", 0), 0)
+        self.assertEqual(self.hook(self.bash("python3 task.py discard x --worktree /tmp/work"))[0], 2)
+
     def test_second_session_cannot_use_first_sessions_task(self):
         self.declare(); self.branch("feat/x")
         self.assertEqual(self.hook(self.write("src/a.py"))[0], 0)

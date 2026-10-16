@@ -63,10 +63,37 @@ class Delivery(unittest.TestCase):
         self.rec["code_changed_at"] = 0
         with mock.patch.object(delivery, "_code", return_value={"tree": ["head", "before"]}):
             self.rec["html_checkpoint"] = delivery.checkpoint(self.rec)
-        with mock.patch.object(delivery, "_code", return_value={"tree": ["head", "after"]}):
+        with mock.patch.object(delivery, "_code", return_value={"tree": ["head", "after"]}) as code_state:
             self.assertTrue(delivery.problems(self.rec))
+            code_state.assert_called_once_with(self.rec)
             self.write("<html><title>Result</title><body>After edit</body></html>")
             self.assertEqual(delivery.problems(self.rec), [])
+
+    def test_touching_unchanged_report_does_not_clear_new_task_activity(self):
+        self.write("<html><title>Result</title><body>Before activity</body></html>")
+        self.rec["html_checkpoint"] = delivery.checkpoint(self.rec)
+        for key in ("code_changed_at", "outcome_at"):
+            with self.subTest(activity=key):
+                self.rec[key] = self.rec["declared_at"] + 5
+                os.utime(self.report, (self.rec[key] + 1, self.rec[key] + 1))
+                with mock.patch.object(delivery, "_code", side_effect=AssertionError("unexpected Git scan")):
+                    self.assertIn("the deliverable content has not changed since", delivery.problems(self.rec)[0])
+                self.rec.pop(key)
+        self.rec["evidence"] = [{"at": self.rec["declared_at"] + 5}]
+        os.utime(self.report, (self.rec["declared_at"] + 6, self.rec["declared_at"] + 6))
+        with mock.patch.object(delivery, "_code", side_effect=AssertionError("unexpected Git scan")):
+            self.assertIn("the deliverable content has not changed since", delivery.problems(self.rec)[0])
+
+        self.write("<html><title>Result</title><body>Updated after activity</body></html>")
+        os.utime(self.report, (self.rec["evidence"][0]["at"] + 1, self.rec["evidence"][0]["at"] + 1))
+        self.assertEqual(delivery.problems(self.rec), [])
+
+    def test_status_page_does_not_claim_stop_hooks_are_active(self):
+        from agentkeel_core import statuspage
+        page = statuspage.render({"repository": "/repo", "task": None, "worktrees": []}, None,
+                                 {"guards": {}}, [])
+        self.assertEqual(page.count("Stop enforcement not verified here; handoff/finish enforce HTML"), 2)
+        self.assertIn("do not prove this Stop hook ran", page)
 
 
 if __name__ == "__main__":

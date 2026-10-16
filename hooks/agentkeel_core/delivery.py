@@ -88,7 +88,10 @@ def checkpoint(rec):
         mtime = os.stat(path).st_mtime if path and text is not None else None
     except OSError:
         mtime = None
-    return {"path": path, "mtime": mtime,
+    activity = [float(rec.get("declared_at") or 0), float(rec.get("outcome_at") or 0),
+                float(rec.get("code_changed_at") or 0)]
+    activity.extend(float(e.get("at") or 0) for e in rec.get("evidence") or [] if isinstance(e, dict))
+    return {"path": path, "mtime": mtime, "activity_at": max(activity),
             "digest": hashlib.sha256(text.encode("utf-8")).hexdigest() if text is not None else None,
             "code": _code(rec), "valid": not issues, "problems": issues}
 
@@ -108,7 +111,10 @@ def problems(rec, require_fresh=True):
     if mtime < latest:
         issues.append("the deliverable is stale; update it after the latest task evidence")
     saved = rec.get("html_checkpoint")
-    if saved and saved.get("digest") == hashlib.sha256(text.encode("utf-8")).hexdigest() and saved.get("mtime") == mtime:
-        if _code(rec) != saved.get("code"):
+    if saved and saved.get("digest") == hashlib.sha256(text.encode("utf-8")).hexdigest():
+        checkpoint_activity = float(saved.get("activity_at", saved.get("mtime") or 0))
+        if latest > checkpoint_activity:
+            issues.append("the deliverable content has not changed since the latest task evidence")
+        elif _code(rec) != saved.get("code"):
             issues.append("the code changed since the last HTML handoff checkpoint")
     return issues

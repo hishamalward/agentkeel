@@ -25,7 +25,7 @@ def other_records(environ=os.environ, mine=None):
                 rec = json.load(fh)
         except Exception:
             continue
-        if not isinstance(rec, dict) or (mine and rec.get("session_id") == mine.get("session_id")):
+        if not isinstance(rec, dict) or (mine and path == record.record_path(mine.get("session_id"), environ)):
             continue
         out.append({"task": rec.get("task"), "session": rec.get("session_id"), "size": rec.get("size"),
                     "kind": rec.get("kind") or "feature",
@@ -70,6 +70,10 @@ def render(out, rec, pol, others):
     parts.append("<h2>Guard modes</h2><table><tr><th>Guard</th><th>Mode</th></tr>" + "".join(
         f"<tr><td>{_e(g)}</td><td><span class=\"pill{' no' if m in ('off', 'pass') else ' warn' if m == 'warn' else ''}\">{_e(m)}</span></td></tr>"
         for g, m in sorted((pol.get("guards") or {}).items())) + "</table><p>Set in agentkeel.json, <code>\"guards\": {\"task\": \"warn\"}</code>; missing means block. MCP policy is managed by MCPClerk.</p>")
+    parts.append("<h2>Host Stop enforcement</h2><table><tr><th>Host</th><th>Status</th></tr>" + _rows([
+        (host, "Stop enforcement not verified here; handoff/finish enforce HTML")
+        for host in ("Claude Code", "Codex")])
+        + "</table><p>Installed, enabled or trusted hooks do not prove this Stop hook ran in the current session.</p>")
     ws = out.get("worktrees") or []
     parts.append("<h2>Worktrees of this task</h2>" + ("<table><tr><th>Path</th><th>Branch</th><th>State</th><th>Changed files</th></tr>" + _rows([
         (w.get("path"), w.get("branch"), w.get("error") or (f"{w.get('ahead')} commit(s) not in {w.get('protected')}, " + ("merged" if w.get("merged") else "not merged") if "ahead" in w else "no protected branch to compare with"), w.get("changed", ""))
