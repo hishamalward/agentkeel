@@ -4,13 +4,13 @@
     "name": "Hisham Al-Ward",
     "url": "https://github.com/hishamalward"
   },
-  "description": "Claude Code and Codex guardrails for declared tasks, linked worktrees, persistent HTML checkpoints, and permissioned shipping. Acts only in opted-in repositories.",
+  "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
   "plugins": [
     {
       "name": "agentkeel",
       "displayName": "AgentKeel",
       "source": "./",
-      "description": "Claude Code and Codex task guardrails with a fail-closed MCPClerk bridge; acts only in opted-in repositories.",
+      "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
       "version": "0.10.0",
       "author": {
         "name": "Hisham Al-Ward"

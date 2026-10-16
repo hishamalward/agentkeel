@@ -1,7 +1,7 @@
 {
   "name": "agentkeel",
   "version": "0.10.0",
-  "description": "Claude Code and Codex task guardrails with a fail-closed MCPClerk bridge; acts only in opted-in repositories.",
+  "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
   "author": {
     "name": "Hisham Al-Ward"
   },

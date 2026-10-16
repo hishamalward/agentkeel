@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/261005-brand-banner-dark-asset.svg">
-    <img src="docs/261005-brand-banner-light-asset.svg" width="100%" alt="AgentKeel: guardrails beneath your AI coding agents.">
+    <img src="docs/261005-brand-banner-light-asset.svg" width="100%" alt="AgentKeel: tasks, worktrees, and verified delivery.">
   </picture>
 </p>
 
@@ -11,7 +11,9 @@
   <a href="#install-and-opt-in"><img src="https://img.shields.io/badge/python-3.10%2B-2f5bd3" alt="Python 3.10+"></a>
 </p>
 
-AgentKeel is a guardrail plugin for Claude Code and Codex. Before writing, an agent declares a task, its permissions, a persistent HTML report, and (for code work) gets a linked worktree. Hooks check supported edits, commands and intercepted MCP calls against that scope. The core uses Python's standard library.
+AgentKeel manages task scope from declaration through delivery for Claude Code and Codex. Each task records its permissions and persistent HTML report; coding tasks get a linked worktree, while no-code tasks read the repository and write an external report without editing tracked files. Hooks check supported edits, commands and intercepted MCP calls against that scope. The core uses Python's standard library.
+
+<img src="docs/task-flow.svg" width="100%" alt="Task flow: declare scope, work in a task worktree or report-only mode, verify and checkpoint in HTML, then ship and clean up. AgentSlots can attach optional runtime resources, and MCPClerk judges MCP tool calls.">
 
 ## What it does
 
@@ -26,7 +28,7 @@ AgentKeel is a guardrail plugin for Claude Code and Codex. Before writing, an ag
 
 ## Install and opt in
 
-Install AgentKeel through the host's plugin marketplace, then opt each repository in. Python 3.10+, git, and bash 3.2+ are required. Version 0.10.0 removes AgentKeel's former MCP catalog and adapter; MCP policy now requires MCPClerk.
+Install AgentKeel through the host's plugin marketplace, then opt each repository in. Python 3.10+, git, and bash 3.2+ are required. MCP tool policy is handled by MCPClerk; see [guardrails](docs/guardrails.md#mcpclerk-bridge) for setup and migration instructions.
 
 Claude Code:
 
@@ -48,7 +50,7 @@ The default `{}` policy protects `main` and `master`. Every write needs a declar
 
 ### MCPClerk bridge
 
-Install MCPClerk separately. AgentKeel uses an executable named by the absolute `AGENTKEEL_MCPCLERK` override, then `~/.local/bin/mcpclerk`, then a fixed system search path. MCPClerk stores user policy in `~/.mcpclerk/mcp_catalog.json` (or `$MCPCLERK_HOME/mcp_catalog.json`) and project policy in `mcpclerk.json`. To move old AgentKeel policy, explicitly run `mcpclerk migrate-keel --scope project --file agentkeel.json --project /path/to/project` and `mcpclerk migrate-keel --scope user --file /path/to/old-user-catalog.json`, review each result, and keep its backup. Then remove the legacy `mcp` and `guards.mcp_unknown` keys from `agentkeel.json` and remove `mcp_catalog.json` from `AGENTKEEL_HOME` (default `~/.agentkeel`); the bridge refuses MCP calls while those legacy files or keys remain. MCPClerk's judge is independent of native host permissions and task guard modes.
+Install MCPClerk separately. Its decisions are independent of native host permissions and task guard modes. The [MCPClerk setup guide](docs/guardrails.md#mcpclerk-bridge) describes configuration and migration from older AgentKeel MCP policy.
 
 ## A task from start to finish
 
