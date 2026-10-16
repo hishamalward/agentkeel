@@ -206,6 +206,30 @@ class ShippingGit(unittest.TestCase):
             shipping.ship_local(rec, self.env)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.initial)
 
+    def test_ship_local_refuses_when_policy_requires_a_named_check(self):
+        Path(self.primary, "agentkeel.json").write_text('{"require_check_before_push":"ci/build"}\n')
+        git(self.primary, "add", "agentkeel.json")
+        git(self.primary, "commit", "-m", "require check before push")
+        owned = workspace.create(self.primary, "local-check-policy", "session",
+                                 path=os.path.join(self.root, "check-policy-task"))
+        task = owned["path"]
+        git(task, "config", "user.name", "test")
+        git(task, "config", "user.email", "test@example.invalid")
+        Path(task, "change.txt").write_text("candidate\n")
+        git(task, "add", "change.txt")
+        git(task, "commit", "-m", "candidate")
+        sha, tree = evidence.code_state(task)
+        report = Path(self.root, "check-policy-report.html")
+        report.write_text("<html><title>Report</title><body>Done</body></html>")
+        rec = {"session_id": "session", "task": "local-check-policy", "permissions": ["merge"],
+               "workspace": owned, "write_roots": [self.root], "deliverable": str(report),
+               "evidence": [{"result": "passed", "head": sha, "tree": tree}], "shipping": {}}
+        before = git(self.primary, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(shipping.FinishError, "requires.*PR"):
+            shipping.ship_local(rec, self.env)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), before)
+        self.assertEqual(rec["shipping"], {})
+
     def test_pr_uses_canonical_configured_protected_branch_as_base(self):
         git(self.primary, "branch", "-m", "release")
         Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')

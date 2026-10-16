@@ -205,6 +205,37 @@ class Workspace(RepoCase):
                 git(self.repo, "merge", "--ff-only", "feat/task-x")
                 self.assertEqual(self.release(manifest)["state"], "released")
 
+    def test_project_disposable_paths_preserve_other_ignored_data(self):
+        from pathlib import Path
+        Path(self.repo, ".gitignore").write_text(".venv/\nx.pyc\n.env\n.venv-backup/\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore local files")
+        Path(self.primary, "agentkeel.json").write_text(json.dumps({
+            "disposable_ignored": [".venv", "x.pyc"]}))
+        manifest = self.create()
+        for name in (".venv/bin/python", "x.pyc", ".env", ".venv-backup/data"):
+            path = Path(self.path, name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("local")
+        with self.assertRaisesRegex(workspace.WorkspaceError, r"\.env"):
+            self.release(manifest)
+        self.assertEqual(Path(self.path, ".env").read_text(), "local")
+        Path(self.path, ".env").unlink()
+        with self.assertRaisesRegex(workspace.WorkspaceError, "venv-backup"):
+            self.release(manifest)
+        Path(self.path, ".venv-backup/data").unlink()
+        self.assertEqual(self.release(manifest)["state"], "released")
+
+    def test_invalid_disposable_paths_do_not_expand_cleanup(self):
+        from pathlib import Path
+        manifest = self.create()
+        for value in (".venv", [""], ["."], [".."], ["/tmp"], ["../data"], ["*"], [None]):
+            with self.subTest(value=value):
+                Path(self.primary, "agentkeel.json").write_text(json.dumps({"disposable_ignored": value}))
+                with self.assertRaisesRegex(workspace.WorkspaceError, "disposable_ignored"):
+                    self.release(manifest)
+                self.assertTrue(Path(self.path).is_dir())
+
     def test_explicit_ignored_disposal_keeps_process_and_tip_checks(self):
         from pathlib import Path
         Path(self.repo, ".gitignore").write_text(".env\n")

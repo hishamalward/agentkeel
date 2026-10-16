@@ -33,7 +33,11 @@ Keel then takes the lock again and rechecks identity, absent runtime claim, pres
 branch tip, files and processes before removing the tree. An unknown process, unpreserved tip or ignored local data is a reason to retain it.
 Amend/rebase history is not an extra preservation gate once the tip is merged. Ignored
 `__pycache__`, `.pytest_cache`, `node_modules` and `.DS_Store` are treated as regenerated
-artifacts; other ignored files need preservation or explicit `finish --discard-ignored`.
+artifacts. The canonical checkout’s `disposable_ignored` policy can allow additional exact
+worktree-relative file/directory paths, such as `.venv` or `dist`; directory entries include
+their descendants. Other ignored files need preservation or explicit `finish --discard-ignored`,
+which discards all ignored data, including `.env`. The policy never waives checks for tracked
+changes, untracked files, ownership, branch preservation or active processes.
 Human-only `discard TASK --worktree PATH` can waive work preservation for a cancelled task,
 but always retains identity, runtime-release and active-process checks. Other tasks' shared Git branches and stashes remain
 untouched. Retaining a preview is explicit and keeps both ownership records.

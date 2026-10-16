@@ -326,12 +326,18 @@ def _release_problems(manifest, discard_ignored=False, discard=False):
             raise WorkspaceError(f"workspace has an unfinished Git operation ({marker})")
     repo = repostate.locate(path)
     if not (discard_ignored or discard):
+        disposable = record.policy(manifest["primary"])["disposable_ignored"]
+        if not isinstance(disposable, list) or any(
+                not isinstance(p, str) or any(part in ("", ".", "..") for part in p.split("/"))
+                or any(c in p for c in "*?[]\\") for p in disposable):
+            raise WorkspaceError("disposable_ignored must list relative file/directory paths without globs or dot segments")
         with repostate.Shadow(repo) as shadow:
             ignored = shadow.git("ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0")
         # Ignored does not mean disposable: retain secrets/data, allow only common regenerated caches.
         caches = {"__pycache__", ".pytest_cache", "node_modules"}
         unknown = [p for p in ignored if p and p.split("/")[-1] != ".DS_Store"
-                   and not caches.intersection(p.split("/")[:-1])]
+                   and not caches.intersection(p.split("/")[:-1])
+                   and not any(p == d or p.startswith(d + "/") for d in disposable)]
         if unknown:
             raise WorkspaceError("workspace contains ignored local files: " + ", ".join(unknown[:5])
                                  + "; preserve them or explicitly use finish --discard-ignored")

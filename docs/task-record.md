@@ -24,8 +24,8 @@ Permissions are `review`, `implement`, `merge`, `push`, `distribution-build`, `s
 - `handoff` validates the current HTML and saves a checkpoint. A later code change with an unchanged report makes the checkpoint stale; update the report and hand off again.
 - `pr --title TITLE --body-file FILE` opens a pull request for the task's candidate.
 - `ship --pr NUMBER` checks the ready PR and successful checks against the exact candidate, pushes that SHA to the PR's configured protected base, and synchronizes the canonical checkout. It requires `merge` and `push`.
-- `ship --local` verifies the exact committed candidate and current HTML, then fast-forwards the clean canonical checkout's current configured protected branch without network access. It requires `merge`.
-- `finish [--keep] [--discard-ignored]` checks delivery and cleanup state. After worktree cleanup it may return `report_pending`; refresh the report to reflect cleanup and rerun `finish`. `--keep` retains the worktree/runtime for a preview. Ignored generated caches (`__pycache__`, `.pytest_cache`, `node_modules`, `.DS_Store`) may be removed with the owned tree; other ignored local files block cleanup. `--discard-ignored` explicitly discards those ignored files and logs the choice; it never waives clean tracked/untracked state, tip preservation or process checks.
+- `ship --local` verifies the exact committed candidate and current HTML, then fast-forwards the clean canonical checkout's current configured protected branch without network access. It requires `merge` and refuses when `require_check_before_push` is configured; use the PR route then.
+- `finish [--keep] [--discard-ignored]` checks delivery and cleanup state. After worktree cleanup it may return `report_pending`; refresh the report to reflect cleanup and rerun `finish`. `--keep` retains the worktree/runtime for a preview. Ignored generated caches (`__pycache__`, `.pytest_cache`, `node_modules`, `.DS_Store`) may be removed with the owned tree; the canonical checkout’s `disposable_ignored` policy can name additional disposable paths; other ignored local files block cleanup. `--discard-ignored` explicitly discards all remaining ignored files, including `.env` or local data, and logs the choice; it never waives clean tracked/untracked state, tip preservation or process checks.
 - `cancel` marks the task cancelled and keeps its worktree, resources and record. Starting another task archives the cancelled ownership in the task directory; status continues to show it.
 - Human-only `discard TASK --worktree PATH` releases resources and removes that cancelled owned worktree, including ignored files and unmerged changes. It records the explicit discard and refuses an active task, changed identity or active process. It can find both current and archived cancelled records.
 - `status [--json|--html]` reads current task/worktree facts. `show` prints this session's record.
@@ -35,6 +35,19 @@ The legacy human-operated `open`, `import` and `release` commands manage isolate
 
 ## Repository policy
 
-`agentkeel.json` configures `protected_branches`, task/secret/fix guard modes, additional command patterns and optional `require_check_before_push`. `init` creates `{}` only when the file is absent, preserves existing policy, updates only the managed `AGENTS.md` block and registers the repository outside it. It never commits. MCP catalog and tool policy are managed by MCPClerk; see [guardrails](guardrails.md#mcpclerk-bridge) for explicit migration and legacy cleanup requirements.
+`agentkeel.json` configures `protected_branches`, task/secret/fix guard modes, additional command patterns, `disposable_ignored` and optional `require_check_before_push`. `init` creates `{}` only when the file is absent, preserves existing policy, updates only the managed `AGENTS.md` block and registers the repository outside it. It never commits. MCP catalog and tool policy are managed by MCPClerk; see [guardrails](guardrails.md#mcpclerk-bridge) for explicit migration and legacy cleanup requirements.
 
 The task record is not a security boundary around arbitrary processes. See [guardrails](guardrails.md) and [enforcement design](enforcement-design.md).
+
+`disposable_ignored` lists additional generated files or directories safe to delete with an owned
+worktree. Read from the canonical checkout, entries are exact paths relative to the worktree
+root; directories include descendants. For example:
+
+```json
+{"disposable_ignored": [".venv", ".mypy_cache", "dist", ".coverage"]}
+```
+
+Only ignored files are eligible. `.venv` does not match `.venv-backup` or `other/.venv`.
+Use no leading/trailing slash, empty/dot/parent segments, backslashes or globs; invalid entries
+block normal cleanup. This adds to the built-in cache conventions and does not authorize
+deletion of any other ignored data.

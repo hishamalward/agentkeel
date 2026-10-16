@@ -245,6 +245,7 @@ def policy(root):
         if k in guards:
             guards[k] = v if v in MODES else "block"  # an unknown value blocks
     return {"protected": protected, "commands": commands, "guards": guards,
+            "disposable_ignored": data.get("disposable_ignored", []),
             "require_check": str(data.get("require_check_before_push") or "")}
 
 

@@ -131,6 +131,9 @@ def ship_local(rec, environ=os.environ):
     require(rec, "merge")
     owned = workspace.validate(rec.get("workspace") or {})
     primary = owned["primary"]
+    required_check = record.policy(primary)["require_check"]
+    if required_check:
+        raise FinishError(f"repository requires check {required_check!r}; use PR shipping")
     with record.locked(os.path.join(owned["common_dir"], "agentkeel-finish")):
         state = rec.setdefault("shipping", {})
         if state.get("mode") not in (None, "local"):

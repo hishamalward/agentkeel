@@ -23,7 +23,8 @@ Use the repository's required checks. A passing check on different code is stale
 Run pr --title <title> --body-file <file> to push the tested commit and open the PR.
 Run ship --pr <number> after review/checks: exact commit push, then pull --ff-only in the clean
 canonical checkout's current configured protected branch. Or run ship --local to fast-forward
-that same branch without network access; it requires merge permission. Dirty, ahead, diverged,
+that same branch without network access; it requires merge permission and no configured
+require_check_before_push policy. Use PR shipping when that policy names a check. Dirty, ahead, diverged,
 unconfigured or busy canonical state stays sync_pending; never reset or autostash.
 Refresh the HTML with the ship result, then finish. Finish releases optional Slots resources,
 checks ownership/preservation/processes, and removes the worktree. Refresh the final HTML and
