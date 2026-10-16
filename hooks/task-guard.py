@@ -437,10 +437,9 @@ def judge_command(command, cwd, rec, environ, session, line=None):
                 need(rec, perm, f"`{' '.join(sc.argv)[:60]}`")
         if pol["require_check"] and argv[:3] == ["gh", "pr", "merge"]:
             raise Block(
-                "refusing `gh pr merge`: GitHub writes a new commit for --merge, --squash and --rebase,\n"
-                "and no check has run on it, so the tested commit is not the one main receives.\n"
-                "Ship the tested commit itself, in its own call: git push origin <tested-sha>:main\n"
-                "(it must already contain main; GitHub then marks the pull request merged).")
+                "refusing raw `gh pr merge` with a configured required check.\n"
+                "Use task.py ship --pr NUMBER to verify the exact candidate and checks before merging;\n"
+                "add --admin only for an explicitly authorized administrator exception.")
         line["earlier"] = line.get("earlier", 0) + (sc.name not in ("cd", "pushd", "popd"))
 
 

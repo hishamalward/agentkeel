@@ -97,8 +97,7 @@ class ShippingGit(unittest.TestCase):
             self.assertEqual(fh.read(), b"owner bytes")
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.initial)
 
-    def test_ship_retry_after_sync_failure_does_not_push_twice(self):
-        # A task-owned linked tree whose exact committed state has passed local verification.
+    def pr_fixture(self):
         git(self.primary, "branch", "-m", "release")
         Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
         git(self.primary, "add", "agentkeel.json")
@@ -106,50 +105,154 @@ class ShippingGit(unittest.TestCase):
         git(self.primary, "push", "origin", "release")
         owned = workspace.create(self.primary, "ship", "session", path=os.path.join(self.root, "task"))
         task = owned["path"]
-        git(task, "config", "user.name", "test")
-        git(task, "config", "user.email", "test@example.invalid")
-        with open(os.path.join(task, "change.txt"), "w") as fh:
-            fh.write("candidate\n")
+        Path(task, "change.txt").write_text("candidate\n")
         git(task, "add", "change.txt")
         git(task, "commit", "-m", "candidate")
         sha, tree = evidence.code_state(task)
-        report = os.path.join(self.root, "report.html")
-        with open(report, "w") as fh:
-            fh.write("<html><title>Report</title><body>Done</body></html>")
-        rec = {"session_id": "session", "task": "ship", "permissions": ["merge", "push"],
-               "workspace": owned, "worktrees": [task], "write_roots": [self.root],
-               "deliverable": report, "evidence": [{"result": "passed", "head": sha, "tree": tree}],
-               "shipping": {}}
-        hook = os.path.join(self.bare, "hooks", "pre-receive")
-        pushes = os.path.join(self.root, "pushes")
-        with open(hook, "w") as fh:
-            fh.write("#!/bin/sh\nprintf x >> '" + pushes + "'\ncat >/dev/null\n")
-        os.chmod(hook, 0o755)
-        fake_env = {**self.env, "AGENTKEEL_HOME": os.path.join(self.root, "home")}
-        with mock.patch.object(shipping, "reviewed", return_value="https://example.invalid/pr/1") as reviewed:
-            # A dirty primary makes the post-push pull fail. The failed sync is recorded persistently.
-            dirty = os.path.join(self.primary, "keep.txt")
-            with open(dirty, "wb") as fh:
-                fh.write(b"preserve")
-            with self.assertRaisesRegex(shipping.FinishError, "dirty"):
-                shipping.ship(rec, 1, fake_env)
-            self.assertTrue(rec["shipping"]["pushed"])
-            self.assertEqual(rec["lifecycle"], "sync_pending")
-            self.assertEqual(Path(dirty).read_bytes(), b"preserve")
-            git(self.primary, "checkout", "main")
-            with self.assertRaisesRegex(shipping.FinishError, "protected branch changed"):
-                shipping.ship(rec, 1, fake_env)
-            git(self.primary, "checkout", "release")
-            self.assertEqual(Path(pushes).read_text(), "x")
-            os.unlink(dirty)
-            shipping.ship(rec, 1, fake_env)
-            self.assertTrue(rec["shipping"]["synced"])
-            self.assertEqual(Path(pushes).read_text(), "x")
-            self.assertEqual(git(self.primary, "rev-parse", "HEAD"), sha)
-            self.assertEqual(reviewed.call_count, 2)  # initial gate and final pre-push recheck
-            self.assertEqual(reviewed.call_args.args[-1], "release")
-            self.assertEqual(subprocess.run(["git", "--git-dir", self.bare, "rev-parse", "refs/heads/release"],
-                                            check=True, capture_output=True, text=True).stdout.strip(), sha)
+        git(task, "push", "origin", f"{sha}:refs/heads/{owned['branch']}")
+        report = Path(self.root, "report.html")
+        report.write_text("<html><title>Report</title><body>Done</body></html>")
+        self.rec = {"session_id": "session", "task": "ship", "permissions": ["merge", "push"],
+                    "workspace": owned, "worktrees": [task], "write_roots": [self.root],
+                    "deliverable": str(report), "evidence": [{"result": "passed", "head": sha, "tree": tree}],
+                    "shipping": {}}
+        self.pr_data = {"state": "OPEN", "isDraft": False, "headRefOid": sha,
+                        "headRefName": owned["branch"], "baseRefName": "release",
+                        "reviewDecision": "REVIEW_REQUIRED", "url": "https://github.com/owner/repo/pull/1",
+                        "statusCheckRollup": [{"__typename": "StatusContext", "state": "SUCCESS"}]}
+        self.env.update(AGENTKEEL_HOME=os.path.join(self.root, "home"), AGENTKEEL_GH="fake-gh")
+        self.merge_calls = []
+        self.merge_behavior = "merge"
+        real_run = shipping.run
+
+        def gh_run(root, argv, environ):
+            if argv[0] != "fake-gh":
+                return real_run(root, argv, environ)
+            self.assertIn("--repo", argv)
+            self.assertEqual(argv[argv.index("--repo") + 1], "owner/repo")
+            if argv[1:3] == ["pr", "view"]:
+                return json.dumps(self.pr_data)
+            self.assertEqual(argv[1:3], ["pr", "merge"])
+            self.assertIn("--merge", argv)
+            self.assertEqual(argv[argv.index("--match-head-commit") + 1], sha)
+            self.merge_calls.append(argv)
+            if self.merge_behavior == "denied":
+                raise shipping.FinishError("GitHub permission denied")
+            if self.merge_behavior == "queued":
+                return "queued"
+            if self.merge_behavior == "head_changed":
+                self.pr_data["headRefOid"] = "b" * 40
+                raise shipping.FinishError("GitHub rejected changed head")
+            self.server_merge()
+            if self.merge_behavior == "timeout":
+                raise shipping.FinishError("timed out after server merged")
+            return "merged"
+
+        for patch in (mock.patch.object(shipping, "run", side_effect=gh_run),
+                      mock.patch.object(shipping.checks, "github_slug", return_value="owner/repo")):
+            patch.start()
+            self.addCleanup(patch.stop)
+        return sha
+
+    def server_merge(self):
+        producer = os.path.join(self.root, "merger")
+        subprocess.run(["git", "clone", "-q", "-b", "release", self.bare, producer], check=True)
+        git(producer, "merge", "--no-ff", self.pr_data["headRefOid"], "-m", "Merge PR")
+        merged = git(producer, "rev-parse", "HEAD")
+        git(producer, "push", "origin", "release")
+        self.pr_data.update(state="MERGED", mergeCommit={"oid": merged})
+        return merged
+
+    def test_admin_merge_sync_retry_uses_github_once_and_preserves_dirty_main(self):
+        sha = self.pr_fixture()
+        dirty = Path(self.primary, "keep.txt")
+        dirty.write_bytes(b"preserve")
+        with self.assertRaisesRegex(shipping.FinishError, "dirty"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertTrue(self.rec["shipping"]["pushed"])
+        self.assertEqual(self.rec["lifecycle"], "sync_pending")
+        self.assertEqual(dirty.read_bytes(), b"preserve")
+        self.assertEqual(len(self.merge_calls), 1)
+        self.assertIn("--admin", self.merge_calls[0])
+        git(self.primary, "checkout", "main")
+        with self.assertRaisesRegex(shipping.FinishError, "protected branch changed"):
+            shipping.ship(self.rec, 1, self.env)
+        git(self.primary, "checkout", "release")
+        dirty.unlink()
+        shipping.ship(self.rec, 1, self.env)
+        self.assertTrue(self.rec["shipping"]["synced"])
+        self.assertEqual(len(self.merge_calls), 1)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.pr_data["mergeCommit"]["oid"])
+        git(self.primary, "merge-base", "--is-ancestor", sha, "HEAD")
+
+    def test_normal_review_refuses_then_approved_merge_omits_admin(self):
+        self.pr_fixture()
+        with self.assertRaisesRegex(shipping.FinishError, "review is pending"):
+            shipping.ship(self.rec, 1, self.env)
+        self.assertFalse(self.merge_calls)
+        self.pr_data["reviewDecision"] = "APPROVED"
+        shipping.ship(self.rec, 1, self.env)
+        self.assertNotIn("--admin", self.merge_calls[0])
+        self.assertTrue(self.rec["shipping"]["synced"])
+
+    def test_existing_external_merge_resumes_without_merging_again(self):
+        self.pr_fixture()
+        merged = self.server_merge()
+        shipping.ship(self.rec, 1, self.env)
+        self.assertFalse(self.merge_calls)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), merged)
+
+    def test_timeout_after_merge_recovers_from_saved_attempt(self):
+        self.pr_fixture()
+        self.merge_behavior = "timeout"
+        with self.assertRaisesRegex(shipping.FinishError, "timed out"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertNotIn("pushed", self.rec["shipping"])
+        shipping.ship(self.rec, 1, self.env)
+        self.assertEqual(len(self.merge_calls), 1)
+        self.assertTrue(self.rec["shipping"]["synced"])
+
+    def test_queued_merge_stays_pending_and_later_resumes(self):
+        self.pr_fixture()
+        self.merge_behavior = "queued"
+        with self.assertRaisesRegex(shipping.FinishError, "merge is pending"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertNotIn("pushed", self.rec["shipping"])
+        self.assertTrue(Path(self.rec["workspace"]["path"]).is_dir())
+        self.server_merge()
+        shipping.ship(self.rec, 1, self.env)
+        self.assertEqual(len(self.merge_calls), 1)
+
+    def test_github_permission_denial_retains_work_and_does_not_sync(self):
+        self.pr_fixture()
+        before = git(self.primary, "rev-parse", "HEAD")
+        self.merge_behavior = "denied"
+        with self.assertRaisesRegex(shipping.FinishError, "permission denied"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), before)
+        self.assertNotIn("pushed", self.rec["shipping"])
+        self.assertTrue(Path(self.rec["workspace"]["path"], "change.txt").is_file())
+        with mock.patch.object(shipping.checks, "github_slug", return_value="other/repo"):
+            with self.assertRaisesRegex(shipping.FinishError, "origin.*changed"):
+                shipping.ship(self.rec, 1, self.env, admin=True)
+
+    def test_head_changed_at_merge_does_not_sync(self):
+        self.pr_fixture()
+        self.merge_behavior = "head_changed"
+        with self.assertRaisesRegex(shipping.FinishError, "changed head"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertNotIn("pushed", self.rec["shipping"])
+        with self.assertRaisesRegex(shipping.FinishError, "exact tested"):
+            shipping.ship(self.rec, 1, self.env, admin=True)
+        self.assertEqual(len(self.merge_calls), 1)
+
+    def test_claimed_merged_pr_must_preserve_candidate_in_remote_base(self):
+        self.pr_fixture()
+        self.pr_data.update(state="MERGED", mergeCommit={"oid": self.initial})
+        with self.assertRaises(shipping.FinishError):
+            shipping.ship(self.rec, 1, self.env)
+        self.assertNotIn("pushed", self.rec["shipping"])
+        self.assertFalse(self.merge_calls)
 
     def test_ship_local_fast_forwards_verified_candidate_without_remote_access(self):
         git(self.primary, "branch", "-m", "release")
@@ -297,6 +400,9 @@ class ReviewGate(unittest.TestCase):
             fh.write("#!/bin/sh\ncat '" + os.path.join(self.root, "response.json") + "'\n")
         os.chmod(self.gh, 0o755)
         self.env = {**os.environ, "AGENTKEEL_GH": self.gh, "AGENTKEEL_HOME": os.path.join(self.root, "home")}
+        slug = mock.patch.object(shipping.checks, "github_slug", return_value="owner/repo")
+        slug.start()
+        self.addCleanup(slug.stop)
         self.write()
 
     def tearDown(self):
@@ -310,6 +416,45 @@ class ReviewGate(unittest.TestCase):
         self.write()
         with self.assertRaisesRegex(shipping.FinishError, match):
             shipping.reviewed(self.root, 1, "a" * 40, "feat/x", self.env)
+
+    def test_admin_only_waives_missing_review_and_keeps_other_gates(self):
+        self.data["reviewDecision"] = "REVIEW_REQUIRED"
+        self.write()
+        self.assertEqual(shipping.reviewed(self.root, 1, "a" * 40, "feat/x", self.env,
+                                          admin=True)["state"], "OPEN")
+        for change in ({"reviewDecision": "CHANGES_REQUESTED"}, {"isDraft": True},
+                       {"headRefOid": "b" * 40}, {"baseRefName": "other"},
+                       {"state": "CLOSED"}, {"statusCheckRollup": []},
+                       {"statusCheckRollup": [{"__typename": "StatusContext", "state": "PENDING"}]}):
+            with self.subTest(change=change):
+                previous = dict(self.data)
+                self.data.update(change)
+                self.write()
+                with self.assertRaises(shipping.FinishError):
+                    shipping.reviewed(self.root, 1, "a" * 40, "feat/x", self.env, admin=True)
+                self.data = previous
+
+    def test_merged_retry_still_refuses_requested_changes(self):
+        self.data.update(state="MERGED", reviewDecision="CHANGES_REQUESTED")
+        self.write()
+        with self.assertRaisesRegex(shipping.FinishError, "review is pending"):
+            shipping.reviewed(self.root, 1, "a" * 40, "feat/x", self.env,
+                              admin=True, allow_merged=True)
+
+    def test_admin_cannot_bypass_configured_required_check(self):
+        self.data["reviewDecision"] = "REVIEW_REQUIRED"
+        self.write()
+        with mock.patch.object(shipping.record, "policy", return_value={"require_check": "ci"}), \
+             mock.patch.object(shipping.checks, "conclusion", return_value=("failure", "ci failed")):
+            with self.assertRaisesRegex(shipping.FinishError, "ci failed"):
+                shipping.reviewed(self.root, 1, "a" * 40, "feat/x", self.env, admin=True)
+
+    def test_cli_rejects_admin_with_local_shipping(self):
+        cli = Path(__file__).resolve().parents[1] / "hooks/task.py"
+        result = subprocess.run([sys.executable, str(cli), "ship", "--local", "--admin"],
+                                capture_output=True, text=True, env=self.env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--admin is only valid with --pr", result.stderr)
 
     def test_skipped_jobs_alone_are_not_a_successful_check(self):
         self.data["statusCheckRollup"] = [{"__typename": "CheckRun", "status": "COMPLETED",

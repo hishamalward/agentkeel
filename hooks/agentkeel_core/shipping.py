@@ -72,14 +72,19 @@ def pr(rec, title, body_file, environ=os.environ):
                       "--title", title, "--body-file", os.path.abspath(body_file)], environ)
 
 
-def reviewed(root, number, sha, branch, environ, base="main"):
+def reviewed(root, number, sha, branch, environ, base="main", *, admin=False, allow_merged=False):
     gh = environ.get("AGENTKEEL_GH", "gh")
-    data = json.loads(run(root, [gh, "pr", "view", str(number), "--json",
-                               "state,isDraft,headRefOid,headRefName,baseRefName,reviewDecision,statusCheckRollup,url"], environ))
-    if (data.get("state") != "OPEN" or data.get("isDraft") or data.get("headRefOid") != sha
+    slug = checks.github_slug(root, "origin")
+    if not slug:
+        raise FinishError("origin is not a GitHub repository")
+    data = json.loads(run(root, [gh, "pr", "view", str(number), "--repo", slug, "--json",
+                               "state,isDraft,headRefOid,headRefName,baseRefName,reviewDecision,statusCheckRollup,url,mergeCommit"], environ))
+    merged = allow_merged and data.get("state") == "MERGED"
+    if ((data.get("state") != "OPEN" and not merged) or data.get("isDraft") or data.get("headRefOid") != sha
             or data.get("headRefName") != branch or data.get("baseRefName") != base):
         raise FinishError(f"PR must be ready, open, based on {base}, and point to the exact tested task commit")
-    if data.get("reviewDecision") not in ("", None, "APPROVED"):
+    accepted_reviews = ("", None, "APPROVED", "REVIEW_REQUIRED") if admin else ("", None, "APPROVED")
+    if data.get("reviewDecision") == "CHANGES_REQUESTED" or (not merged and data.get("reviewDecision") not in accepted_reviews):
         raise FinishError("PR review is pending or changes were requested")
     jobs = data.get("statusCheckRollup")
     if not isinstance(jobs, list) or not jobs:
@@ -101,7 +106,7 @@ def reviewed(root, number, sha, branch, environ, base="main"):
         state, detail = checks.conclusion(root, "origin", sha, required, environ)
         if state != "success":
             raise FinishError(detail)
-    return data["url"]
+    return data
 
 
 def sync_branch(primary, sha, branch, environ=os.environ):
@@ -186,7 +191,7 @@ def ship_local(rec, environ=os.environ):
         record.save(rec, environ)
 
 
-def ship(rec, number, environ=os.environ):
+def ship(rec, number, environ=os.environ, *, admin=False):
     require(rec, "merge", "push")
     owned = workspace.validate(rec.get("workspace") or {})
     primary, root = owned["primary"], owned["path"]
@@ -200,27 +205,46 @@ def ship(rec, number, environ=os.environ):
         if state.get("target_branch") not in (None, base):
             raise FinishError("canonical protected branch changed during ship; resolve the recorded attempt first")
         state["target_branch"] = base
+        slug = checks.github_slug(root, "origin")
+        if not slug or state.get("repo") not in (None, slug):
+            raise FinishError("GitHub origin is unavailable or changed during ship")
         if not state.get("sha"):
             owned, sha = candidate(rec)
-            url = reviewed(root, number, sha, owned["branch"], environ, base)
-            state.update(mode="pr", sha=sha, pr=number, url=url)
+            data = reviewed(root, number, sha, owned["branch"], environ, base,
+                            admin=admin, allow_merged=True)
+            state.update(mode="pr", sha=sha, pr=number, url=data["url"], repo=slug)
             record.save(rec, environ)
         sha = state["sha"]
         if number != state["pr"]:
             raise FinishError("retry the recorded PR, not a different PR")
         if not state.get("pushed"):
-            git(root, "fetch", "--no-tags", "origin", base, environ=environ)
-            remote = git(root, "rev-parse", "FETCH_HEAD", environ=environ)
-            already = subprocess.run(["git", "merge-base", "--is-ancestor", sha, remote], cwd=root,
-                                     capture_output=True, env=environ).returncode == 0
-            if not already:
+            data = reviewed(root, number, sha, owned["branch"], environ, base,
+                            admin=admin, allow_merged=True)
+            if data["state"] == "OPEN":
                 _, current = candidate(rec)
                 if current != sha:
                     raise FinishError("candidate changed; existing ship attempt must be resolved before shipping another commit")
-                reviewed(root, number, sha, owned["branch"], environ, base)
+                git(root, "fetch", "--no-tags", "origin", base, environ=environ)
+                remote = git(root, "rev-parse", "FETCH_HEAD", environ=environ)
                 git(root, "merge-base", "--is-ancestor", remote, sha, environ=environ)
-                git(root, "push", "origin", f"{sha}:refs/heads/{base}", environ=environ)
-            state["pushed"] = True
+                gh = environ.get("AGENTKEEL_GH", "gh")
+                argv = [gh, "pr", "merge", str(number), "--repo", slug,
+                        "--merge", "--match-head-commit", sha]
+                if admin:
+                    argv.append("--admin")
+                run(root, argv, environ)
+                data = reviewed(root, number, sha, owned["branch"], environ, base,
+                                admin=admin, allow_merged=True)
+            if data["state"] != "MERGED":
+                raise FinishError("PR merge is pending; retry ship after GitHub confirms it merged")
+            merged = (data.get("mergeCommit") or {}).get("oid")
+            if not isinstance(merged, str) or len(merged) != 40 or any(c not in "0123456789abcdef" for c in merged):
+                raise FinishError("merged PR has no verifiable merge commit")
+            git(root, "fetch", "--no-tags", "origin", base, environ=environ)
+            remote = git(root, "rev-parse", "FETCH_HEAD", environ=environ)
+            git(root, "merge-base", "--is-ancestor", sha, merged, environ=environ)
+            git(root, "merge-base", "--is-ancestor", merged, remote, environ=environ)
+            state.update(pushed=True, merge_sha=merged)
             rec.update(lifecycle="sync_pending", outcome_at=time.time())
             record.save(rec, environ)
         try:

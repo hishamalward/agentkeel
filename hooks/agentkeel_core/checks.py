@@ -1,11 +1,8 @@
 """agentkeel core: ask the hosting side whether a commit's required check passed.
 
-Used by the push gate: when a repository's agentkeel.json names a required check
-(`"require_check_before_push": "agentkeel-required"`), an agent's push or PR merge into a
-protected branch needs that check to have passed on the exact commit being shipped (a PR merge is
-refused: GitHub writes a new, unchecked commit for it). Git refuses a
-non-fast-forward push and the guard refuses a force push, so a pushed commit already contains the
-branch it lands on: a green check on that commit is a check on what main becomes.
+The push gate verifies a named check on the exact commit being pushed. Raw shell PR merges
+are refused when that policy is configured; task.py ship verifies the PR head and named check,
+requests an exact-head GitHub merge, then proves candidate preservation before local sync.
 
 It asks GitHub through the `gh` CLI (AGENTKEEL_GH names another binary): the check-runs API, or,
 for a token that may read Actions but not Checks, the jobs of the commit's workflow runs. When the answer cannot be
