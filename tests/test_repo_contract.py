@@ -43,14 +43,14 @@ class RepoContract(unittest.TestCase):
             self.assertEqual(out.returncode, 0, f"{name}: {out.stdout}\n{out.stderr}")
 
     def test_shell_hooks_parse(self):
-        for name in ("plan-size-guard.sh",):
+        for name in ("run.sh",):
             out = subprocess.run(["bash", "-n", os.path.join(ROOT, "hooks", name)], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, out.stderr)
 
 
 class ProductDocs(unittest.TestCase):
     """AgentKeel's own docs are Markdown that GitHub renders (README.md and docs/*.md). The HTML
-    records AgentKeel creates in an adopting repository are checked by pages.py instead."""
+    records AgentKeel creates in an adopting repository are checked by delivery.py instead."""
 
     @staticmethod
     def slugs(path):

@@ -4,20 +4,27 @@
     "name": "Hisham Al-Ward",
     "url": "https://github.com/hishamalward"
   },
-  "description": "Guardrail plugins for Claude Code and Codex.",
+  "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
   "plugins": [
     {
       "name": "agentkeel",
       "displayName": "AgentKeel",
       "source": "./",
-      "description": "Guardrail plugins for Claude Code and Codex: task scope, worktree isolation, and shipping checks. Acts only in repositories that opt in with agentkeel.json.",
-      "version": "0.9.1",
-      "author": { "name": "Hisham Al-Ward" },
+      "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
+      "version": "0.10.0",
+      "author": {
+        "name": "Hisham Al-Ward"
+      },
       "homepage": "https://github.com/hishamalward/agentkeel",
       "repository": "https://github.com/hishamalward/agentkeel",
       "license": "MIT",
       "category": "productivity",
-      "tags": ["guardrails", "hooks", "git", "agents"]
+      "tags": [
+        "guardrails",
+        "hooks",
+        "git",
+        "agents"
+      ]
     }
   ]
 }

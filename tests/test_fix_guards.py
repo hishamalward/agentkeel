@@ -73,9 +73,9 @@ class FixGuards(RepoCase):
         self.assertEqual(rec["evidence"][-1]["result"], "failed")
         self.assertEqual((rec["fix"]["cycles"], rec["fix"]["edited"]), (1, False))
         self.assertIn("fix cycle 1 of 3", out.stderr)
-        out = self.task("verify", "--", "true")  # a pass is the hooks' to record, not task.py's
+        out = self.task("verify", "--", "true")  # the foreground CLI records an unchanged-code pass
         self.assertEqual(out.returncode, 0)
-        self.assertEqual(len(self.record()["evidence"]), 2)
+        self.assertEqual(len(self.record()["evidence"]), 3)
 
     def test_cause_command(self):
         self.fix_task()

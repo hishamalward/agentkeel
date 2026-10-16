@@ -5,6 +5,7 @@ the `stop.command.input` schema embedded in Codex CLI 0.160.1. They are not live
 import json
 import os
 import subprocess
+import time
 
 from helpers import HOOKS, SESSION, RepoCase, git
 
@@ -38,9 +39,11 @@ class StopReport(RepoCase):
         out = subprocess.run(["/bin/sh", RUN, "stop-report.py"] + (["--plugin"] if plugin else []),
                              input=raw if raw is not None else json.dumps(payload or claude_stop(self.primary)),
                              text=True, capture_output=True, env={**clean, **self.env}, timeout=120)
-        msg = json.loads(out.stdout)["systemMessage"] if out.stdout.strip() else ""
-        if out.stdout.strip():
-            self.assertEqual(set(json.loads(out.stdout)), {"systemMessage"})  # never a block or continue
+        output = json.loads(out.stdout) if out.stdout.strip() else {}
+        if output:
+            self.assertIn(set(output), ({"systemMessage"}, {"decision", "reason"}))
+        self.last_output = output
+        msg = output.get("systemMessage", output.get("reason", ""))
         return out.returncode, msg, out.stderr
 
     def put(self, folder, name, text="x\n"):
@@ -151,8 +154,72 @@ class Deliverable(StopReport):
             "permissions": ["review"], "worktrees": [], "write_roots": [self.tmp], "resources": [],
             "declared_at": 0, "evidence": [], "history": [], "deliverable": page})
         code, msg, err = self.stop(claude_stop(self.primary))
-        self.assertEqual(code, 0, err); self.assertIn("deliverable", msg); self.assertIn("not written yet", msg)
+        self.assertEqual(code, 0, err); self.assertIn("deliverable", msg); self.assertIn("missing or is not a regular file", msg)
         with open(page, "w") as fh:
-            fh.write("<p>done</p>")
+            fh.write("<html><head><title>Report</title></head><body>Done</body></html>")
         code, msg, err = self.stop(claude_stop(self.primary))
-        self.assertEqual(code, 0, err); self.assertNotIn("deliverable", msg)
+        self.assertEqual(code, 0, err); self.assertIn("current HTML checkpoint", msg)
+
+
+class DeliveryStop(RepoCase):
+    stop = StopReport.stop
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.primary, "agentkeel.json"), "w") as fh:
+            fh.write("{}\n")
+        git(self.primary, "add", "agentkeel.json")
+        git(self.primary, "commit", "-q", "-m", "opt in")
+
+    def test_incomplete_checkpoint_blocks_once_then_active_stop_is_allowed(self):
+        from agentkeel_core import record
+        page = os.path.join(self.tmp, "report.html")
+        record.atomic_write_json(os.path.join(self.home, "tasks", SESSION + ".json"), {
+            "version": 1, "task": "r", "session_id": SESSION, "size": "small", "kind": "review",
+            "permissions": ["review"], "worktrees": [], "write_roots": [self.tmp], "resources": [],
+            "declared_at": int(time.time()), "evidence": [], "history": [], "deliverable": page})
+        payload = claude_stop(self.primary)
+        code, msg, err = self.stop(payload)
+        self.assertEqual(code, 0, err)
+        self.assertIn("missing or is not a regular file", msg)
+        self.assertEqual(self.last_output.get("decision"), "block")
+        active = dict(payload, stop_hook_active=True)
+        code, msg, err = self.stop(active)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("decision", self.last_output)
+        with open(os.path.join(self.home, "stop-reports", SESSION + ".json")) as fh:
+            self.assertTrue(json.load(fh)["incomplete"])
+
+
+    def test_code_change_after_saved_handoff_makes_html_checkpoint_stale(self):
+        from agentkeel_core import delivery
+        page = os.path.join(self.tmp, "report.html")
+        with open(page, "w") as fh:
+            fh.write("<html><head><title>Report</title></head><body>Done</body></html>")
+        rec = {"deliverable": page, "write_roots": [self.tmp], "worktrees": [self.repo],
+               "declared_at": 0, "evidence": []}
+        rec["html_checkpoint"] = delivery.checkpoint(rec)
+        self.assertEqual(delivery.problems(rec), [])
+        with open(os.path.join(self.repo, "after-handoff.txt"), "w") as fh:
+            fh.write("changed\n")
+        self.assertIn("the code changed since the last HTML handoff checkpoint", delivery.problems(rec))
+        with open(page, "w") as fh:
+            fh.write("<html><head><title>Updated</title></head><body>Reviewed new code</body></html>")
+        os.utime(page, (time.time() + 2, time.time() + 2))
+        self.assertEqual(delivery.problems(rec), [])
+
+    def test_cancelled_stop_is_not_blocked(self):
+        from agentkeel_core import record
+        page = os.path.join(self.tmp, "report.html")
+        record.atomic_write_json(os.path.join(self.home, "tasks", SESSION + ".json"), {
+            "version": 1, "task": "r", "session_id": SESSION, "size": "small", "kind": "review",
+            "permissions": ["review"], "worktrees": [], "write_roots": [self.tmp], "resources": [],
+            "declared_at": int(time.time()), "evidence": [], "history": [], "deliverable": page})
+        record.atomic_write_json(os.path.join(self.home, "tasks", SESSION + ".json"), {
+            "version": 2, "task": "r", "session_id": SESSION, "size": "small", "kind": "review",
+            "permissions": ["review"], "worktrees": [], "write_roots": [self.tmp], "resources": [],
+            "declared_at": int(time.time()), "evidence": [], "history": [], "deliverable": page,
+            "lifecycle": "cancelled"})
+        code, msg, err = self.stop(claude_stop(self.primary))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("decision", self.last_output)

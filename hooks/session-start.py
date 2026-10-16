@@ -152,13 +152,14 @@ def main():
         return 0
     print("agentkeel is active in this repository. Before your first write, declare the task from\n"
           "your reading of the request, state that reading in your first update, and proceed:\n"
-          f'  python3 "{task}" start <task-id> --size small|large --allow <permissions> [--kind fix|feature|review|docs|chore] [--deliverable <page>]\n'
+          f'  python3 "{task}" start <task-id> --size no-code|small|large --allow <permissions> [--kind fix|feature|review|docs|chore] --deliverable <absolute-report.html>\n'
           "Permissions: review, implement, merge, push, distribution-build, store-submission, paid-job,\n"
           "remote-write, publish. Kind fix turns on the debugging guards (failed check and cause line\n"
           "before any code edit; three edit-then-fail cycles stop the loop). Status page: task.py status --html.\n"
-          "Code changes happen in the task's own worktree (git worktree add ../<repo>-<task> -b feat/<task>).\n"
-          f'Docs pages (where agentkeel.json sets "docs": "html"): read with python3 "{task}" context <page>,\n'
-          "start one with task.py new; plan and progress go in the page's Working section."
+          "AgentKeel creates the worktree for a coding task; change into the printed path. No-code has no worktree.\n"
+          "Keep one coherent HTML report outside the worktree, with visual mockups when useful. No template is required.\n"
+          "Stop enforcement is not verified here; hook registration is not proof of invocation. Handoff and finish enforce HTML.\n"
+          "Run handoff to validate the report, ship to advance the canonical protected branch, then finish to clean up."
           + (f"\nRun task.py exactly as shown, with nothing in front of python3: the host's permission\n"
              "rules match the command as written. Your session id is "
              f"{payload['session_id']}; you need it only if\n"

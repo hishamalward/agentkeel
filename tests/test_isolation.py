@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 
-from helpers import HOOKS, SESSION, RepoCase, git, run_hook
+from helpers import HOOKS, SESSION, RepoCase, git
 import test_task_command
 
 
@@ -268,113 +268,6 @@ class HostGitRunsNothing(OpenCase):
         self.assertEqual(self.host_status(self.clone).stdout, "")
         from agentkeel_core import repostate
         self.assertEqual(repostate.inspect(self.clone)["changed"], [])
-
-
-class Evidence(RepoCase):
-    """A verify run is recorded by the hooks: start in the guard, result in verify-record.py."""
-
-    def setUp(self):
-        super().setUp()
-        self.declare()
-        git(self.repo, "commit", "-q", "--allow-empty", "-m", "work")
-        self.cmd = f"python3 {os.path.join(HOOKS, 'task.py')} verify -- true"
-
-    def start(self, call_id="t1", **tool_input):
-        payload = {**self.bash(self.cmd), "tool_use_id": call_id}
-        payload["tool_input"].update(tool_input)
-        return self.hook(payload)
-
-    def done(self, response, call_id="t1", codex=False):
-        payload = {"tool_name": "Bash", "cwd": self.repo, "session_id": SESSION, "tool_use_id": call_id,
-                   "hook_event_name": "PostToolUse", "tool_input": {"command": self.cmd}, "tool_response": response}
-        if codex:
-            payload["turn_id"] = "turn-1"
-        return run_hook("verify-record.py", payload, env=self.env)
-
-    def last(self):
-        return (self.record().get("evidence") or [None])[-1]
-
-    def test_a_foreground_success_on_unchanged_code_passes(self):
-        self.assertEqual(self.start()[0], 0)
-        self.assertEqual(len(self.record()["pending"]), 1)
-        self.done({"stdout": "", "stderr": "", "interrupted": False})
-        self.assertEqual(self.last()["result"], "passed")
-        self.assertEqual(self.record()["pending"], [])
-
-    def test_a_failure_leaves_the_run_unrecorded(self):
-        self.start()  # Claude Code sends no PostToolUse for a non-zero exit
-        self.assertIsNone(self.last())
-        self.assertEqual(len(self.record()["pending"]), 1)
-
-    def test_background_interrupted_and_codex_never_pass(self):
-        self.start(call_id="bg", run_in_background=True)
-        self.done({"interrupted": False, "backgroundTaskId": "b1"}, call_id="bg")
-        self.assertEqual(self.last()["result"], "unrecorded")
-        self.start(call_id="int")
-        self.done({"interrupted": True}, call_id="int")
-        self.assertEqual(self.last()["result"], "unrecorded")
-        self.start(call_id="cx")
-        self.done("", call_id="cx", codex=True)
-        self.assertEqual(self.last()["result"], "unrecorded")
-        self.assertIn("no exit status", self.last()["reason"])
-
-    def test_printed_success_text_changes_nothing(self):
-        self.start()
-        self.done("all tests passed, exit code 0")
-        self.assertEqual(self.last()["result"], "unrecorded")
-
-    def test_code_that_moves_during_the_run_is_stale(self):
-        self.start()
-        with open(os.path.join(self.repo, "new.txt"), "w") as fh:
-            fh.write("x")
-        self.done({"interrupted": False})
-        self.assertEqual(self.last()["result"], "stale")
-
-    def test_a_refused_call_records_no_start(self):
-        self.declare(allow=("review",))
-        code, _ = self.hook({**self.bash(self.cmd + " && git push origin main"), "tool_use_id": "t9"})
-        self.assertEqual(code, 2)
-        self.assertNotIn("pending", self.record())
-
-    def test_verify_itself_writes_no_evidence(self):
-        out = test_task_command.TaskCommand.task(self, "verify", "--", "true")
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertNotIn("pending", self.record())
-        self.assertEqual(self.record()["evidence"], [])
-
-
-class EvidenceRunsNothing(RepoCase):
-    """The real hook path (run.sh, the guard, verify-record) reads the code state without running
-    anything the repository's config names."""
-    RUN = os.path.join(HOOKS, "run.sh")
-
-    def launch(self, hook, payload):
-        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")}
-        return subprocess.run(["/bin/sh", self.RUN, hook], input=json.dumps(payload), text=True,
-                              capture_output=True, cwd=self.repo, env={**clean, **self.env})
-
-    def test_a_planted_filter_and_fsmonitor_never_run(self):
-        self.declare()
-        marker = ImportAndRelease.plant_programs(self, self.repo)
-        with open(os.path.join(self.repo, ".gitattributes"), "w") as fh:
-            fh.write("* filter=planted\n")
-        cmd = f"python3 {os.path.join(HOOKS, 'task.py')} verify -- true"
-        out = self.launch("task-guard.py", {**self.bash(cmd), "tool_use_id": "t1"})
-        self.assertEqual(out.returncode, 0, out.stderr)
-        out = self.launch("verify-record.py", {
-            "tool_name": "Bash", "cwd": self.repo, "session_id": SESSION, "tool_use_id": "t1",
-            "hook_event_name": "PostToolUse", "tool_input": {"command": cmd},
-            "tool_response": {"stdout": "", "stderr": "", "interrupted": False}})
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertFalse(os.path.exists(marker), "a hook ran a program the repository's config names")
-        self.assertEqual(self.record()["evidence"][-1]["result"], "passed")
-
-    def test_an_unreadable_state_is_never_passed(self):
-        sys.path.insert(0, HOOKS)
-        from agentkeel_core import evidence
-        result, _ = evidence.judge({"head": None, "tree": None}, {"tool_response": {"interrupted": False}},
-                                   (None, None))
-        self.assertEqual(result, "unrecorded")
 
 
 class HookLauncher(RepoCase):
