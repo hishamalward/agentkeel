@@ -18,6 +18,39 @@ Without `--base`, creation uses the canonical checkout’s current configured pr
 
 Permissions are `review`, `implement`, `merge`, `push`, `distribution-build`, `store-submission`, `paid-job`, `remote-write` and `publish`. Each action requires its own permission. `kind` describes the task; `fix` enables the debugging guards.
 
+## Resume existing work
+
+Use `resume` when returning to a linked worktree, including one created before Keel's current
+ownership manifests. Run it in the returning host session, not under a copied session ID:
+
+```sh
+python3 "$TASK" resume android --worktree /path/to/existing-worktree --size large \
+  --allow review,implement --deliverable /path/to/reports/android.html
+```
+
+If another session owns it, the refusal prints the exact `--from-session ID` arguments needed.
+Repeat the command with those arguments only after confirming the named sessions have stopped
+using that worktree and the user wants the handoff. Multiple legacy claims require all their IDs.
+An old record's timestamp is not proof that the session ended. The new workspace manifest is
+authoritative; old task records remain as history, but current guards refuse their writes,
+commits, pushes and MCP actions. An already-running command cannot be revoked by a hook.
+Use current plugin hooks in every participating session; start a fresh host session after upgrading.
+
+Resume does not create branches, move HEAD, stage, commit, stash or change worktree files.
+It starts with fresh verification, shipping state and HTML checkpoint requirements. Permissions
+are declared anew from the user's request. Primary checkouts, detached/protected branches,
+changed identities and unfinished Git operations are refused. Finish or cancel a different
+current task before resuming this one.
+
+An attached runtime must be released by its current owner before handoff, even if paused.
+Keel does not rewrite Slots' resource ownership. Attach requested services in the returning
+session after resume. No runtime marker means no Slots command is needed.
+
+After verified shipping, `finish` releases optional runtime resources and ends the claim but
+retains a resumed worktree, branch and files. Refresh the HTML after this result as usual.
+The retained tree can be resumed again. New worktrees made by `start` still use normal removal.
+`--keep` continues to retain an active preview and its ownership instead of ending the claim.
+
 ## Commands
 
 - `verify -- <command...>` runs a foreground check and records its result against the worktree's code state.

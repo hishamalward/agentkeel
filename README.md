@@ -19,6 +19,7 @@ AgentKeel manages task scope from declaration through delivery for Claude Code a
 
 - Each session owns one task record outside the repository. `no-code`, `small` and `large` describe task process; permissions independently authorize actions.
 - Coding tasks get a linked worktree created by AgentKeel. The session-start message prints its path; the agent must change into it before editing. A `no-code` task has no worktree.
+- Returning to an existing linked worktree uses `resume`, with fresh scope and permissions. It preserves the branch, files and index, supports explicit handoff from prior sessions (including legacy claims), and retains the worktree at finish. See [resume](docs/task-record.md#resume-existing-work).
 - Every task names a free-form HTML deliverable in a persistent folder outside the repository and disposable worktrees. Handoff and finish require a current, readable report with real `html`, `title` and `body` tags and content. Stop uses the same checks when invoked, but live host enforcement remains unverified and internal errors fail open. There is no page template or content schema.
 - `fix` tasks require a recorded failed check and cause before code edits. The guard limits repeated edit/fail cycles; see [Debugging](skills/debugging/SKILL.md).
 - Task, secret and fix guards can be set to `block`, `warn` or `off` in `agentkeel.json`. MCPClerk policy is separate and fail-closed.
@@ -44,7 +45,7 @@ codex plugin marketplace add hishamalward/agentkeel
 codex plugin add agentkeel@agentkeel
 ```
 
-In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.10.1/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
+In Codex, open `/hooks` in the repository and trust AgentKeel's hooks. In the repository, run the installed `task.py init` path printed by the host/plugin instructions. Plugin files are cached under a versioned path such as `~/.claude/plugins/cache/agentkeel/agentkeel/0.10.2/hooks/task.py`; session start prints the actual path. `init` creates `agentkeel.json` only when absent, updates its managed block in `AGENTS.md`, registers the repository, and reports host install/trust state. It does not commit.
 
 The default `{}` policy protects `main` and `master`. Every write needs a declared task. Configure optional protected branches, command rules and `require_check_before_push` in `agentkeel.json`; see [the policy guide](docs/task-record.md#repository-policy). MCPClerk owns MCP catalog and tool policy.
 

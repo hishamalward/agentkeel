@@ -111,11 +111,11 @@ def _read_manifest(path):
 
 def _same_identity(expected, actual):
     stable = ("version", "task", "session", "path", "gitdir", "common_dir", "primary",
-              "branch", "base_sha", "identity", "dir_dev", "dir_ino")
+              "branch", "base_sha", "identity", "dir_dev", "dir_ino", "retain_on_finish")
     return all(expected.get(key) == actual.get(key) for key in stable)
 
 
-def _validate(manifest, allow_pending=True):
+def _validate(manifest, allow_pending=True, allow_retained=False):
     if not isinstance(manifest, dict) or manifest.get("version") != 1:
         raise WorkspaceError("workspace manifest is missing or unsupported")
     path = manifest.get("path")
@@ -124,7 +124,8 @@ def _validate(manifest, allow_pending=True):
     stored = _read_manifest(_gitpath(path, "agent-workspace.json"))
     if stored is None or not _same_identity(manifest, stored):
         raise WorkspaceError("workspace manifest identity does not match Git state")
-    if stored.get("state") not in (("active", "disposal_pending") if allow_pending else ("active",)):
+    states = ("active", "disposal_pending") if allow_pending else ("active",)
+    if stored.get("state") not in states + (("retained",) if allow_retained else ()):
         raise WorkspaceError(f"workspace is {stored.get('state')!r}, not active")
     required_strings = ("task", "session", "gitdir", "common_dir", "primary", "branch", "base_sha", "identity")
     if any(not isinstance(stored.get(key), str) or not stored[key] for key in required_strings):
@@ -159,6 +160,81 @@ def inspect(path):
 def validate(manifest):
     """Validate the caller's manifest against the path, Git administration and stored identity."""
     return _validate(manifest)
+
+
+@contextlib.contextmanager
+def resume(path, task, session, from_sessions, environ):
+    """Claim an existing tree explicitly, without changing its files, index or Git refs."""
+    path = os.path.abspath(os.path.expanduser(path))
+    if path != os.path.realpath(path) or _top(path) != path:
+        raise WorkspaceError("resume requires the canonical linked worktree root")
+    common, gitdir = _common(path), _gitdir(path)
+    if common == gitdir:
+        raise WorkspaceError("resume requires a linked worktree, not the primary checkout")
+    primary = _primary(path, common)
+    with _file_lock(os.path.join(common, "agent-lifecycle.lock")):
+        with _file_lock(os.path.join(gitdir, "agent-lifecycle.lock")):
+            if _top(path) != path or _common(path) != common or _gitdir(path) != gitdir:
+                raise WorkspaceError("worktree identity changed while waiting for handoff")
+            branch = _git(path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
+            if not branch or branch in record.policy(primary)["protected"] | record.policy(path)["protected"]:
+                raise WorkspaceError("resume requires an attached, non-protected branch")
+            if (path, "refs/heads/" + branch) not in _worktrees(primary):
+                raise WorkspaceError("worktree is not registered with this repository")
+            if os.path.lexists(runtime_path(path)):
+                raise WorkspaceError("runtime is attached; its current owner must release it before session handoff")
+            for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+                if os.path.lexists(os.path.join(gitdir, marker)):
+                    raise WorkspaceError("finish the in-progress Git operation before session handoff")
+            manifest_path = _gitpath(path, "agent-workspace.json")
+            previous = _read_manifest(manifest_path)
+            if previous:
+                previous = _validate(previous, allow_pending=False, allow_retained=True)
+                owners = {previous["session"]} if previous["state"] == "active" else set()
+            else:
+                owners = set()
+                folder = os.path.join(record.home(environ), "tasks")
+                for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+                    if not name.endswith(".json"):
+                        continue
+                    owner = _read_manifest(os.path.join(folder, name))
+                    if owner and path in owner.get("worktrees", []):
+                        if not owner.get("session_id"):
+                            raise WorkspaceError("legacy worktree claim has no session identity")
+                        owners.add(owner["session_id"])
+            owners.discard(session)
+            if set(from_sessions) != owners:
+                flags = " ".join("--from-session " + s for s in sorted(owners)) or "no --from-session flags"
+                raise WorkspaceError("ownership handoff requires " + flags +
+                                     "; confirm those sessions are no longer using this worktree before transferring")
+            info = os.stat(path)
+            manifest = {"version": 1, "task": task, "session": session, "path": path,
+                        "gitdir": gitdir, "common_dir": common, "primary": primary,
+                        "branch": branch, "base_sha": _git(path, "rev-parse", "HEAD").stdout.strip(),
+                        "identity": secrets.token_hex(32), "dir_dev": info.st_dev, "dir_ino": info.st_ino,
+                        "state": "active", "retain_on_finish": True,
+                        "previous_sessions": sorted(owners)}
+            _write_manifest(manifest_path, manifest)
+            try:
+                yield dict(manifest)
+            except BaseException:
+                if previous:
+                    _write_manifest(manifest_path, previous)
+                else:
+                    os.unlink(manifest_path)
+                raise
+
+
+def retain(manifest):
+    """End the claim while keeping an adopted branch and all worktree content."""
+    with _file_lock(os.path.join(manifest["common_dir"], "agent-lifecycle.lock")):
+        with _file_lock(os.path.join(manifest["gitdir"], "agent-lifecycle.lock")):
+            current = _validate(manifest)
+            if os.path.lexists(runtime_path(current["path"])):
+                raise WorkspaceError("runtime is still attached; release it before retaining the worktree")
+            current["state"] = "retained"
+            _write_manifest(_gitpath(current["path"], "agent-workspace.json"), current)
+            return current
 
 
 @contextlib.contextmanager

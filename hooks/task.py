@@ -2,7 +2,8 @@
 """AgentKeel: declare a task, own its worktree, keep current HTML, and finish safely.
 
 start requires --size no-code|small|large, --allow and --deliverable. Medium aliases small.
-Coding tasks create their own linked worktree; no-code tasks only own report folders.
+New coding tasks create linked worktrees; resume adopts an existing one without changing Git state.
+No-code tasks only own report folders. Resumed worktrees are retained at finish.
 verify records a foreground check against unchanged code. handoff validates free-form HTML.
 pr opens a pull request; ship verifies and merges its exact head through GitHub, then pulls the
 canonical protected branch. Explicit --admin permits an authorized missing-review exception.
@@ -11,6 +12,7 @@ finish releases owned resources/worktree and validates the final HTML. cancel pr
 Legacy human-only open/import/release retain independent-clone containment.
 """
 import argparse
+import contextlib
 import shlex
 import json
 import os
@@ -59,7 +61,8 @@ def start(args, environ):
         return fail("--deliverable must be inside a declared --write-root")
     if not deliverable.lower().endswith((".html", ".htm")):
         return fail("--deliverable must name an HTML file")
-    with record.locked(record.record_path(session, environ)):
+    resuming = args.action == "resume"
+    with record.locked(record.record_path(session, environ)), contextlib.ExitStack() as claims:
         prev = record.load(session, environ)
         retained = None
         if prev and prev.get("task") != args.task:
@@ -76,6 +79,12 @@ def start(args, environ):
             prev = None
         if prev and size == "no-code" and prev.get("worktrees"):
             return fail("a task with a worktree cannot become no-code; finish it first")
+        if prev and not resuming:
+            problem = record.ownership_problem(prev)
+            if problem:
+                return fail(problem)
+        if resuming and prev and prev.get("worktrees") and prev["worktrees"] != [realpath(args.worktree, cwd)]:
+            return fail("finish or cancel the current task before resuming another worktree")
         rec = prev or {"version": 2, "task": args.task, "session_id": session,
                        "worktrees": [], "write_roots": [], "resources": [], "declared_at": time.time(),
                        "evidence": [], "history": [], "cause": None, "fix": {"cycles": 0, "edited": False}}
@@ -84,9 +93,17 @@ def start(args, environ):
             widened = sorted(set(perms) - set(prev.get("permissions") or []))
             if widened:
                 print("agentkeel: permissions widened: " + ", ".join(widened) + "; state the authorization in your update")
-        if size != "no-code" and not rec.get("worktrees"):
+        if resuming or (size != "no-code" and not rec.get("worktrees")):
             try:
-                owned = workspace.create(cwd, args.task, session, path=args.path, branch=args.branch, base=args.base)
+                if resuming:
+                    owned = claims.enter_context(workspace.resume(args.worktree, args.task, session,
+                                                                 args.from_session, environ))
+                    rec = {**rec, "evidence": [], "cause": None, "fix": {"cycles": 0, "edited": False},
+                           "declared_at": time.time()}
+                    for key in ("shipping", "html_checkpoint", "outcome_at", "code_changed_at"):
+                        rec.pop(key, None)
+                else:
+                    owned = workspace.create(cwd, args.task, session, path=args.path, branch=args.branch, base=args.base)
             except (ValueError, OSError, workspace.WorkspaceError) as exc:
                 return fail(str(exc))
             rec["workspace"] = owned
@@ -102,6 +119,8 @@ def start(args, environ):
     print("  worktree: " + (rec["worktrees"][0] if rec["worktrees"] else "none (no-code)"))
     print("  deliverable: " + deliverable)
     print("  scratch: " + rec["scratch"])
+    if resuming:
+        print("  existing branch/files/index preserved; finish retains this worktree")
     return 0
 
 
@@ -512,6 +531,8 @@ def _task_owners(environ):
         try:
             with open(os.path.join(folder, name)) as fh:
                 rec = json.load(fh)
+            if record.ownership_problem(rec):
+                continue
             for w in rec.get("worktrees") or []:
                 owners.setdefault(os.path.realpath(w), rec.get("task") or "?")
         except Exception:
@@ -631,6 +652,16 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--path")
     s.add_argument("--branch")
     s.add_argument("--base", help="base ref; defaults to the canonical checkout's protected branch")
+    r = sub.add_parser("resume", help="declare work in an existing linked worktree; preserve it at finish")
+    r.add_argument("task")
+    r.add_argument("--worktree", required=True)
+    r.add_argument("--size", required=True, choices=("small", "large"))
+    r.add_argument("--allow", required=True)
+    r.add_argument("--kind", choices=record.KINDS, default="feature")
+    r.add_argument("--deliverable", required=True)
+    r.add_argument("--write-root", action="append")
+    r.add_argument("--from-session", action="append", default=[],
+                   help="explicit handoff from this prior owner after it stops using the tree; repeat for legacy claims")
     o = sub.add_parser("open")
     o.add_argument("task")
     o.add_argument("--host", required=True, choices=isolation.HOSTS)
@@ -679,7 +710,7 @@ def main(argv=None, environ=os.environ):
         return selftest()
     args = p.parse_args(argv)
     handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd,
-                "start": start, "show": show, "verify": verify, "cancel": cancel, "discard": discard,
+                "start": start, "resume": start, "show": show, "verify": verify, "cancel": cancel, "discard": discard,
                 "handoff": handoff, "finish": finish, "pr": pr, "ship": ship, "status": status,
                 "cause": cause, "reopen": reopen}
     if args.action not in handlers:

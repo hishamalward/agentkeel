@@ -1,6 +1,6 @@
 # Optional runtime boundary
 
-AgentKeel creates and deletes Git worktrees. It does not allocate ports, databases,
+AgentKeel creates and deletes new task worktrees and can resume existing ones. It does not allocate ports, databases,
 dependencies, simulators or server processes. AgentSlots may attach to an existing worktree.
 
 Keel writes `agent-workspace.json` in that worktree's Git administrative directory. Its
@@ -41,3 +41,11 @@ changes, untracked files, ownership, branch preservation or active processes.
 Human-only `discard TASK --worktree PATH` can waive work preservation for a cancelled task,
 but always retains identity, runtime-release and active-process checks. Other tasks' shared Git branches and stashes remain
 untouched. Retaining a preview is explicit and keeps both ownership records.
+
+`resume` holds common then worktree lifecycle locks, verifies the Git identity, and requires
+explicit handoff from the current session owner (all legacy owners if no manifest exists).
+It refuses an attached runtime rather than changing Slots' records. The new manifest supersedes
+legacy task claims. If saving the new task fails, the prior manifest is restored. Worktree files,
+index and refs are unchanged. A resumed manifest has `retain_on_finish: true`; finish releases
+the runtime and changes its state to `retained` without deleting the worktree or branch.
+Slots cannot attach to that ended claim until a new session resumes it.
