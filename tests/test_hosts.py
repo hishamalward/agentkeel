@@ -218,11 +218,9 @@ class SessionOwnership(RepoCase):
             self.assertEqual(fh.read(), before)
 
     def test_ambiguous_environment_fails_closed_and_says_how(self):
-        report_root = os.path.join(self.tmp, "reports")
-        os.makedirs(report_root)
         out = self.task({"AGENTKEEL_SESSION_ID": "", "CODEX_THREAD_ID": "a", "CLAUDE_CODE_SESSION_ID": "b"},
                         "start", "z", "--size", "small", "--allow", "review",
-                        "--write-root", report_root, "--deliverable", os.path.join(report_root, "z.html"))
+                        "--deliverable", "doc/z.html")
         from agentkeel_core import record
         if record.nearest_host() is None:
             self.assertEqual(out.returncode, 2); self.assertIn("no session id", out.stderr)
