@@ -381,7 +381,9 @@ def ship(args, environ):
             shipping.ship(rec, args.pr, environ, admin=args.admin)
     except (shipping.FinishError, workspace.WorkspaceError, OSError, ValueError) as exc:
         return fail(str(exc))
-    print("agentkeel: canonical protected branch synchronized; refresh HTML then run finish")
+    print("agentkeel: canonical protected branch synchronized; "
+          + ("run finish to preserve committed HTML and clean up" if rec.get("report_root")
+             else "refresh HTML then run finish"))
     return 0
 
 
