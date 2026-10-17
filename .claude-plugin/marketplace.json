@@ -4,14 +4,14 @@
     "name": "Hisham Al-Ward",
     "url": "https://github.com/hishamalward"
   },
-  "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
+  "description": "Task lifecycle, linked worktrees, visual HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
   "plugins": [
     {
       "name": "agentkeel",
       "displayName": "AgentKeel",
       "source": "./",
-      "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
-      "version": "0.10.2",
+      "description": "Task lifecycle, linked worktrees, visual HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
+      "version": "0.11.0",
       "author": {
         "name": "Hisham Al-Ward"
       },

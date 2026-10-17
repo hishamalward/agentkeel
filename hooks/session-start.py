@@ -157,7 +157,7 @@ def main():
         return 0
     print("agentkeel is active in this repository. Before your first write, declare the task from\n"
           "your reading of the request, state that reading in your first update, and proceed:\n"
-          f'  python3 "{task}" start <task-id> --size no-code|small|large --allow <permissions> [--kind fix|feature|review|docs|chore] --deliverable <absolute-report.html>\n'
+          f'  python3 "{task}" start <task-id> --size no-code|small|large --allow <permissions> [--kind fix|feature|review|docs|chore] [--deliverable <progress.html>] [--spec <spec.html>]\n'
           "Permissions: review, implement, merge, push, distribution-build, store-submission, paid-job,\n"
           "remote-write, publish. Kind fix turns on the debugging guards (failed check and cause line\n"
           "before any code edit; three edit-then-fail cycles stop the loop). Status page: task.py status --html.\n"
@@ -165,9 +165,16 @@ def main():
           "To continue in an existing linked worktree, use task.py resume <task-id> --worktree <path>\n"
           "with --size, --allow and --deliverable. It preserves files/index and retains the tree at finish.\n"
           "If it names prior owners, --from-session ID explicitly hands over each stopped session's claim.\n"
-          "Keep one coherent HTML report outside the worktree, with visual mockups when useful. No template is required.\n"
+          "The user is highly visual. Present self-contained, visually designed HTML with concrete mockups and visual explanations.\n"
+          "Choose the presentation freely; no template or fixed section structure is required.\n"
+          "Coding-task artifacts stay in the worktree; HTML goes in its root-level /doc folder.\n"
+          "No-code has no worktree: use temporary or provider-managed HTML outside the repository.\n"
+          "Prefer two pages: the specification/full plan, and progress/results/verification/remaining work.\n"
+          "Overwrite progress in place; revise the spec when scope or decisions change. Keep both consistent.\n"
+          "Coding paths are worktree-relative; default progress is doc/<task>-progress.html. --spec declares the second page.\n"
+          "Commit coding-task pages with the work, verify the committed candidate, then run handoff.\n"
           "Stop enforcement is not verified here; hook registration is not proof of invocation. Handoff and finish enforce HTML.\n"
-          "Run handoff to validate the report, ship to advance the canonical protected branch, then finish to clean up."
+          "Run ship to advance the canonical protected branch, then finish. Committed pages survive in canonical /doc."
           + (f"\nRun task.py exactly as shown, with nothing in front of python3: the host's permission\n"
              "rules match the command as written. Your session id is "
              f"{payload['session_id']}; you need it only if\n"

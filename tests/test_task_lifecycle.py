@@ -29,6 +29,7 @@ class Lifecycle(unittest.TestCase):
                               cwd=cwd or self.repo, env=self.env, capture_output=True, text=True)
 
     def start(self, size="small"):
+        self.report = self.root / ("reports" if size == "no-code" else "repo-work/doc") / "task.html"
         return self.task("start", "work", "--size", size, "--allow", "review,implement",
                          "--deliverable", str(self.report))
 
@@ -64,7 +65,7 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(self.task("cancel").returncode, 0)
         self.assertTrue(Path(owned).is_dir())
         out = self.task("start", "other", "--size", "no-code", "--allow", "review",
-                        "--deliverable", str(self.report))
+                        "--deliverable", str(self.root / "reports/other.html"))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.rec()["task"], "other")
         retained = [json.loads(p.read_text()) for p in (self.root / "state/tasks").glob("*.json")]
@@ -97,7 +98,7 @@ class Lifecycle(unittest.TestCase):
         tree = self.rec()["worktrees"][0]
         self.assertEqual(self.task("cancel").returncode, 0)
         out = self.task("start", "other", "--size", "small", "--allow", "implement",
-                        "--base", "missing-branch", "--deliverable", str(self.report))
+                        "--base", "missing-branch", "--deliverable", "doc/task.html")
         self.assertNotEqual(out.returncode, 0)
         self.assertEqual(self.rec()["task"], "work")
         self.assertEqual(len(list((self.root / "state/tasks").glob("*.json"))), 1)
@@ -105,6 +106,7 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
 
     def test_local_only_cli_finishes_rewritten_commit_with_generated_cache(self):
+        self.report = self.root / "repo-work/doc/task.html"
         git(str(self.repo), "branch", "-m", "main", "master")
         Path(self.repo, ".gitignore").write_text("__pycache__/\n")
         git(str(self.repo), "add", ".gitignore")
@@ -114,25 +116,21 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         tree = self.rec()["worktrees"][0]
         Path(tree, "code.py").write_text("value = 1\n")
-        git(tree, "add", "code.py")
+        self.report.parent.mkdir(parents=True)
+        self.report.write_text("<html><title>Task</title><body>Candidate checked</body></html>")
+        git(tree, "add", "code.py", "doc/task.html")
         git(tree, "commit", "-qm", "first")
         git(tree, "commit", "--amend", "-qm", "revised")
         out = self.task("verify", "--", sys.executable, "-m", "py_compile", "code.py", cwd=tree)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.report.parent.mkdir(parents=True, exist_ok=True)
-        def report(text):
-            self.report.write_text("<html><head><title>Task</title></head><body>" + text + "</body></html>")
-        report("Verified candidate")
         self.assertEqual(self.task("handoff").returncode, 0)
         out = self.task("ship", "--local")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(Path(self.repo, "code.py").read_text(), "value = 1\n")
-        report("Local branch synchronized")
-        self.assertNotEqual(self.task("finish").returncode, 0)  # final cleanup outcome needs HTML
-        self.assertFalse(Path(tree).exists())
-        report("Worktree released and local branch synchronized")
         out = self.task("finish")
         self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(Path(tree).exists())
+        self.assertTrue((self.repo / "doc/task.html").is_file())
         self.assertEqual(self.rec()["lifecycle"], "complete")
 
     def test_verify_records_pass_only_if_code_did_not_change(self):

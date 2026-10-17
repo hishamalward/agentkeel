@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AgentKeel: declare a task, own its worktree, keep current HTML, and finish safely.
 
-start requires --size no-code|small|large, --allow and --deliverable. Medium aliases small.
+start requires --size no-code|small|large and --allow. Medium aliases small.
 New coding tasks create linked worktrees; resume adopts an existing one without changing Git state.
 No-code tasks only own report folders. Resumed worktrees are retained at finish.
 verify records a foreground check against unchanged code. handoff validates free-form HTML.
@@ -47,20 +47,6 @@ def start(args, environ):
         return fail("unknown or empty permission; choose from " + ", ".join(record.PERMISSIONS))
     size = record.SIZE_ALIASES.get(args.size, args.size)
     cwd = os.getcwd()
-    deliverable = realpath(args.deliverable, cwd)
-    roots = [realpath(p, cwd) for p in args.write_root or [os.path.dirname(deliverable)]]
-    for root in roots:
-        if root in ("/", os.path.realpath(os.path.expanduser("~")), record.home(environ)) or root.startswith(record.home(environ) + os.sep):
-            return fail("report root is too wide or inside AgentKeel state: " + root)
-        probe = root
-        while not os.path.isdir(probe):
-            probe = os.path.dirname(probe)
-        if gitops.toplevel(probe):
-            return fail("report root is inside a repository; choose a persistent folder outside it")
-    if not any(deliverable.startswith(root + os.sep) for root in roots):
-        return fail("--deliverable must be inside a declared --write-root")
-    if not deliverable.lower().endswith((".html", ".htm")):
-        return fail("--deliverable must name an HTML file")
     resuming = args.action == "resume"
     with record.locked(record.record_path(session, environ)), contextlib.ExitStack() as claims:
         prev = record.load(session, environ)
@@ -85,6 +71,42 @@ def start(args, environ):
                 return fail(problem)
         if resuming and prev and prev.get("worktrees") and prev["worktrees"] != [realpath(args.worktree, cwd)]:
             return fail("finish or cancel the current task before resuming another worktree")
+        try:
+            spec_value = args.spec or (prev or {}).get("spec")
+            if size == "no-code":
+                target = None
+                report_root = None
+                fallback = os.path.join(tempfile.gettempdir(), "agentkeel-reports", record._safe(session),
+                                        args.task + "-progress.html")
+                deliverable = realpath(args.deliverable or (prev or {}).get("deliverable") or fallback, cwd)
+                spec = realpath(spec_value, cwd) if spec_value else None
+                roots = sorted({os.path.dirname(p) for p in (deliverable, spec) if p})
+                for root in roots:
+                    if root in ("/", os.path.realpath(os.path.expanduser("~")), record.home(environ)) or root.startswith(record.home(environ) + os.sep):
+                        return fail("report root is too wide or inside AgentKeel state: " + root)
+                    probe = root
+                    while not os.path.isdir(probe):
+                        probe = os.path.dirname(probe)
+                    if gitops.toplevel(probe):
+                        return fail("no-code HTML belongs in temporary or provider storage outside a repository")
+                if any(not p.lower().endswith((".html", ".htm")) for p in (deliverable, spec) if p):
+                    return fail("task pages must name HTML files")
+            else:
+                if resuming:
+                    target = realpath(args.worktree, cwd)
+                elif (prev or {}).get("worktrees"):
+                    target = prev["worktrees"][0]
+                else:
+                    target = workspace.destination(cwd, args.task, args.path)
+                report_root = os.path.join(target, "doc")
+                previous = (prev or {}).get("deliverable") if (prev or {}).get("report_root") else None
+                deliverable = delivery.report_path(target, args.deliverable or previous or f"doc/{args.task}-progress.html")
+                spec = delivery.report_path(target, spec_value) if spec_value else None
+                roots = [report_root]
+            if spec == deliverable:
+                return fail("specification and progress must be different HTML files")
+        except (ValueError, OSError, workspace.WorkspaceError) as exc:
+            return fail(str(exc))
         rec = prev or {"version": 2, "task": args.task, "session_id": session,
                        "worktrees": [], "write_roots": [], "resources": [], "declared_at": time.time(),
                        "evidence": [], "history": [], "cause": None, "fix": {"cycles": 0, "edited": False}}
@@ -103,13 +125,13 @@ def start(args, environ):
                     for key in ("shipping", "html_checkpoint", "outcome_at", "code_changed_at"):
                         rec.pop(key, None)
                 else:
-                    owned = workspace.create(cwd, args.task, session, path=args.path, branch=args.branch, base=args.base)
+                    owned = workspace.create(cwd, args.task, session, path=target, branch=args.branch, base=args.base)
             except (ValueError, OSError, workspace.WorkspaceError) as exc:
                 return fail(str(exc))
             rec["workspace"] = owned
             rec["worktrees"] = [owned["path"]]
         rec.update(size=size, kind=args.kind, permissions=perms, deliverable=deliverable,
-                   write_roots=sorted(set(roots) | set(rec["write_roots"])), lifecycle="active")
+                   spec=spec, report_root=report_root, write_roots=roots, lifecycle="active")
         rec["scratch"] = os.path.join(os.path.realpath(tempfile.gettempdir()), "agentkeel-scratch", record._safe(session))
         os.makedirs(rec["scratch"], exist_ok=True)
         if retained:
@@ -117,7 +139,9 @@ def start(args, environ):
         record.save(rec, environ)
     print(f"agentkeel: task '{args.task}', {size}; permissions {', '.join(perms)}")
     print("  worktree: " + (rec["worktrees"][0] if rec["worktrees"] else "none (no-code)"))
-    print("  deliverable: " + deliverable)
+    print("  progress: " + deliverable)
+    if spec:
+        print("  specification: " + spec)
     print("  scratch: " + rec["scratch"])
     if resuming:
         print("  existing branch/files/index preserved; finish retains this worktree")
@@ -258,7 +282,7 @@ def handoff(args, environ):
     rec = record.load(record.session_from_env(environ), environ)
     if not rec:
         return fail("no task declared for this session")
-    problems = delivery.problems(rec)
+    problems = delivery.problems(rec, require_fresh=not rec.get("report_root"))
     if problems:
         return fail("HTML handoff pending: " + "; ".join(problems))
     rec["html_checkpoint"] = delivery.checkpoint(rec)
@@ -576,7 +600,7 @@ def status(args, environ):
     out = {"repository": top, "task": None, "worktrees": [], "opened": [], "others": []}
     if rec:
         out["task"] = {"id": rec.get("task"), "size": rec.get("size"), "kind": rec.get("kind") or "feature",
-                       "permissions": rec.get("permissions") or [], "deliverable": rec.get("deliverable"),
+                       "permissions": rec.get("permissions") or [], "deliverable": rec.get("deliverable"), "spec": rec.get("spec"),
                        "cause": rec.get("cause"), "fix": rec.get("fix") or {}, "evidence": rec.get("evidence") or []}
         out["worktrees"] = [_worktree_facts(w, protected) for w in mine]
     out["guards"] = pol["guards"]
@@ -647,8 +671,8 @@ def main(argv=None, environ=os.environ):
     s.add_argument("--size", required=True, choices=record.SIZES + tuple(record.SIZE_ALIASES))
     s.add_argument("--allow", required=True)
     s.add_argument("--kind", choices=record.KINDS, default="feature")
-    s.add_argument("--deliverable", required=True)
-    s.add_argument("--write-root", action="append")
+    s.add_argument("--deliverable", help="progress HTML: worktree-relative doc/TASK-progress.html for code; temporary/provider file for no-code")
+    s.add_argument("--spec", help="optional specification/full-plan HTML; same location rules as progress")
     s.add_argument("--path")
     s.add_argument("--branch")
     s.add_argument("--base", help="base ref; defaults to the canonical checkout's protected branch")
@@ -658,8 +682,8 @@ def main(argv=None, environ=os.environ):
     r.add_argument("--size", required=True, choices=("small", "large"))
     r.add_argument("--allow", required=True)
     r.add_argument("--kind", choices=record.KINDS, default="feature")
-    r.add_argument("--deliverable", required=True)
-    r.add_argument("--write-root", action="append")
+    r.add_argument("--deliverable", help="progress HTML inside the worktree doc folder")
+    r.add_argument("--spec", help="optional specification/full-plan HTML inside the worktree doc folder")
     r.add_argument("--from-session", action="append", default=[],
                    help="explicit handoff from this prior owner after it stops using the tree; repeat for legacy claims")
     o = sub.add_parser("open")

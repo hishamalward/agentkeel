@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import time
+from pathlib import Path
 
 from . import checks, delivery, evidence, gitops, record, workspace
 
@@ -270,6 +271,17 @@ def finish(rec, environ=os.environ, keep=False, discard_ignored=False):
         owned = rec.get("workspace")
         if not owned:
             raise FinishError("legacy worktree has no ownership manifest; preserve it for explicit migration")
+        preserved = {}
+        if rec.get("report_root") and not owned.get("retain_on_finish"):
+            for key in ("deliverable", "spec"):
+                if not rec.get(key):
+                    continue
+                relative = os.path.relpath(rec[key], owned["path"])
+                target = delivery.report_path(owned["primary"], relative)
+                git(owned["primary"], "ls-files", "--error-unmatch", "--", relative)
+                if not os.path.isfile(target) or Path(target).read_bytes() != Path(rec[key]).read_bytes():
+                    raise FinishError("task page is not preserved unchanged in canonical main: " + relative)
+                preserved[key] = target
         workspace.prepare_release(owned)
         runtime = os.path.join(owned["gitdir"], "agent-runtime.json")
         if os.path.lexists(runtime):
@@ -281,6 +293,15 @@ def finish(rec, environ=os.environ, keep=False, discard_ignored=False):
         else:
             workspace.release(owned, discard_ignored=discard_ignored)
         rec["worktrees"] = []
+        if rec.get("report_root"):
+            rec.update(preserved)
+            if preserved:
+                rec["report_root"] = os.path.join(owned["primary"], "doc")
+                rec["write_roots"] = [rec["report_root"]]
+            rec["html_checkpoint"] = delivery.checkpoint(rec)
+            rec["lifecycle"] = "complete"
+            record.save(rec, environ)
+            return
         rec.update(lifecycle="report_pending", outcome_at=time.time())
         record.save(rec, environ)
     html(rec)

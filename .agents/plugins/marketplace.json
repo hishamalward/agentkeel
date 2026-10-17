@@ -15,7 +15,7 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Productivity",
-      "description": "Task lifecycle, linked worktrees, persistent HTML checkpoints, and permissioned delivery for Claude Code and Codex."
+      "description": "Task lifecycle, linked worktrees, visual HTML checkpoints, and permissioned delivery for Claude Code and Codex."
     }
   ]
 }

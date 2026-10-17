@@ -7,7 +7,7 @@ record (hooks/task.py) and judges every operation in the tool call against it:
   file edits (Write, Edit, NotebookEdit)
     - agentkeel state, hook configuration and agentkeel.json are never edited by the agent
     - a task must be declared for this session
-    - the task's --write-root folders (report folders outside any repository) are writable
+    - the task's HTML folder is writable; code-task pages belong in its worktree's /doc
     - otherwise the target must be inside one of the task's own linked worktrees (never the
       shared checkout), the task must have `implement`, and the branch must not be protected
     - temp files outside any repository: only the task's scratch (its scratch folder, or a temp
@@ -101,10 +101,11 @@ TASK_CMD = 'python3 "%s"' % os.path.join(os.path.dirname(os.path.abspath(__file_
 NO_TASK = (
     "no task is declared for this session.\n\n"
     "Declare it in one command, from your reading of the human's request, then retry:\n"
-    f"  {TASK_CMD} start <task-id> --size no-code|small|large --allow <permissions> --deliverable <outside-repo.html> [--write-root <outside-repo-folder>] [--kind fix|feature|review|docs|chore]\n\n"
+    f"  {TASK_CMD} start <task-id> --size no-code|small|large --allow <permissions> --deliverable doc/<task>-progress.html [--spec doc/<task>-spec.html] [--kind fix|feature|review|docs|chore]\n\n"
     "Returning to an existing worktree? Use task.py resume <task-id> --worktree <path>\n"
-    "with --size, --allow and --deliverable instead. It reports any required --from-session handoff.\n"
-    "Permissions: review (write only --write-root folders), implement, merge, push,\n"
+    "with --size and --allow instead. It reports any required --from-session handoff.\n"
+    "No-code tasks get no worktree; omit --deliverable for temporary HTML or name a provider HTML file.\n"
+    "Permissions: review (write task report folders only), implement, merge, push,\n"
     "distribution-build, store-submission, paid-job, remote-write, publish. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
 )
@@ -139,7 +140,7 @@ def judge_edit(ev, rec, environ):
             f"{'; write roots: ' + ', '.join(rec.get('write_roots')) if rec.get('write_roots') else ''}"
             f"{'; scratch: ' + rec['scratch'] if rec.get('scratch') else ''}.\n"
             "Temp files go in the task's scratch folder. If this path is really part of the task,\n"
-            "re-declare with --write-root <folder>.")
+            "keep it inside the owned worktree.")
     owned_repos = {gitops.common_dir(w) for w in rec.get("worktrees") or [] if os.path.isdir(w)}
     own_clone = bool(rec.get("clone")) and root == os.path.realpath(rec["clone"])
     if not own_clone and gitops.is_primary(root) and (not owned_repos or gitops.common_dir(root) in owned_repos):
@@ -147,23 +148,25 @@ def judge_edit(ev, rec, environ):
             f"refusing to write {target}: {root} is the repository's shared checkout.\n"
             "Every code task, small ones included, works in its own managed worktree, so the shared checkout\n"
             "stays free for other agents' merges. Start a code task with task.py; it creates and records the worktree:\n"
-            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable <outside-repo.html>")
+            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable doc/<task>-progress.html")
     if root not in (rec.get("worktrees") or []):
         raise Block(
             f"refusing to write {target}: it belongs to another worktree ({root}).\n"
             "Another agent may own it. Work only in this task's worktrees; if this one is yours,\n"
             "use task.py resume with an explicit ownership handoff for this existing worktree.")
-    if "implement" not in perms:
-        raise Block(
-            f"task '{rec.get('task')}' has permissions {', '.join(sorted(perms))}: it writes only its\n"
-            "--write-root folders. If the human asked for code changes, re-declare with implement.")
     pol = record.policy(root)
     branch = gitops.current_branch(gitops.GitCall([], root, "", [], {}))
     if branch in pol["protected"]:
         raise Block(
             f"this worktree is on the protected branch '{branch}'. Every code task works on its own\n"
             "branch in its own managed worktree. Start the task with task.py so it creates and records one:\n"
-            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable <outside-repo.html>")
+            f"  {TASK_CMD} start {rec.get('task')} --size small --allow implement --deliverable doc/<task>-progress.html")
+    if rec.get("report_root") and under(target, rec["report_root"]):
+        return
+    if "implement" not in perms:
+        raise Block(
+            f"task '{rec.get('task')}' has permissions {', '.join(sorted(perms))}: it writes only its\n"
+            "task report folder. If the human asked for code changes, re-declare with implement.")
     if rec.get("kind") == "fix" and rel and not rel.startswith("docs/"):
         judge_fix(rec, environ)
     rec["code_changed_at"] = time.time()

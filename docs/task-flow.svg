@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
   <title id="title">AgentKeel task lifecycle</title>
-  <desc id="desc">Declare a task, work in its linked worktree or in report-only mode, verify and checkpoint a persistent HTML report, then ship and clean up. AgentSlots can attach optional runtime resources. MCPClerk judges MCP calls independently of host permissions.</desc>
+  <desc id="desc">Declare a task, work in its linked worktree or in report-only mode, verify and checkpoint a visual HTML pages, then ship and clean up. AgentSlots can attach optional runtime resources. MCPClerk judges MCP calls independently of host permissions.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
       <path d="M0 0 10 5 0 10z" fill="#5573bf"/>
@@ -26,7 +26,7 @@
     <text class="heading ink" x="64" y="44">Declare</text>
     <text class="body muted" x="24" y="91">
       <tspan x="24" dy="0">Record the goal, permissions,</tspan>
-      <tspan x="24" dy="25">and persistent HTML report path.</tspan>
+      <tspan x="24" dy="25">and visual HTML pages path.</tspan>
       <tspan x="24" dy="38">Choose the task size:</tspan>
     </text>
     <rect class="soft-blue" x="22" y="194" width="234" height="38" rx="10"/>
@@ -43,9 +43,9 @@
     <text class="heading ink" x="64" y="44">Work in scope</text>
     <text class="body muted" x="24" y="91">
       <tspan x="24" dy="0">Code: own linked worktree</tspan>
-      <tspan x="24" dy="23">for tracked edits.</tspan>
+      <tspan x="24" dy="23">for edits and /doc HTML.</tspan>
       <tspan x="24" dy="34">No-code: read repository;</tspan>
-      <tspan x="24" dy="23">write only external HTML</tspan>
+      <tspan x="24" dy="23">write temp/provider HTML</tspan>
       <tspan x="24" dy="23">report; no tracked edits.</tspan>
     </text>
     <rect class="soft-teal" x="22" y="239" width="234" height="39" rx="10"/>
@@ -61,8 +61,8 @@
     <text class="body muted" x="24" y="91">
       <tspan x="24" dy="0">Run checks; record outcomes</tspan>
       <tspan x="24" dy="23">and useful evidence.</tspan>
-      <tspan x="24" dy="34">Save persistent HTML before</tspan>
-      <tspan x="24" dy="23">handoff. It records the result</tspan>
+      <tspan x="24" dy="34">Commit code + /doc pages;</tspan>
+      <tspan x="24" dy="23">verify, then handoff records</tspan>
       <tspan x="24" dy="23">and current code state.</tspan>
     </text>
     <rect class="soft-orange" x="22" y="239" width="234" height="39" rx="10"/>
@@ -81,7 +81,7 @@
       <tspan x="22" dy="23">canonical branch; or local</tspan>
       <tspan x="22" dy="23">fast-forward if allowed.</tspan>
       <tspan x="22" dy="23">Clean resources/worktree;</tspan>
-      <tspan x="22" dy="23">save final HTML.</tspan>
+      <tspan x="22" dy="23">preserve pages in /doc.</tspan>
       <tspan x="22" dy="23">No-code skips shipping.</tspan>
     </text>
     <rect class="soft-orange" x="18" y="239" width="192" height="39" rx="10"/>

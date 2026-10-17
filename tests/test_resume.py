@@ -26,6 +26,7 @@ class Resume(unittest.TestCase):
         return tree
 
     def resume(self, tree, *extra):
+        self.report = Path(tree) / "doc/task.html"
         return self.task('resume', 'continue-work', '--worktree', str(tree), '--size', 'small',
                          '--allow', 'review,implement', '--deliverable', str(self.report), *extra)
 
@@ -105,24 +106,19 @@ class Resume(unittest.TestCase):
     def test_finish_retains_adopted_tree_and_a_later_session_can_resume_it(self):
         tree = self.existing()
         self.assertEqual(self.resume(tree).returncode, 0)
-        git(str(tree), 'add', 'staged', 'untracked')
+        self.report.parent.mkdir()
+        self.report.write_text('<html><title>Resume</title><body>Candidate checked</body></html>')
+        git(str(tree), 'add', 'staged', 'untracked', 'doc/task.html')
         git(str(tree), 'commit', '-qm', 'continued work')
         self.assertEqual(self.task('start', 'continue-work', '--size', 'small',
                                    '--allow', 'review,implement,merge', '--deliverable', str(self.report)).returncode, 0)
         self.assertEqual(self.task('verify', '--', sys.executable, '-c', 'pass', cwd=tree).returncode, 0)
-        self.report.parent.mkdir()
-        def report(text):
-            self.report.write_text('<html><title>Resume</title><body>' + text + '</body></html>')
-        report('Candidate checked')
         self.assertEqual(self.task('handoff').returncode, 0)
         out = self.task('ship', '--local')
         self.assertEqual(out.returncode, 0, out.stderr)
-        report('Local main synchronized')
-        self.assertNotEqual(self.task('finish').returncode, 0)
+        self.assertEqual(self.task('finish').returncode, 0)
         self.assertTrue(tree.is_dir())
         self.assertEqual((tree / 'staged').read_text(), 'keep unstaged too\n')
-        report('Existing worktree retained')
-        self.assertEqual(self.task('finish').returncode, 0)
         self.assertEqual(self.rec()['lifecycle'], 'complete')
         self.env['AGENTKEEL_SESSION_ID'] = 'later'
         out = self.resume(tree)

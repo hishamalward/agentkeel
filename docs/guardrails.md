@@ -4,7 +4,7 @@ AgentKeel checks supported Claude Code and Codex hook events in opted-in reposit
 
 ## Task and permissions
 
-A task declares `no-code`, `small` or `large`, a kind, permissions, write roots, worktrees and a required persistent HTML deliverable. `start` creates the linked worktree for code tasks. Supported file writes must land in an owned worktree or declared report root; protected branches and remote actions require their matching permissions. Commits must name paths. Shipping checks exact-SHA verification and current HTML before advancing the canonical checkout's current configured protected branch; PR shipping also checks review and required CI evidence, then uses GitHub’s exact-head PR merge operation. Explicitly authorized `--admin` shipping may waive missing review, but not requested changes or failed/pending checks.
+A task declares `no-code`, `small` or `large`, a kind, permissions, write roots, worktrees and a required HTML progress page and optional spec. `start` creates the linked worktree for code tasks. Supported file writes must land in an owned worktree or declared report root; protected branches and remote actions require their matching permissions. Commits must name paths. Shipping checks exact-SHA verification and current HTML before advancing the canonical checkout's current configured protected branch; PR shipping also checks review and required CI evidence, then uses GitHub’s exact-head PR merge operation. Explicitly authorized `--admin` shipping may waive missing review, but not requested changes or failed/pending checks.
 
 The `fix` kind requires failed verification evidence and a recorded cause before code edits. It limits repeated edit/fail cycles; `reopen` is a human operation. See [Debugging](../skills/debugging/SKILL.md).
 
