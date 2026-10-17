@@ -1,12 +1,12 @@
 # Enforcement design and limits
 
-AgentKeel combines host hook checks with task records. The plugin runs in opted-in repositories; `task.py init` records opt-in outside the repository and preserves existing policy. A task record binds the host session to declared permissions, linked worktrees, report roots and a persistent HTML deliverable.
+AgentKeel combines host hook checks with task records. The plugin runs in opted-in repositories; `task.py init` records opt-in outside the repository and preserves existing policy. A task record binds the host session to declared permissions, linked worktrees, report roots and HTML pages.
 
 ## Normal task isolation
 
 Code tasks use linked worktrees. The task guard checks supported file-tool paths, parsed shell/Git actions and task permissions. The worktree keeps ordinary source edits off the shared checkout, but it shares the repository's Git object store and common metadata. `no-code` tasks do not create a worktree.
 
-The report is stored outside repositories and disposable worktrees. Delivery checks validate path containment, HTML structure, nonempty title/body, freshness and unchanged-code checkpoints. The HTML is free form and is not interpreted as authorization. See [delivery checkpoints](delivery.md).
+Coding-task pages live in the owned worktree’s `/doc` and are committed with the work. No-code pages live in temporary or provider storage without a worktree. Delivery checks validate path containment, HTML structure, nonempty title/body, freshness and unchanged-code checkpoints. The HTML is free form and is not interpreted as authorization. See [delivery checkpoints](delivery.md).
 
 ## Optional isolated clone
 

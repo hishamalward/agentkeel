@@ -17,6 +17,8 @@ Keel uses the same name in the common Git directory to serialize creation and di
 When both locks are needed, acquire common first, worktree second. Do not unlink lock files.
 After acquiring a lock, revalidate identity and state; an earlier path check is insufficient.
 
+For normal coding-task cleanup, Keel first confirms declared HTML pages are tracked and preserved unchanged in canonical `/doc`. No-code tasks have no worktree or runtime to release.
+
 Keel marks the workspace `disposal_pending` before releasing its lifecycle lock to invoke:
 
 ```sh

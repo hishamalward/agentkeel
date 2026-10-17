@@ -58,6 +58,8 @@ def render(out, rec, pol, others):
                      + _rows([(t.get("id"), t.get("size"), t.get("kind"), ", ".join(t.get("permissions") or []),
                                (t.get("deliverable") or "none") + ("" if not t.get("deliverable") else
                                 (" (present)" if os.path.exists(t["deliverable"]) else " (not written yet)")))]) + "</table>")
+        if t.get("spec"):
+            parts.append("<p>Specification: <code>" + _e(t["spec"]) + "</code></p>")
         if t.get("kind") == "fix":
             failed = any(e.get("result") == "failed" for e in t.get("evidence") or [])
             parts.append("<h2>Fix guards</h2><table><tr><th>Check</th><th>State</th></tr>" + _rows([

@@ -18,7 +18,7 @@ class TaskCommand(RepoCase):
         env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "AGENTKEEL_SESSION_ID", "CODEX_THREAD_ID")}
         env.update(self.env)
         if args[:1] == ("start",) and "--deliverable" not in args:
-            args = (*args, "--deliverable", os.path.join(self.tmp, "reports", args[1] + ".html"))
+            args = (*args, "--deliverable", "doc/" + args[1] + ".html")
         if session:
             env["CLAUDE_CODE_SESSION_ID"] = session
         return subprocess.run([sys.executable, T, *args], cwd=cwd or self.repo, capture_output=True,

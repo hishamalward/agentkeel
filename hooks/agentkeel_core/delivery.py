@@ -44,9 +44,22 @@ def _inside(path, roots):
 
 
 def _code(rec):
+    if rec.get("report_root"):
+        root = os.path.dirname(rec["report_root"])
+        return {root: evidence.code_state(root)[1]}
     return {os.path.realpath(path): list(state) if state else None
             for path in rec.get("worktrees") or []
             for state in [evidence.code_state(path)]}
+
+
+def report_path(worktree, value):
+    root = os.path.join(os.path.realpath(worktree), "doc")
+    path = os.path.realpath(os.path.join(worktree, os.path.expanduser(value)))
+    if os.path.realpath(root) != root or not path.startswith(root + os.sep):
+        raise ValueError("HTML pages must be inside the task worktree's root-level doc folder")
+    if not path.lower().endswith((".html", ".htm")):
+        raise ValueError("task pages must name HTML files")
+    return path
 
 
 def _read(rec):
@@ -57,7 +70,12 @@ def _read(rec):
     roots = rec.get("write_roots") or []
     if not os.path.isabs(str(rec.get("deliverable"))) or not _inside(path, roots):
         return path, None, ["the deliverable must be inside a declared write root"]
-    if any(_inside(path, [w]) for w in rec.get("worktrees") or []):
+    if rec.get("report_root"):
+        try:
+            report_path(os.path.dirname(rec["report_root"]), path)
+        except ValueError as exc:
+            return path, None, [str(exc)]
+    elif any(_inside(path, [w]) for w in rec.get("worktrees") or []):
         return path, None, ["the deliverable must be outside disposable worktrees"]
     try:
         if not os.path.isfile(path):
@@ -83,7 +101,7 @@ def checkpoint(rec):
     """Read the current deliverable and code snapshot for a human handoff."""
     path, text, _ = _read(rec)
     current = {**rec, "html_checkpoint": None}
-    issues = problems(current)
+    issues = problems(current, require_fresh=not rec.get("report_root"))
     try:
         mtime = os.stat(path).st_mtime if path and text is not None else None
     except OSError:
@@ -93,14 +111,35 @@ def checkpoint(rec):
     activity.extend(float(e.get("at") or 0) for e in rec.get("evidence") or [] if isinstance(e, dict))
     return {"path": path, "mtime": mtime, "activity_at": max(activity),
             "digest": hashlib.sha256(text.encode("utf-8")).hexdigest() if text is not None else None,
+            "spec_digest": _spec_digest(rec),
             "code": _code(rec), "valid": not issues, "problems": issues}
+
+
+def _spec_digest(rec):
+    if not rec.get("spec"):
+        return None
+    _, text, issues = _read({**rec, "deliverable": rec["spec"]})
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text and not issues else None
 
 
 def problems(rec, require_fresh=True):
     """Return actionable issues without imposing a page grammar on the HTML."""
     path, text, issues = _read(rec)
+    if rec.get("spec"):
+        _, _, spec_issues = _read({**rec, "deliverable": rec["spec"]})
+        issues += ["specification: " + issue for issue in spec_issues]
     if issues or not require_fresh:
         return issues
+    if rec.get("report_root"):
+        if rec.get("lifecycle") == "complete":
+            return []
+        saved = rec.get("html_checkpoint") or {}
+        code = _code(rec)
+        if (not saved.get("valid") or not all(code.values()) or saved.get("code") != code
+                or saved.get("digest") != hashlib.sha256(text.encode("utf-8")).hexdigest()
+                or saved.get("spec_digest") != _spec_digest(rec)):
+            return ["run handoff after reviewing the current work and task pages"]
+        return []
     try:
         mtime = os.stat(path).st_mtime
     except OSError:

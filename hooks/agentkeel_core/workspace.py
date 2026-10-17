@@ -295,6 +295,13 @@ def _rollback(repo, branch, base_sha, stage, target, owned_gitdir, stage_identit
     return errors
 
 
+def destination(repo, task, path=None):
+    if path:
+        return os.path.realpath(os.path.expanduser(path))
+    primary = _primary(repo, _common(repo))
+    return os.path.join(os.path.dirname(primary), f"{os.path.basename(primary)}-{task}")
+
+
 def create(repo, task, session, path=None, branch=None, base=None):
     """Create a branch and linked worktree; only this call's branch/tree are rolled back."""
     if not isinstance(task, str) or not task or not isinstance(session, str) or not session:
@@ -312,8 +319,7 @@ def create(repo, task, session, path=None, branch=None, base=None):
     base_sha = _git(source, "rev-parse", "--verify", f"{base}^{{commit}}").stdout.strip()
     if not base_sha:
         raise WorkspaceError(f"base {base!r} does not resolve to a commit")
-    target = os.path.realpath(os.path.expanduser(path)) if path else \
-        os.path.join(os.path.dirname(primary), f"{os.path.basename(primary)}-{task}")
+    target = destination(repo, task, path)
     target = os.path.abspath(target)
     if target == primary or target.startswith(primary + os.sep):
         raise WorkspaceError("worktree path must be outside the primary checkout")
