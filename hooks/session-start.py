@@ -54,6 +54,8 @@ def _owners(environ):
                 rec = json.load(fh)
         except Exception:
             continue
+        if record.ownership_problem(rec):
+            continue
         for w in rec.get("worktrees") or []:
             owners.setdefault(os.path.realpath(w), rec.get("task") or "?")
     return owners
@@ -75,6 +77,9 @@ def where(cwd, session_id, environ=os.environ):
     rec = record.load(session_id, environ)
     if rec:
         lines.append(f"Your task: {rec.get('task')} ({rec.get('size')}; {', '.join(rec.get('permissions') or [])}).")
+        problem = record.ownership_problem(rec)
+        if problem:
+            lines.append("Task cannot authorize writes: " + problem)
     else:
         lines.append("Your task: none declared yet.")
     owners = _owners(environ)
@@ -157,6 +162,9 @@ def main():
           "remote-write, publish. Kind fix turns on the debugging guards (failed check and cause line\n"
           "before any code edit; three edit-then-fail cycles stop the loop). Status page: task.py status --html.\n"
           "AgentKeel creates the worktree for a coding task; change into the printed path. No-code has no worktree.\n"
+          "To continue in an existing linked worktree, use task.py resume <task-id> --worktree <path>\n"
+          "with --size, --allow and --deliverable. It preserves files/index and retains the tree at finish.\n"
+          "If it names prior owners, --from-session ID explicitly hands over each stopped session's claim.\n"
           "Keep one coherent HTML report outside the worktree, with visual mockups when useful. No template is required.\n"
           "Stop enforcement is not verified here; hook registration is not proof of invocation. Handoff and finish enforce HTML.\n"
           "Run handoff to validate the report, ship to advance the canonical protected branch, then finish to clean up."

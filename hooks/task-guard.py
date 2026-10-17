@@ -102,6 +102,8 @@ NO_TASK = (
     "no task is declared for this session.\n\n"
     "Declare it in one command, from your reading of the human's request, then retry:\n"
     f"  {TASK_CMD} start <task-id> --size no-code|small|large --allow <permissions> --deliverable <outside-repo.html> [--write-root <outside-repo-folder>] [--kind fix|feature|review|docs|chore]\n\n"
+    "Returning to an existing worktree? Use task.py resume <task-id> --worktree <path>\n"
+    "with --size, --allow and --deliverable instead. It reports any required --from-session handoff.\n"
     "Permissions: review (write only --write-root folders), implement, merge, push,\n"
     "distribution-build, store-submission, paid-job, remote-write, publish. Size never grants a permission.\n"
     "State your reading in your first update; ask only if the request is unclear."
@@ -150,7 +152,7 @@ def judge_edit(ev, rec, environ):
         raise Block(
             f"refusing to write {target}: it belongs to another worktree ({root}).\n"
             "Another agent may own it. Work only in this task's worktrees; if this one is yours,\n"
-            "start a task with task.py so it creates and records the worktree.")
+            "use task.py resume with an explicit ownership handoff for this existing worktree.")
     if "implement" not in perms:
         raise Block(
             f"task '{rec.get('task')}' has permissions {', '.join(sorted(perms))}: it writes only its\n"
@@ -474,6 +476,8 @@ def decide(payload, environ=os.environ):
     cwd = payload.get("cwd") or environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     session = payload.get("session_id")
     rec = record.load(session, environ) if session else None
+    if rec and record.ownership_problem(rec):
+        rec = None  # A transferred record cannot authorize edits, commits, pushes or MCP calls.
     try:
         for ev in host.events(payload, cwd):
             if ev.kind == "edit":

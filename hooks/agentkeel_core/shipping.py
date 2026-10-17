@@ -276,7 +276,10 @@ def finish(rec, environ=os.environ, keep=False, discard_ignored=False):
             # One optional executable boundary; no access to Slots' private records.
             slots = environ.get("AGENTKEEL_SLOTS", "agent-slots")
             run(owned["primary"], [slots, "release", "--worktree", owned["path"]], environ)
-        workspace.release(owned, discard_ignored=discard_ignored)
+        if owned.get("retain_on_finish"):
+            rec["workspace"] = workspace.retain(owned)
+        else:
+            workspace.release(owned, discard_ignored=discard_ignored)
         rec["worktrees"] = []
         rec.update(lifecycle="report_pending", outcome_at=time.time())
         record.save(rec, environ)

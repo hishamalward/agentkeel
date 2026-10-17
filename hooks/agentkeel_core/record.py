@@ -135,6 +135,23 @@ def save(rec, environ=os.environ):
     return path
 
 
+def ownership_problem(rec):
+    """A workspace manifest supersedes old session records, including legacy claims."""
+    from . import workspace
+    for path in rec.get("worktrees") or []:
+        if not os.path.isdir(path):
+            continue
+        try:
+            current = workspace.inspect(path)
+            if current and (current["session"] != rec.get("session_id") or current["task"] != rec.get("task")):
+                return "worktree ownership was transferred; declare your own task or explicitly resume it"
+            if current and rec.get("workspace"):
+                workspace.validate(rec["workspace"])
+        except (workspace.WorkspaceError, OSError, ValueError) as error:
+            return "worktree ownership is unavailable: " + str(error)
+    return None
+
+
 def atomic_write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")

@@ -3,8 +3,12 @@
 Declare the task from the user's request before writing:
     python3 "<task.py path>" start <task-id> --size no-code|small|large --allow <permissions> --deliverable <absolute-report.html>
 Use the path printed at session start. Size grants no permission. Medium aliases small.
-No-code owns report folders only. Every coding task gets its own worktree, created by Keel.
+No-code owns report folders only. New coding tasks get a worktree created by Keel.
 Change into the printed worktree. Optional --path, --branch and --base select its location and base.
+To return to existing work, use resume <task-id> --worktree <path> with --size, --allow and --deliverable.
+It preserves files, index and branch, resets verification, and retains the worktree at finish.
+If prior owners are reported, repeat --from-session ID for each after confirming they stopped using it.
+Release any attached runtime through its current owner before handoff. Never impersonate its session.
 Do not write code in the canonical shared checkout. Cancel preserves unfinished work and ownership records.
 
 Keep one coherent HTML report outside disposable worktrees. Include plans, progress, evidence,
@@ -30,7 +34,7 @@ that same branch without network access; it requires merge permission and no con
 require_check_before_push policy. Use PR shipping when that policy names a check. Dirty, ahead, diverged,
 unconfigured or busy canonical state stays sync_pending; never reset or autostash.
 Refresh the HTML with the ship result, then finish. Finish releases optional Slots resources,
-checks ownership/preservation/processes, and removes the worktree. Refresh the final HTML and
+checks ownership/preservation/processes, and removes newly created worktrees; resumed trees remain. Refresh the final HTML and
 retry if report_pending. --keep retains a preview explicitly. Failed stages remain retryable.
 AgentSlots is optional: dependencies and requested runtime only. No runtime means no Slots call.
 
