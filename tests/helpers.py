@@ -67,6 +67,14 @@ class RepoCase(unittest.TestCase):
     def branch(self, name, repo=None):
         git(repo or self.repo, "checkout", "-q", "-b", name)
 
+    def set_policy(self, data, repo=None):
+        from agentkeel_core import record
+        return record.save_policy(repo or self.primary, data)
+
+    def activate(self, data=None, repo=None):
+        from agentkeel_core import record
+        return record.activate(repo or self.primary, data, self.env)
+
     def declare(self, size="small", allow=("implement",), task="x", session=SESSION,
                 worktrees=None, write_roots=()):
         from agentkeel_core import record

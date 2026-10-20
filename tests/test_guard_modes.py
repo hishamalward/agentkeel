@@ -1,4 +1,4 @@
-"""Guard modes: agentkeel.json "guards" turns a refusal into a warning or switches it off."""
+"""Guard modes: private policy "guards" turns a refusal into a warning or switches it off."""
 import json
 import os
 import subprocess
@@ -10,8 +10,7 @@ from helpers import HOOKS, SESSION, RepoCase, git, run_hook
 
 class GuardModes(RepoCase):
     def modes(self, **guards):
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"guards": guards}, fh)
+        self.set_policy({"guards": guards})
 
     def test_task_guard_blocks_by_default(self):
         self.declare()  # on protected main: a write is refused

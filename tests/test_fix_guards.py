@@ -85,8 +85,7 @@ class FixGuards(RepoCase):
 
     def test_warn_mode_lets_the_edit_through(self):
         self.fix_task()
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"guards": {"fix": "warn"}}, fh)
+        self.set_policy({"guards": {"fix": "warn"}})
         out = subprocess.run([sys.executable, os.path.join(HOOKS, "task-guard.py")], input=json.dumps(self.write("src/a.py")),
                              text=True, capture_output=True, env={**os.environ, **self.env})
         self.assertEqual(out.returncode, 0, out.stderr)

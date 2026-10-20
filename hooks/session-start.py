@@ -9,7 +9,7 @@ When agentkeel arrives as a plugin, its scripts live in the plugin folder, not i
 so the instruction file cannot name them. This prints, as context for the session, the one
 command the agent needs, with this install's real path. Between the two it prints the human's
 profile (AGENTKEEL_HOME/profile.md), capped, as plain context that grants nothing. With --plugin
-it prints only in repositories that opted in with agentkeel.json. It never blocks.
+it prints only in repositories registered in private AgentKeel state. It never blocks.
 """
 import json
 import os

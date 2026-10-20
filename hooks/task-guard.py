@@ -5,7 +5,7 @@ Invariant 1, every write is bounded before it happens. This one guard reads this
 record (hooks/task.py) and judges every operation in the tool call against it:
 
   file edits (Write, Edit, NotebookEdit)
-    - agentkeel state, hook configuration and agentkeel.json are never edited by the agent
+    - agentkeel state, its private policy and hook configuration are never edited by the agent
     - a task must be declared for this session
     - the task's HTML folder is writable; code-task pages belong in its worktree's /doc
     - otherwise the target must be inside one of the task's own linked worktrees (never the
@@ -21,7 +21,7 @@ record (hooks/task.py) and judges every operation in the tool call against it:
     - force push, reset --hard, whole-tree checkout or restore, clean -f, branch -D, stash
       drop/clear/pop: refused unless the command itself carries AGENTKEEL_ALLOW_DESTRUCTIVE=1
     - distribution builds, store submissions, deploy commands and paid jobs: need their own
-      permission (classes and patterns in agentkeel_core/record.py, extended by agentkeel.json)
+      permission (classes and patterns in agentkeel_core/record.py, extended by private policy)
 
 Exit 0 allows; exit 2 blocks with the reason on stderr. A payload that is not JSON allows: a
 broken guard must never stop work on its own. What this cannot see is in the README's capability
@@ -37,7 +37,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agentkeel_core import checks, clerk, evidence, gitops, host, record, shell  # noqa: E402
 
-CONFIG_NAMES = ("agentkeel.json", "mcpclerk.json", ".mcp.json")  # native MCP config changes are human-managed
+CONFIG_NAMES = ("mcpclerk.json", ".mcp.json")  # native MCP config changes are human-managed
 CONFIG_PARTS = ((".claude", "settings.json"), (".claude", "settings.local.json"), (".claude", "hooks"),
                 (".codex", "hooks.json"), (".codex", "config.toml"), (".codex", "hooks"))
 NPX = {"npx", "bunx", "pnpx"}
@@ -88,6 +88,9 @@ def is_config(path, environ):
     parts = path.split(os.sep)
     if os.path.basename(path) in CONFIG_NAMES:
         return True
+    root = gitops.toplevel(nearest_dir(path))
+    if root and os.path.realpath(path) == record.policy_path(root):
+        return True
     for a, b in CONFIG_PARTS:
         for i in range(len(parts) - 1):
             if parts[i] == a and parts[i + 1] == b:
@@ -118,7 +121,7 @@ def judge_edit(ev, rec, environ):
     if is_config(target, environ):
         raise Block(
             f"refusing to edit {target}.\n"
-            "agentkeel state, hook configuration and agentkeel.json change only through the\n"
+            "agentkeel state, its private policy and hook configuration change only through the\n"
             "installer or by the human. If the human asked for this change, tell them the exact\n"
             "edit and let them make it.")
     if not rec:
@@ -234,7 +237,7 @@ def human_task_command(argv):
     """Human-only task commands that this guard still reserves."""
     for i, tok in enumerate(argv):
         if os.path.basename(tok) == "task.py":
-            for word in ("open", "import", "release", "reopen", "discard"):
+            for word in ("init", "deactivate", "open", "import", "release", "reopen", "discard"):
                 if word in argv[i + 1:i + 4]:
                     return word
     return None
@@ -413,6 +416,10 @@ def judge_command(command, cwd, rec, environ, session, line=None):
             continue
         judge_session_claim(sc, session)
         human = human_task_command(sc.argv)
+        if human in ("init", "deactivate"):
+            raise Block(
+                f"`task.py {human}` changes this machine's AgentKeel activation or private policy. "
+                "The human must run it directly.")
         if human == "discard":
             raise Block("`task.py discard` is the human's command: it deletes cancelled task work, including unmerged changes. "
                         "Report the exact task and worktree path for the human to discard explicitly.")

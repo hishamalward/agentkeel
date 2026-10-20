@@ -1,6 +1,6 @@
 {
   "name": "agentkeel",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Task lifecycle, linked worktrees, visual HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
   "author": {
     "name": "Hisham Al-Ward"

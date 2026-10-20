@@ -1,6 +1,6 @@
 # Enforcement design and limits
 
-AgentKeel combines host hook checks with task records. The plugin runs in opted-in repositories; `task.py init` records opt-in outside the repository and preserves existing policy. A task record binds the host session to declared permissions, linked worktrees, report roots and HTML pages.
+AgentKeel combines host hook checks with task records. The plugin runs in repositories activated through `task.py init`; activation lives under `AGENTKEEL_HOME`, and policy lives in private Git metadata. Neither is a repository file. A task record binds the host session to declared permissions, linked worktrees, report roots and HTML pages.
 
 ## Normal task isolation
 
@@ -14,7 +14,7 @@ The human-operated legacy `open`, `import` and `release` commands use a separate
 
 ## MCP calls
 
-AgentKeel sends intercepted MCP calls to the MCPClerk bridge for a fail-closed judge decision. MCPClerk owns user/project catalogs and policy; AgentKeel task guard modes cannot override its refusal. If the bridge is missing or returns invalid data, the MCP call is blocked while ordinary coding work can continue. Older AgentKeel MCP policy must be explicitly migrated with `mcpclerk migrate-keel`, backed up, and removed from `agentkeel.json` and the user catalog under `AGENTKEEL_HOME` (default `~/.agentkeel`) before calls are allowed. Host-native permissions and trust remain separate. The bridge observes only intercepted calls and cannot prevent the same credentials being used through shell, scripts or browsers.
+AgentKeel sends intercepted MCP calls to the MCPClerk bridge for a fail-closed judge decision. MCPClerk owns user/project catalogs and policy; AgentKeel task guard modes cannot override its refusal. If the bridge is missing or returns invalid data, the MCP call is blocked while ordinary coding work can continue. Older AgentKeel MCP policy must be explicitly migrated with `mcpclerk migrate-keel`, backed up, and its legacy public `agentkeel.json` and user catalog under `AGENTKEEL_HOME` (default `~/.agentkeel`) removed before calls are allowed. Host-native permissions and trust remain separate. The bridge observes only intercepted calls and cannot prevent the same credentials being used through shell, scripts or browsers.
 
 ## Evidence and boundaries
 

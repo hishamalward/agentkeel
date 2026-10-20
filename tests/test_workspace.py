@@ -210,8 +210,7 @@ class Workspace(RepoCase):
         Path(self.repo, ".gitignore").write_text(".venv/\nx.pyc\n.env\n.venv-backup/\n")
         git(self.repo, "add", ".gitignore")
         git(self.repo, "commit", "-qm", "ignore local files")
-        Path(self.primary, "agentkeel.json").write_text(json.dumps({
-            "disposable_ignored": [".venv", "x.pyc"]}))
+        self.set_policy({"disposable_ignored": [".venv", "x.pyc"]})
         manifest = self.create()
         for name in (".venv/bin/python", "x.pyc", ".env", ".venv-backup/data"):
             path = Path(self.path, name)
@@ -231,7 +230,7 @@ class Workspace(RepoCase):
         manifest = self.create()
         for value in (".venv", [""], ["."], [".."], ["/tmp"], ["../data"], ["*"], [None]):
             with self.subTest(value=value):
-                Path(self.primary, "agentkeel.json").write_text(json.dumps({"disposable_ignored": value}))
+                self.set_policy({"disposable_ignored": value})
                 with self.assertRaisesRegex(workspace.WorkspaceError, "disposable_ignored"):
                     self.release(manifest)
                 self.assertTrue(Path(self.path).is_dir())

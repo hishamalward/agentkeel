@@ -112,7 +112,7 @@ class Status(RepoCase):
 
 class Init(RepoCase):
     task = TaskCommand.task
-    """task.py init: opt in without overwriting policy; installation, opt-in and trust apart."""
+    """task.py init: private activation and policy; installation, opt-in and trust apart."""
 
     def setUp(self):
         super().setUp()
@@ -120,34 +120,39 @@ class Init(RepoCase):
         self.codex_dir = os.path.join(self.tmp, "codex-home")
         os.makedirs(os.path.join(self.claude_dir, "plugins")); os.makedirs(self.codex_dir)
         self.env.update({"CLAUDE_CONFIG_DIR": self.claude_dir, "CODEX_HOME": self.codex_dir})
-        self.policy = os.path.join(self.primary, "agentkeel.json")
+        from agentkeel_core import record
+        self.policy = record.policy_path(self.primary)
         self.with_bin()  # no real claude or codex: every host fact in these tests is staged
 
-    def init(self):
-        return self.task("init", cwd=self.primary)
+    def init(self, *extra):
+        return self.task("init", *extra, cwd=self.primary)
 
     def commits(self):
         return subprocess.run(["git", "-C", self.primary, "rev-list", "--all", "--count"],
                               capture_output=True, text=True).stdout.strip()
 
-    def test_first_init_creates_the_file_registers_and_does_not_commit(self):
+    def test_first_init_creates_only_private_state(self):
         self.with_bin()
         self.fake_cli("claude", "[]")
         self.fake_cli("codex", "No plugins found in marketplace `agentkeel`.\n")
-        before = self.commits()
+        before = (self.commits(), subprocess.run(
+            ["git", "-C", self.primary, "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True, text=True).stdout)
         out = self.init()
         self.assertEqual(out.returncode, 0, out.stderr)
         with open(self.policy) as fh:
             self.assertEqual(json.load(fh), {})
-        self.assertEqual(self.commits(), before)
-        self.assertIn("??", subprocess.run(["git", "-C", self.primary, "status", "--porcelain", "agentkeel.json"],
-                                           capture_output=True, text=True).stdout)
+        after = (self.commits(), subprocess.run(
+            ["git", "-C", self.primary, "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True, text=True).stdout)
+        self.assertEqual(after, before)
         with open(os.path.join(self.home, "opted-in.json")) as fh:
             self.assertEqual(len(json.load(fh)), 1)
-        for text in ("created agentkeel.json", "protected branches: main, master",
+        for text in ("created privately", "protected branches: main, master",
                      "require_check_before_push", "plugin not installed: claude plugin install",
-                     "codex plugin add agentkeel@agentkeel", "git add agentkeel.json"):
+                     "codex plugin add agentkeel@agentkeel"):
             self.assertIn(text, out.stdout)
+        self.assertNotIn("git add", out.stdout)
 
     def test_the_opt_in_reaches_a_worktree_without_a_commit(self):
         from agentkeel_core import record
@@ -158,25 +163,47 @@ class Init(RepoCase):
         self.assertFalse(record.plugin_inactive(["--plugin"], payload, {"AGENTKEEL_HOME": self.home}))
 
     def test_repeating_init_keeps_an_existing_policy_byte_for_byte(self):
-        text = '{"protected_branches": ["release"], "docs": "html"}\n'
-        with open(self.policy, "w") as fh:
-            fh.write(text)
+        self.set_policy({"protected_branches": ["release"], "docs": "html"})
+        with open(self.policy, "rb") as fh:
+            before = fh.read()
         for _ in range(2):
             out = self.init()
             self.assertEqual(out.returncode, 0, out.stderr)
-            self.assertIn("kept the existing agentkeel.json (keys: docs, protected_branches)", out.stdout)
-        with open(self.policy) as fh:
-            self.assertEqual(fh.read(), text)
+            self.assertIn("kept privately", out.stdout)
+        with open(self.policy, "rb") as fh:
+            self.assertEqual(fh.read(), before)
         self.assertIn("protected branches: release", out.stdout)
-        self.assertNotIn('HTML work records ("docs"', out.stdout)
 
-    def test_a_malformed_policy_is_refused_and_left_alone(self):
-        with open(self.policy, "w") as fh:
-            fh.write("{not json")
-        out = self.init()
-        self.assertEqual(out.returncode, 2); self.assertIn("left as it is", out.stderr)
+    def test_policy_import_requires_a_json_object_and_preserves_existing_policy(self):
+        self.set_policy({"protected_branches": ["release"]})
+        source = os.path.join(self.tmp, "policy.json")
+        with open(source, "w") as fh:
+            fh.write("[1, 2]")
+        out = self.init("--policy", source)
+        self.assertEqual(out.returncode, 2); self.assertIn("not a JSON object", out.stderr)
         with open(self.policy) as fh:
-            self.assertEqual(fh.read(), "{not json")
+            self.assertEqual(json.load(fh), {"protected_branches": ["release"]})
+
+    def test_policy_import_and_deactivate_leave_repository_files_unchanged(self):
+        source = os.path.join(self.tmp, "policy.json")
+        with open(source, "w") as fh:
+            json.dump({"protected_branches": ["release"]}, fh)
+        before = subprocess.run(["git", "-C", self.primary, "status", "--porcelain", "--untracked-files=all"],
+                                capture_output=True, text=True).stdout
+        out = self.init("--policy", source)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("created privately", out.stdout)
+        with open(self.policy) as fh:
+            self.assertEqual(json.load(fh), {"protected_branches": ["release"]})
+        out = self.task("deactivate", cwd=self.primary)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("repository files unchanged", out.stdout)
+        self.assertFalse(os.path.exists(self.policy))
+        with open(os.path.join(self.home, "opted-in.json")) as fh:
+            self.assertEqual(json.load(fh), {})
+        after = subprocess.run(["git", "-C", self.primary, "status", "--porcelain", "--untracked-files=all"],
+                               capture_output=True, text=True).stdout
+        self.assertEqual(after, before)
 
     def fake_cli(self, name, stdout, code=0):
         """A host command on PATH that prints canned output."""
@@ -200,43 +227,6 @@ class Init(RepoCase):
         out = self.init().stdout
         self.assertIn("0 of 4 hooks trusted", out)
         self.assertNotIn("Python 3.11", out)
-
-    def test_a_policy_created_after_an_absence_check_is_kept_byte_for_byte(self):
-        """Regression: init checked exists() and then opened with "w", so a policy written in
-        between was replaced with {}. The exclusive create cannot replace anything."""
-        text = '{"docs": "html", "require_check_before_push": "agentkeel-required"}\n'
-        with open(self.policy, "w") as fh:
-            fh.write(text)
-        probe = ("import os, runpy, sys\n"
-                 "real = os.path.exists\n"
-                 "os.path.exists = lambda p: False if str(p).endswith('agentkeel.json') else real(p)\n"
-                 f"sys.argv = [{T!r}, 'init']\n"
-                 f"runpy.run_path({T!r}, run_name='__main__')\n")
-        env = {**os.environ, **self.env}
-        out = subprocess.run([sys.executable, "-c", probe], cwd=self.primary, capture_output=True, text=True, env=env)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        with open(self.policy) as fh:
-            self.assertEqual(fh.read(), text)
-        self.assertIn("kept the existing agentkeel.json", out.stdout)
-
-    def test_a_dangling_symlink_is_left_and_its_target_never_created(self):
-        target = os.path.join(self.tmp, "outside", "policy.json")
-        os.symlink(target, self.policy)
-        out = self.init()
-        self.assertEqual(out.returncode, 2); self.assertIn("symbolic link to a missing file", out.stderr)
-        self.assertTrue(os.path.islink(self.policy)); self.assertEqual(os.readlink(self.policy), target)
-        self.assertFalse(os.path.exists(os.path.dirname(target)))
-
-    def test_a_symlink_to_a_real_policy_is_read_and_never_written(self):
-        target = os.path.join(self.tmp, "policy.json")
-        with open(target, "w") as fh:
-            fh.write('{"protected_branches": ["release"]}')
-        os.symlink(target, self.policy)
-        out = self.init()
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("symbolic link, which init reads and never writes through", out.stdout)
-        with open(target) as fh:
-            self.assertEqual(fh.read(), '{"protected_branches": ["release"]}')
 
     def test_hosts_report_their_own_install_enable_and_version(self):
         self.with_bin()
@@ -381,96 +371,6 @@ class SessionBanner(RepoCase):
         self.assertIn(f"Where you are: {mine_owned} (a linked worktree), on branch feat/mine.", out)
         self.assertIn("Your task: mine (small; implement, merge).", out)
         self.assertIn(f"  {other_owned}  branch feat/other-task  task other-task", out)
-
-
-class SharedInstructions(RepoCase):
-    """init keeps one agentkeel block in AGENTS.md for both hosts; nothing outside it changes."""
-    task = TaskCommand.task
-
-    def setUp(self):
-        super().setUp()
-        self.bin = os.path.join(self.tmp, "bin"); os.makedirs(self.bin)
-        self.env.update({"CODEX_HOME": os.path.join(self.tmp, "codex"),
-                         "PATH": os.pathsep.join([self.bin, os.path.dirname(shutil.which("git")), "/usr/bin", "/bin"])})
-        self.agents = os.path.join(self.primary, "AGENTS.md")
-
-    def init(self):
-        out = self.task("init", cwd=self.primary)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        return out.stdout
-
-    def read(self):
-        with open(self.agents, encoding="utf-8", newline="") as fh:
-            return fh.read()
-
-    def write(self, text):
-        with open(self.agents, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text)
-
-    def test_first_init_creates_the_block_and_never_a_claude_file(self):
-        out = self.init()
-        self.assertIn("created AGENTS.md with the agentkeel block", out)
-        text = self.read()
-        self.assertTrue(text.startswith("<!-- agentkeel:start -->\n<!-- agentkeel:sha256="))
-        self.assertIn('python3 "<task.py path>" start <task-id> --size no-code|small|large --allow <permissions>', text)
-        self.assertNotIn(".claude/hooks/task.py start", text)
-        for name in ("CLAUDE.md", "CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")):
-            self.assertFalse(os.path.exists(os.path.join(self.primary, name)))
-        self.assertIn("git add agentkeel.json AGENTS.md", out)
-
-    def test_repeating_init_changes_nothing(self):
-        self.init()
-        before = self.read()
-        out = self.init()
-        self.assertEqual(self.read(), before)
-        self.assertIn("AGENTS.md has this version's agentkeel block", out)
-        self.assertNotIn("git add", out)
-
-    def test_the_users_rules_stay_byte_for_byte(self):
-        mine = "# My repo\r\n\nRules the team wrote.\n"
-        self.write(mine)
-        self.assertIn("added the agentkeel block to AGENTS.md", self.init())
-        self.assertTrue(self.read().startswith(mine))
-
-    def test_an_older_block_is_updated_and_its_surroundings_kept(self):
-        from agentkeel_core import instructions
-        before, after = "# Top\n\n", "\n## After the block\nmore rules\n"
-        self.write(before + instructions.block_for("old text\n") + after)
-        self.assertIn("updated the agentkeel block", self.init())
-        text = self.read()
-        self.assertTrue(text.startswith(before)); self.assertTrue(text.endswith(after))
-        self.assertNotIn("old text", text)
-
-    def test_an_edited_or_install_py_block_is_left_and_reported(self):
-        from agentkeel_core import instructions
-        edited = "# Top\n" + instructions.block_for("shipped text\n").replace("shipped text", "my own text")
-        legacy = "# Top\n<!-- agentkeel:start -->\nwritten by install.py\n<!-- agentkeel:end -->\n"
-        for text in (edited, legacy):
-            self.write(text)
-            self.assertIn("written by install.py or edited by hand, so init left", self.init())
-            self.assertEqual(self.read(), text)
-
-    def test_broken_markers_and_a_symlink_are_left(self):
-        broken = "<!-- agentkeel:start -->\nno end marker\n"
-        self.write(broken)
-        self.assertIn("one agentkeel marker without the other", self.init())
-        self.assertEqual(self.read(), broken)
-        os.remove(self.agents)
-        target = os.path.join(self.tmp, "elsewhere.md")
-        with open(target, "w") as fh:
-            fh.write("shared rules\n")
-        os.symlink(target, self.agents)
-        self.assertIn("symbolic link; init does not write through it", self.init())
-        with open(target) as fh:
-            self.assertEqual(fh.read(), "shared rules\n")
-
-    def test_a_claude_file_is_reported_and_left(self):
-        with open(os.path.join(self.primary, "CLAUDE.md"), "w") as fh:
-            fh.write("old rules\n")
-        out = self.init()
-        self.assertIn("CLAUDE.md exists: Claude Code loads it instead of AGENTS.md", out)
-        with open(os.path.join(self.primary, "CLAUDE.md")) as fh:
-            self.assertEqual(fh.read(), "old rules\n")
 
 
 if __name__ == "__main__":

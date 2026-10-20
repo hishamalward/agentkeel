@@ -76,7 +76,7 @@ def all_opened(environ=os.environ):
 
 
 def writable_extra(policy_data):
-    """Declared caches from agentkeel.json "writable": absolute paths only, never a home or root."""
+    """Declared caches from private policy "writable": absolute paths only, never a home or root."""
     home = os.path.realpath(os.path.expanduser("~"))
     out = []
     for p in policy_data or []:
@@ -87,11 +87,7 @@ def writable_extra(policy_data):
 
 
 def _policy_writable(repo):
-    try:
-        with open(os.path.join(repo, "agentkeel.json")) as fh:
-            return writable_extra((json.load(fh) or {}).get("writable"))
-    except Exception:
-        return []
+    return writable_extra(record.policy_data(repo).get("writable"))
 
 
 class OpenError(Exception):
@@ -171,6 +167,7 @@ def open_task(repo, task, host, size, permissions, base=None, branch=None, path=
     record.atomic_write_json(opened_path(task, environ), rec)
     if host == "claude":
         record.atomic_write_json(session_settings_path(task, environ), claude_settings(rec))
+    record.activate(clone, record.policy_data(top), environ)
     return rec
 
 
@@ -406,6 +403,8 @@ def release_task(task, discard=False, environ=os.environ):
         acc = _fixed_git(repo, "rev-parse", "--verify", "-q", accepted_ref(task)).stdout.strip()
         if acc and _fixed_git(repo, "for-each-ref", "--contains", acc, "--format=x", "refs/heads").stdout.strip():
             _fixed_git(repo, "update-ref", "-d", accepted_ref(task))  # a branch keeps it now
+        if os.path.isdir(clone):
+            record.deactivate(clone, environ)
         shutil.rmtree(clone, ignore_errors=True)
         shutil.rmtree(rec["scratch"], ignore_errors=True)
         for sid in rec.get("sessions") or []:

@@ -22,7 +22,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentkeel_core import evidence, gitops, hostcheck, instructions, isolation, record, delivery, workspace, shipping  # noqa: E402
+from agentkeel_core import evidence, gitops, hostcheck, isolation, record, delivery, workspace, shipping  # noqa: E402
 
 TASK_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -401,73 +401,28 @@ def record_interpreter(environ):
 
 
 def init(args, environ):
-    """Opt the repository in without touching an existing policy, and say what that does and
-    does not turn on. Installation (the host has the plugin), opt-in (this repository) and trust
-    (Codex: the human trusted the hooks in /hooks) are reported separately. It never commits."""
+    """Opt the repository in using private local state only. It never edits repository files."""
     top = gitops.toplevel(os.getcwd())
     if not top:
         return fail("not inside a git repository: run init from the repository you want to opt in")
     top = os.path.realpath(top)
-    path = os.path.join(top, "agentkeel.json")
-    rows = []
-    # One exclusive create: an entry that appears at any moment before it, a dangling symbolic
-    # link included, makes it fail, so nothing that exists is ever replaced or written through.
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
-    except FileExistsError:
-        fd = None
-    except OSError as e:
-        return fail(f"could not create agentkeel.json ({e}); nothing was written")
-    if fd is not None:
-        with os.fdopen(fd, "w") as fh:
-            fh.write("{}\n")
-        data, created = {}, True
-        rows.append(("policy", "created agentkeel.json with {}: the defaults below"))
-    else:
-        link = os.path.islink(path)
-        if link and not os.path.exists(path):
-            return fail("agentkeel.json is a symbolic link to a missing file. It was left as it is, and\n"
-                        "nothing was created at its target; replace it with a real file by hand.")
+    data = None
+    if args.policy:
+        path = os.path.realpath(os.path.expanduser(args.policy))
         try:
             with open(path) as fh:
                 data = json.load(fh)
             if not isinstance(data, dict):
                 raise ValueError("not a JSON object")
-        except Exception as e:
-            return fail(f"agentkeel.json exists but is not a JSON object ({e}). It was left as it is;\n"
-                        "fix it by hand, then run init again.")
-        created = False
-        keys = ", ".join(sorted(data)) or "none set, so the defaults apply"
-        rows.append(("policy", f"kept the existing agentkeel.json (keys: {keys})"
-                     + ("; it is a symbolic link, which init reads and never writes through" if link else "")))
-    status, detail = instructions.ensure(top)
-    rows.append(("agents", {
-        "created": "created AGENTS.md with the agentkeel block: the shared instructions for Claude Code and Codex",
-        "added": "added the agentkeel block to AGENTS.md; nothing outside the block changed",
-        "updated": "updated the agentkeel block in AGENTS.md to this version; nothing outside it changed",
-        "current": "AGENTS.md has this version's agentkeel block",
-        "edited": "the agentkeel block in AGENTS.md was written by install.py or edited by hand, so init left\n"
-                  "it as it is. To take this version's text, delete the block (both markers) and run init again",
-        "broken": "AGENTS.md has one agentkeel marker without the other, or out of order; init left it. Fix\n"
-                  "the markers by hand, then run init again",
-    }.get(status, detail)))
-    conflicts = instructions.claude_conflicts(top)
-    if conflicts:
-        rows.append(("conflict", ", ".join(conflicts) + " exists: Claude Code loads it instead of AGENTS.md, so the\n"
-                     "shared instructions are hidden from Claude. Move its content into AGENTS.md and delete it, or\n"
-                     "add the line @AGENTS.md to it. init does not touch it"))
-    common = gitops.common_dir(top) or top
-    reg_path = os.path.join(record.home(environ), "opted-in.json")
-    os.makedirs(os.path.dirname(reg_path), exist_ok=True)
-    with record.locked(reg_path):
-        try:
-            with open(reg_path) as fh:
-                registry = json.load(fh)
-        except Exception:
-            registry = {}
-        new = common not in registry
-        registry.setdefault(common, int(time.time()))
-        record.atomic_write_json(reg_path, registry)
+        except (OSError, ValueError, UnicodeError) as error:
+            return fail(f"policy file is unavailable or malformed ({error})")
+    had_policy = os.path.exists(record.policy_path(top))
+    try:
+        new, reg_path, private = record.activate(top, data, environ)
+    except (OSError, ValueError) as error:
+        return fail(str(error))
+    policy_action = "updated" if data is not None and had_policy else "created" if not had_policy else "kept"
+    rows = [("policy", policy_action + f" privately in {private}")]
     rows.append(("opt-in", ("registered" if new else "already registered")
                  + f" in {reg_path}: on every host with the plugin, the guards act in this repository and"
                  " all its worktrees, before any commit"))
@@ -521,14 +476,27 @@ def init(args, environ):
     if x["project_install"]:
         state += "; a project install is in .codex/hooks.json"
     rows.append(("codex", state))
-    if created or status in ("created", "added", "updated"):
-        rows.append(("next", "share the policy and instructions through your normal workflow, for example:\n"
-                     "git add agentkeel.json AGENTS.md && git commit -m \"Opt in to AgentKeel\" -- agentkeel.json AGENTS.md"))
     width = max(len(k) for k, _ in rows)
     rows = [(k, v.replace("\n", "\n" + " " * (width + 4))) for k, v in rows]
     print(f"agentkeel init: {top}")
     for k, v in rows:
         print(f"  {k.ljust(width)}  {v}")
+    return 0
+
+
+def deactivate(args, environ):
+    top = gitops.toplevel(os.getcwd())
+    if not top:
+        return fail("not inside a git repository: run deactivate from the repository you want to opt out")
+    top = os.path.realpath(top)
+    try:
+        registered, removed, registry, private = record.deactivate(top, environ)
+    except (OSError, ValueError) as error:
+        return fail(str(error))
+    print(f"agentkeel deactivate: {top}")
+    print("  opt-in  " + (f"removed from {registry}" if registered else f"not registered in {registry}"))
+    print("  policy  " + (f"deleted {private}" if removed else f"none at {private}"))
+    print("  repository files unchanged")
     return 0
 
 
@@ -705,7 +673,9 @@ def main(argv=None, environ=os.environ):
     rl.add_argument("task")
     rl.add_argument("--discard", action="store_true")
     sub.add_parser("show")
-    sub.add_parser("init")
+    i = sub.add_parser("init")
+    i.add_argument("--policy", metavar="FILE", help="JSON object to store as this repository's private local policy")
+    sub.add_parser("deactivate")
     v = sub.add_parser("verify")
     v.add_argument("cmd", nargs=argparse.REMAINDER)
     sub.add_parser("cancel")
@@ -735,7 +705,7 @@ def main(argv=None, environ=os.environ):
     if argv[:1] == ["--selftest"]:
         return selftest()
     args = p.parse_args(argv)
-    handlers = {"init": init, "open": open_cmd, "import": import_cmd, "release": release_cmd,
+    handlers = {"init": init, "deactivate": deactivate, "open": open_cmd, "import": import_cmd, "release": release_cmd,
                 "start": start, "resume": start, "show": show, "verify": verify, "cancel": cancel, "discard": discard,
                 "handoff": handoff, "finish": finish, "pr": pr, "ship": ship, "status": status,
                 "cause": cause, "reopen": reopen}

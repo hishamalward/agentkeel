@@ -11,7 +11,7 @@ from helpers import GIT_ENV
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "hooks"))
-from agentkeel_core import evidence, shipping, workspace
+from agentkeel_core import evidence, record, shipping, workspace
 
 
 def git(cwd, *args):
@@ -99,9 +99,7 @@ class ShippingGit(unittest.TestCase):
 
     def pr_fixture(self):
         git(self.primary, "branch", "-m", "release")
-        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-m", "configure protected branch")
+        record.save_policy(self.primary, {"protected_branches": ["release"]})
         git(self.primary, "push", "origin", "release")
         owned = workspace.create(self.primary, "ship", "session", path=os.path.join(self.root, "task"))
         task = owned["path"]
@@ -175,7 +173,7 @@ class ShippingGit(unittest.TestCase):
         self.assertEqual(len(self.merge_calls), 1)
         self.assertIn("--admin", self.merge_calls[0])
         git(self.primary, "checkout", "main")
-        with self.assertRaisesRegex(shipping.FinishError, "protected branch changed"):
+        with self.assertRaisesRegex(shipping.FinishError, "not configured as protected"):
             shipping.ship(self.rec, 1, self.env)
         git(self.primary, "checkout", "release")
         dirty.unlink()
@@ -256,9 +254,7 @@ class ShippingGit(unittest.TestCase):
 
     def test_ship_local_fast_forwards_verified_candidate_without_remote_access(self):
         git(self.primary, "branch", "-m", "release")
-        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-m", "configure protected branch")
+        record.save_policy(self.primary, {"protected_branches": ["release"]})
         owned = workspace.create(self.primary, "local-ship", "session",
                                  path=os.path.join(self.root, "local-task"))
         task = owned["path"]
@@ -310,9 +306,7 @@ class ShippingGit(unittest.TestCase):
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), self.initial)
 
     def test_ship_local_refuses_when_policy_requires_a_named_check(self):
-        Path(self.primary, "agentkeel.json").write_text('{"require_check_before_push":"ci/build"}\n')
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-m", "require check before push")
+        record.save_policy(self.primary, {"require_check_before_push": "ci/build"})
         owned = workspace.create(self.primary, "local-check-policy", "session",
                                  path=os.path.join(self.root, "check-policy-task"))
         task = owned["path"]
@@ -335,9 +329,7 @@ class ShippingGit(unittest.TestCase):
 
     def test_pr_uses_canonical_configured_protected_branch_as_base(self):
         git(self.primary, "branch", "-m", "release")
-        Path(self.primary, "agentkeel.json").write_text('{"protected_branches":["release"]}\n')
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-m", "configure protected branch")
+        record.save_policy(self.primary, {"protected_branches": ["release"]})
         owned = workspace.create(self.primary, "base-test", "session",
                                  path=os.path.join(self.root, "base-task"))
         task = owned["path"]

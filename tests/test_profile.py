@@ -11,8 +11,7 @@ import test_task_command
 class Profile(RepoCase):
     def setUp(self):
         super().setUp()
-        with open(os.path.join(self.primary, "agentkeel.json"), "w") as fh:
-            fh.write("{}\n")
+        self.activate()
         self.path = os.path.join(self.home, "profile.md")
 
     def put(self, text):
@@ -56,7 +55,6 @@ class Profile(RepoCase):
         self.assertNotIn("profile", self.banner())
 
     def test_a_session_opened_in_its_clone_gets_it_too(self):
-        git(self.primary, "add", "agentkeel.json"); git(self.primary, "commit", "-q", "-m", "opt in")
         from agentkeel_core import isolation
         env = {"AGENTKEEL_HOME": self.home, "AGENTKEEL_SCRATCH": os.path.join(self.tmp, "scratch")}
         rec = isolation.open_task(self.primary, "t", "claude", "small", ["implement"], environ=env)

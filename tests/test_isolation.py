@@ -15,10 +15,7 @@ class OpenCase(RepoCase):
     def setUp(self):
         super().setUp()
         self.env["AGENTKEEL_SCRATCH"] = os.path.join(self.tmp, "scratch")
-        with open(os.path.join(self.primary, "agentkeel.json"), "w") as fh:
-            json.dump({"writable": ["~/.npm", "relative/ignored", "/"]}, fh)
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-q", "-m", "opt in")
+        self.activate({"writable": ["~/.npm", "relative/ignored", "/"]})
         self.clone = os.path.join(self.tmp, "primary-json-flag")
 
     def open(self, *extra, host="claude", task="json-flag"):
@@ -62,6 +59,7 @@ class Open(OpenCase):
 
     def test_the_record_names_clone_base_and_scratch(self):
         self.assertEqual(self.open().returncode, 0)
+        from agentkeel_core import record
         rec = self.opened()
         head = subprocess.run(["git", "-C", self.primary, "rev-parse", "base"], capture_output=True, text=True).stdout.strip()
         self.assertEqual((rec["clone"], rec["branch"], rec["base"], rec["base_sha"]), (self.clone, "feat/json-flag", "base", head))
@@ -69,6 +67,11 @@ class Open(OpenCase):
         self.assertTrue(os.path.isdir(rec["scratch"]))
         self.assertFalse(rec["scratch"].startswith(self.home), "the scratch folder must be outside AGENTKEEL_HOME")
         self.assertEqual(rec["writable"], [os.path.realpath(os.path.expanduser("~/.npm"))])
+        self.assertEqual(record.policy_data(self.clone),
+                         {"writable": ["~/.npm", "relative/ignored", "/"]})
+        payload = {"cwd": self.clone, "tool_name": "Write",
+                   "tool_input": {"file_path": os.path.join(self.clone, "a.py")}}
+        self.assertFalse(record.plugin_inactive(["--plugin"], payload, self.env))
 
     def test_claude_session_settings(self):
         out = self.open()
@@ -420,6 +423,8 @@ class ImportAndRelease(RepoCase):
     def test_release_after_import_deletes_everything(self):
         self.human("open", "u", "--host", "claude", "--size", "small", "--allow", "implement", "--print")
         u_clone = os.path.join(self.tmp, "primary-u")
+        from agentkeel_core import gitops
+        clone_common = gitops.common_dir(u_clone)
         git(u_clone, "commit", "-q", "--allow-empty", "-m", "U")
         u = subprocess.run(["git", "-C", u_clone, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
         self.assertEqual(self.human("import", "u", "--sha", u).returncode, 0)
@@ -431,6 +436,8 @@ class ImportAndRelease(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.home, "opened", "u.json.lock")))
         self.assertFalse(os.path.exists(os.path.join(self.home, "sessions", "u.claude.json")))
         self.assertIsNone(self.ref("refs/agentkeel/accepted/u"), "a branch keeps the work, so the ref goes")
+        with open(os.path.join(self.home, "opted-in.json")) as fh:
+            self.assertNotIn(clone_common, json.load(fh))
 
     def test_release_refuses_while_a_process_works_in_the_clone(self):
         proc = subprocess.Popen(["sleep", "30"], cwd=self.clone)

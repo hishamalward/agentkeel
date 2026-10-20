@@ -26,10 +26,7 @@ def codex_stop(cwd, session=SESSION):
 class StopReport(RepoCase):
     def setUp(self):
         super().setUp()
-        with open(os.path.join(self.primary, "agentkeel.json"), "w") as fh:
-            fh.write("{}\n")
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-q", "-m", "opt in")
+        self.activate()
         self.wt = os.path.join(self.tmp, "primary-x")
         git(self.primary, "worktree", "add", "-q", self.wt, "-b", "feat/x", "main")
 
@@ -166,10 +163,7 @@ class DeliveryStop(RepoCase):
 
     def setUp(self):
         super().setUp()
-        with open(os.path.join(self.primary, "agentkeel.json"), "w") as fh:
-            fh.write("{}\n")
-        git(self.primary, "add", "agentkeel.json")
-        git(self.primary, "commit", "-q", "-m", "opt in")
+        self.activate()
 
     def test_incomplete_checkpoint_blocks_once_then_active_stop_is_allowed(self):
         from agentkeel_core import record

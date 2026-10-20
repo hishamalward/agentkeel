@@ -100,7 +100,8 @@ class Resume(unittest.TestCase):
         git(str(tree), 'checkout', '--detach')
         self.assertNotEqual(self.resume(tree).returncode, 0)
         git(str(tree), 'checkout', '-b', 'release')
-        (self.repo / 'agentkeel.json').write_text('{"protected_branches":["main","release"]}')
+        from agentkeel_core import record
+        record.save_policy(str(self.repo), {"protected_branches": ["main", "release"]})
         self.assertNotEqual(self.resume(tree).returncode, 0)
 
     def test_finish_retains_adopted_tree_and_a_later_session_can_resume_it(self):

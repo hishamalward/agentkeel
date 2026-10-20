@@ -1,5 +1,5 @@
 {
-  "description": "agentkeel: task record and secret guards. Acts only in repositories with an agentkeel.json.",
+  "description": "agentkeel: task record and secret guards. Acts only in repositories activated in private local state.",
   "hooks": {
     "SessionStart": [
       {

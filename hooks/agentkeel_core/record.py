@@ -1,4 +1,4 @@
-"""agentkeel core: the task record, the repo policy file, approved boundaries, and the override log.
+"""agentkeel core: private task and repository state, approved boundaries, and the override log.
 
 A task record answers three separate questions (project canon, #task-record):
 
@@ -30,6 +30,7 @@ MODES = ("block", "warn", "off")
 PERMISSIONS = ("review", "implement", "merge", "push", "distribution-build", "store-submission",
                "paid-job", "remote-write", "publish")
 DEFAULT_PROTECTED = ("main", "master")
+POLICY_NAME = "agentkeel-policy.json"
 # The session id each host gives the shell commands it runs. When one agent runs inside another
 # (Codex started from a Claude Code shell), both variables are set; the nearest agent process
 # among this process's ancestors is the one actually running the command.
@@ -213,9 +214,8 @@ def _touched_dirs(payload):
 
 def plugin_inactive(argv, payload, environ=os.environ):
     """Plugin hooks run in every repository; a guard started with --plugin acts only where an act
-    lands in a repository that opted in with an agentkeel.json at its root. The opt-in is
-    remembered in AGENTKEEL_HOME/opted-in.json, so deleting the file from a shell does not switch
-    the guards off; the human removes the entry there to opt out. A project install needs none."""
+    lands in a repository registered in the private AGENTKEEL_HOME/opted-in.json. A project
+    install needs no registration because its hooks already belong to that repository."""
     if "--plugin" not in argv:
         return False
     from . import gitops
@@ -225,6 +225,8 @@ def plugin_inactive(argv, payload, environ=os.environ):
             registry = json.load(fh)
     except Exception:
         registry = {}
+    if not isinstance(registry, dict):
+        registry = {}
     seen = set()
     for d in _touched_dirs(payload):
         top = gitops.toplevel(d) if d and os.path.isdir(d) else None
@@ -232,26 +234,92 @@ def plugin_inactive(argv, payload, environ=os.environ):
             continue
         seen.add(top)
         common = gitops.common_dir(top) or os.path.realpath(top)
-        if os.path.exists(os.path.join(top, "agentkeel.json")):
-            if common not in registry:
-                with locked(reg_path):
-                    registry[common] = int(time.time())
-                    atomic_write_json(reg_path, registry)
-            return False
         if common in registry:
             return False
     return True
 
 
-def policy(root):
-    """agentkeel.json at the repository root: protected branches and extra command classes."""
-    data = {}
-    if root:
+def policy_path(root):
+    """The private policy shared by every linked worktree of `root`."""
+    if not root:
+        return None
+    from . import gitops
+    common = gitops.common_dir(root)
+    return os.path.join(common, POLICY_NAME) if common else None
+
+
+def policy_data(root):
+    path = policy_path(root)
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_policy(root, data):
+    if not isinstance(data, dict):
+        raise ValueError("policy must be a JSON object")
+    path = policy_path(root)
+    if not path:
+        raise ValueError("not inside a Git repository")
+    atomic_write_json(path, data)
+    return path
+
+
+def activate(root, data=None, environ=os.environ):
+    """Register one repository locally and create or update its private policy."""
+    from . import gitops
+    common = gitops.common_dir(root)
+    if not common:
+        raise ValueError("not inside a Git repository")
+    path = os.path.join(home(environ), "opted-in.json")
+    with locked(path):
         try:
-            with open(os.path.join(root, "agentkeel.json")) as fh:
-                data = json.load(fh) or {}
+            with open(path) as fh:
+                registry = json.load(fh)
+            if not isinstance(registry, dict):
+                registry = {}
         except Exception:
-            data = {}
+            registry = {}
+        new = common not in registry
+        registry.setdefault(common, int(time.time()))
+        atomic_write_json(path, registry)
+    private = policy_path(root)
+    if data is not None or not os.path.exists(private):
+        save_policy(root, data or {})
+    return new, path, private
+
+
+def deactivate(root, environ=os.environ):
+    """Remove one repository's local registration and private policy."""
+    from . import gitops
+    common = gitops.common_dir(root)
+    if not common:
+        raise ValueError("not inside a Git repository")
+    path = os.path.join(home(environ), "opted-in.json")
+    with locked(path):
+        try:
+            with open(path) as fh:
+                registry = json.load(fh)
+            if not isinstance(registry, dict):
+                registry = {}
+        except Exception:
+            registry = {}
+        registered = common in registry
+        registry.pop(common, None)
+        atomic_write_json(path, registry)
+    private = policy_path(root)
+    removed = bool(private and os.path.lexists(private))
+    if removed:
+        os.unlink(private)
+    return registered, removed, path, private
+
+
+def policy(root):
+    """Private repository policy: protected branches and extra command classes."""
+    data = policy_data(root)
     protected = set(data.get("protected_branches") or DEFAULT_PROTECTED)
     commands = {k: list(v) for k, v in DEFAULT_COMMANDS.items()}
     for k, v in (data.get("commands") or {}).items():
@@ -267,7 +335,7 @@ def policy(root):
 
 
 def guard_mode(name, cwd):
-    """block, warn or off for one guard, from agentkeel.json of the repository `cwd` is in.
+    """block, warn or off for one guard, from the private policy of the repository `cwd` is in.
     Outside any repository, or with no setting, a guard blocks."""
     from . import gitops
     try:

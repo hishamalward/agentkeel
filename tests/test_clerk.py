@@ -166,8 +166,7 @@ class GuardBridge(RepoCase):
         self.assertEqual(request["project_dir"], self.repo)
 
     def test_mcp_denial_cannot_be_softened_by_task_or_mcpclerk_modes(self):
-        Path(self.repo, "agentkeel.json").write_text(json.dumps({"guards": {"task": "off",
-                                                                           "mcpclerk": "off"}}))
+        self.set_policy({"guards": {"task": "off", "mcpclerk": "off"}})
         deny = executable(Path(self.tmp) / "deny", f"import json\nprint(json.dumps({decision(False)!r}))\n")
         payload = {"tool_name": "mcp__unknown__read", "cwd": self.repo, "session_id": SESSION,
                    "tool_input": {}}

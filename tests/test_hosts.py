@@ -255,13 +255,12 @@ class PluginOptIn(RepoCase):
                              env={**os.environ, **self.env})
         return out.returncode, out.stdout
 
-    def test_plugin_guards_are_inert_without_agentkeel_json(self):
+    def test_plugin_guards_are_inert_until_private_activation(self):
         p = claude_write(self.repo, "d.py")
         self.assertEqual(self.run_plugin("task-guard.py", p)[0], 0)
         self.assertEqual(self.run_plugin("secret-guard.py", claude_bash(self.repo, "cat .env"))[0], 0)
         self.assertEqual(self.run_plugin("session-start.py", fixture("codex", "session-start") | {"cwd": self.repo})[1], "")
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            fh.write("{}\n")
+        self.activate()
         self.assertEqual(self.run_plugin("task-guard.py", p)[0], 2)
         self.assertEqual(self.run_plugin("secret-guard.py", claude_bash(self.repo, "cat .env"))[0], 2)
         out = self.run_plugin("session-start.py", fixture("codex", "session-start") | {"cwd": self.repo})[1]
@@ -322,8 +321,7 @@ class PluginScope(RepoCase):
 
     def setUp(self):
         super().setUp()
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            fh.write("{}\n")
+        self.activate()
         self.outside = os.path.join(self.tmp, "outside"); os.makedirs(self.outside)
 
     def test_opt_in_follows_the_target_not_the_session_folder(self):
@@ -333,10 +331,16 @@ class PluginScope(RepoCase):
         no_task = claude_write(self.outside, os.path.join(self.repo, "src", "a.py"), session="no-task-session")
         self.assertEqual(self.run_plugin("task-guard.py", no_task), 2)
 
-    def test_deleting_agentkeel_json_does_not_switch_the_guards_off(self):
+    def test_a_public_marker_does_not_control_activation(self):
         self.declare(); self.branch("feat/x")
         self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)
+        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
+            fh.write("{}\n")
+        from agentkeel_core import record
+        record.deactivate(self.repo, self.env)
+        self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 0)
         os.remove(os.path.join(self.repo, "agentkeel.json"))
+        self.activate()
         self.assertEqual(self.run_plugin("task-guard.py", codex_bash(self.repo, "git push origin main")), 2)
 
 

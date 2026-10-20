@@ -29,11 +29,13 @@ class NoTask(RepoCase):
 
 
 class SessionBinding(RepoCase):
-    def test_allowed_commit_marks_report_due_and_discard_is_human_only(self):
+    def test_allowed_commit_marks_report_due_and_local_state_commands_are_human_only(self):
         self.declare(); self.branch("feat/x")
         self.assertEqual(self.hook(self.bash("git commit -m message -- file.py"))[0], 0)
         self.assertGreater(self.record().get("code_changed_at", 0), 0)
-        self.assertEqual(self.hook(self.bash("python3 task.py discard x --worktree /tmp/work"))[0], 2)
+        for command in ("python3 task.py init", "python3 task.py deactivate",
+                        "python3 task.py discard x --worktree /tmp/work"):
+            self.assertEqual(self.hook(self.bash(command))[0], 2, command)
 
     def test_second_session_cannot_use_first_sessions_task(self):
         self.declare(); self.branch("feat/x")
@@ -53,11 +55,13 @@ class SessionBinding(RepoCase):
 
 class ProtectedConfig(RepoCase):
     def test_hook_config_and_state_never_edited_by_the_agent(self):
+        from agentkeel_core import record
         for rel in (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/task-guard.py",
-                    ".codex/hooks.json", ".codex/config.toml", "agentkeel.json"):
+                    ".codex/hooks.json", ".codex/config.toml", record.policy_path(self.repo)):
             self.assertEqual(self.hook(self.write(rel))[0], 2, rel)
         self.declare(); self.branch("feat/x")
         self.assertEqual(self.hook(self.write(".claude/settings.json"))[0], 2)
+        self.assertEqual(self.hook(self.write("src/agentkeel-policy.json"))[0], 0)
         rec = os.path.join(self.home, "tasks", SESSION + ".json")
         code, err = self.hook(self.write(rec, content="{}"))
         self.assertEqual(code, 2); self.assertIn("installer or by the human", err)
@@ -130,8 +134,7 @@ class Branches(RepoCase):
         self.assertFalse(os.path.exists(wt))
 
     def test_protected_branches_from_policy_file(self):
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"protected_branches": ["main", "release"]}, fh)
+        self.set_policy({"protected_branches": ["main", "release"]})
         self.declare(); self.branch("release")
         self.assertEqual(self.hook(self.write("src/a.py"))[0], 2)
 
@@ -317,8 +320,7 @@ class CommandClasses(RepoCase):
             self.assertEqual(self.hook(self.bash(c))[0], 0, c)
 
     def test_paid_job_patterns_from_policy_file(self):
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"commands": {"paid-job": [r"^npx tsx scripts/eval-"]}}, fh)
+        self.set_policy({"commands": {"paid-job": [r"^npx tsx scripts/eval-"]}})
         self.declare(allow=("implement",))
         self.assertEqual(self.hook(self.bash("npx tsx scripts/eval-run.ts"))[0], 2)
         self.declare(allow=("implement", "paid-job"))
@@ -494,14 +496,13 @@ sys.exit(1)
 
 
 class PushGate(RepoCase):
-    """agentkeel.json require_check_before_push: an agent ships only a commit whose check passed."""
+    """Private require_check_before_push policy: only a commit whose check passed ships."""
 
     def setUp(self):
         super().setUp()
         self.branch("feat/x")
         git(self.repo, "remote", "add", "origin", "https://github.com/someone/somerepo.git")
-        with open(os.path.join(self.repo, "agentkeel.json"), "w") as fh:
-            json.dump({"require_check_before_push": "agentkeel-required"}, fh)
+        self.set_policy({"require_check_before_push": "agentkeel-required"})
         self.gh = os.path.join(self.tmp, "fake-gh")
         with open(self.gh, "w") as fh:
             fh.write(FAKE_GH)

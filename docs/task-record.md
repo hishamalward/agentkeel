@@ -62,13 +62,15 @@ The retained tree can be resumed again. New worktrees made by `start` still use 
 - `cancel` marks the task cancelled and keeps its worktree, resources and record. Starting another task archives the cancelled ownership in the task directory; status continues to show it.
 - Human-only `discard TASK --worktree PATH` releases resources and removes that cancelled owned worktree, including ignored files and unmerged changes. It records the explicit discard and refuses an active task, changed identity or active process. It can find both current and archived cancelled records.
 - `status [--json|--html]` reads current task/worktree facts. `show` prints this session's record.
-- `init` opts the current repository into the plugin. `cause` and human-only `reopen` support fix tasks.
+- Human-only `init [--policy FILE]` activates the plugin for the current repository in private local state. Human-only `deactivate` removes that activation and policy. `cause` and human-only `reopen` support fix tasks.
 
 The legacy human-operated `open`, `import` and `release` commands manage isolated clones. They are separate from the linked-worktree flow and their OS sandbox boundary is platform dependent.
 
 ## Repository policy
 
-`agentkeel.json` configures `protected_branches`, task/secret/fix guard modes, additional command patterns, `disposable_ignored` and optional `require_check_before_push`. `init` creates `{}` only when the file is absent, preserves existing policy, updates only the managed `AGENTS.md` block and registers the repository outside it. It never commits. MCP catalog and tool policy are managed by MCPClerk; see [guardrails](guardrails.md#mcpclerk-bridge) for explicit migration and legacy cleanup requirements.
+AgentKeel keeps repository policy in the Git common directory as `agentkeel-policy.json`, so the primary checkout and all linked worktrees use one private local policy. It is never a repository file and cannot be committed. The policy configures `protected_branches`, task/secret/fix guard modes, additional command patterns, `disposable_ignored` and optional `require_check_before_push`.
+
+`init` creates the default `{}` policy without changing the worktree. `init --policy FILE` validates a JSON object and copies it into private Git metadata. It prints the exact stored path. Repeating `init` without `--policy` preserves the current policy. `deactivate` removes the private policy and the repository's entry from `AGENTKEEL_HOME/opted-in.json`; it also leaves repository files unchanged. MCP catalog and tool policy are managed by MCPClerk; see [guardrails](guardrails.md#mcpclerk-bridge) for explicit migration and legacy cleanup requirements.
 
 The task record is not a security boundary around arbitrary processes. See [guardrails](guardrails.md) and [enforcement design](enforcement-design.md).
 

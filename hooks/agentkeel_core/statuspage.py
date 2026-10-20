@@ -71,7 +71,7 @@ def render(out, rec, pol, others):
         parts.append("<h2>This session's task</h2><p>none declared</p>")
     parts.append("<h2>Guard modes</h2><table><tr><th>Guard</th><th>Mode</th></tr>" + "".join(
         f"<tr><td>{_e(g)}</td><td><span class=\"pill{' no' if m in ('off', 'pass') else ' warn' if m == 'warn' else ''}\">{_e(m)}</span></td></tr>"
-        for g, m in sorted((pol.get("guards") or {}).items())) + "</table><p>Set in agentkeel.json, <code>\"guards\": {\"task\": \"warn\"}</code>; missing means block. MCP policy is managed by MCPClerk.</p>")
+        for g, m in sorted((pol.get("guards") or {}).items())) + "</table><p>Set in the repository's private local policy, <code>\"guards\": {\"task\": \"warn\"}</code>; missing means block. MCP policy is managed by MCPClerk.</p>")
     parts.append("<h2>Host Stop enforcement</h2><table><tr><th>Host</th><th>Status</th></tr>" + _rows([
         (host, "Stop enforcement not verified here; handoff/finish enforce HTML")
         for host in ("Claude Code", "Codex")])

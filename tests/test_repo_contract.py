@@ -14,11 +14,10 @@ class RepoContract(unittest.TestCase):
                  for f in fs if f in ("CLAUDE.md", "CLAUDE.local.md")]
         self.assertEqual(found, [])
 
-    def test_agents_fragment_is_at_most_60_lines(self):
-        path = os.path.join(ROOT, "templates", "AGENTS.agentkeel.md")
-        with open(path, encoding="utf-8") as fh:
-            n = len(fh.read().rstrip("\n").split("\n"))
-        self.assertLessEqual(n, 60, f"{path} is {n} lines")
+    def test_no_public_agentkeel_policy_or_instruction_fragment(self):
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "agentkeel.json")))
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "templates", "AGENTS.agentkeel.md")))
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "hooks", "agentkeel_core", "instructions.py")))
 
     def test_no_em_dashes_anywhere(self):
         bad = []

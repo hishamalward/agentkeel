@@ -11,7 +11,7 @@
       "displayName": "AgentKeel",
       "source": "./",
       "description": "Task lifecycle, linked worktrees, visual HTML checkpoints, and permissioned delivery for Claude Code and Codex.",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "author": {
         "name": "Hisham Al-Ward"
       },
