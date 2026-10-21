@@ -717,10 +717,10 @@ $ python3 task.py start metro-fix --path ../ma-metro-fix …
 <tr><th>Item</th><th>Done</th><th>Note</th></tr>
 <tr><td>Plugin off, deny/ask rules, CLAUDE.md</td><td>✓</td><td><code>~/.claude/settings.json</code>; plugin uninstalled; marketplace entry kept.</td></tr>
 <tr><td>GitHub ruleset on main</td><td>✗</td><td><code>gh</code> not logged in on this machine, and the deploy reference says the private repo on GitHub Free has no branch protection. Until then the deny rule is the only guard.</td></tr>
-<tr><td><code>scripts/workstream</code> + AGENTS.md + reference pages</td><td>✓</td><td>Uncommitted in music_analytics; self-test passes; <code>agentkeel.json</code> removed; <code>mcpclerk.json</code> left in place.</td></tr>
-<tr><td>AgentSlots decoupled</td><td>✓</td><td>Uncommitted in agent-slots; 92 tests green. Vendored copy in music_analytics untouched.</td></tr>
+<tr><td><code>scripts/workstream</code> + AGENTS.md + reference pages</td><td>✓</td><td>Branch <code>feat/workstream</code> pushed; PR and merge pending <code>gh auth login</code>. Self-test passes; <code>agentkeel.json</code> removed; <code>mcpclerk.json</code> left in place.</td></tr>
+<tr><td>AgentSlots decoupled</td><td>✓</td><td>Branch <code>chore/drop-agentkeel-coupling</code> pushed; 92 tests green. Vendored copy in music_analytics re-installed from it (manifest entry for <code>agentkeel.json</code> dropped, managed AGENTS.md block reworded in the installer).</td></tr>
 <tr><td>State archived</td><td>✓</td><td><code>~/.agentkeel-retired-2026-10-21/</code> holds the old home, a zip, stop reports, mcpclerk state and the settings backup.</td></tr>
-<tr><td>AgentKeel repo slimmed</td><td>✓</td><td>Uncommitted; old code deleted in the working tree. Tag the previous commit before committing.</td></tr>
+<tr><td>AgentKeel repo slimmed</td><td>✓</td><td>Branch <code>feat/workstream-1.0</code> pushed; <code>v0.12.0</code> tags the last hook release on the remote.</td></tr>
 </table></div>
 
 <footer>
