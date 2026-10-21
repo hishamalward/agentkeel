@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# workstream: one git worktree per stream of work, as a sibling of the repository.
+#   workstream new <slug> [--type feat] [--base main] [--service NAME ...] [--prepare]
+#   workstream ls
+#   workstream done <slug> [--force]
+#   workstream selftest
+# The path is computed from the repository root, never from the shell's cwd, so a tree can
+# never be nested. Runtime resources are attached only when --service/--prepare is given and
+# the repository has scripts/agent-slots (AgentSlots); otherwise the tree is bare.
+set -euo pipefail
+SELF=$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+
+die() { echo "workstream: $*" >&2; exit 1; }
+
+primary() {  # root of the main checkout, from inside any worktree of the repo
+  local common; common=$(git rev-parse --git-common-dir 2>/dev/null) || die "not inside a git repository"
+  (cd "$common/.." && pwd -P)
+}
+
+prefix() {  # sibling folder prefix: AGENT_WORKTREE_PREFIX from .agent-slots.conf, else "<repo>-"
+  local p="$1" v
+  v=$(sed -n 's/^AGENT_WORKTREE_PREFIX=//p' "$p/.agent-slots.conf" 2>/dev/null | head -1 | tr -d "\"'")
+  echo "${v:-$(basename "$p")-}"
+}
+
+default_base() {
+  local p="$1" h
+  h=$(git -C "$p" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) && { echo "${h#origin/}"; return; }
+  git -C "$p" show-ref --verify --quiet refs/heads/main && echo main || git -C "$p" symbolic-ref --short HEAD
+}
+
+slot_of() {  # slot number recorded by AgentSlots for a worktree, or "-"
+  local marker; marker=$(git -C "$1" rev-parse --git-path agent-runtime.json 2>/dev/null) || { echo -; return; }
+  [ -f "$marker" ] && sed -n 's/.*"slot": *\([0-9]*\).*/\1/p' "$marker" | head -1 | grep . || echo -
+}
+
+cmd_new() {
+  local slug="${1:-}"; shift || true
+  [ -n "$slug" ] || die "usage: workstream new <slug> [--type feat] [--base main] [--service NAME ...] [--prepare]"
+  [[ "$slug" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "slug must be kebab-case: $slug"
+  local type=feat base="" services=() prepare=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --type) type="$2"; shift 2;;
+      --base) base="$2"; shift 2;;
+      --service) services+=("$2"); shift 2;;
+      --prepare) prepare=1; shift;;
+      *) die "unknown option: $1";;
+    esac
+  done
+  local p; p=$(primary)
+  [ -n "$base" ] || base=$(default_base "$p")
+  local path branch; path="$(dirname "$p")/$(prefix "$p")$slug"; branch="$type/$slug"
+  [ ! -e "$path" ] || die "already exists: $path"
+  if git -C "$p" show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$p" worktree add "$path" "$branch"
+  else
+    git -C "$p" worktree add -b "$branch" "$path" "$base"
+  fi
+  echo "✓ worktree $path on $branch (from $base)"
+  if [ ${#services[@]} -gt 0 ] || [ -n "$prepare" ]; then
+    [ -x "$p/scripts/agent-slots" ] || die "no scripts/agent-slots in $p; tree created without runtime"
+    local args=(attach --worktree "$path"); [ -n "$prepare" ] && args+=(--prepare)
+    local s; for s in "${services[@]}"; do args+=(--service "$s"); done
+    (cd "$p" && scripts/agent-slots "${args[@]}")
+  else
+    echo "  bare tree: no slot attached (add --service web|db|queue|mobile or --prepare when needed)"
+  fi
+  echo "  next: cd $path"
+}
+
+cmd_ls() {
+  local p; p=$(primary)
+  git -C "$p" worktree list --porcelain | awk '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); print w, $2} /^detached/{print w, "(detached)"}' |
+  while read -r w b; do printf '%-48s %-32s slot %s\n' "$w" "$b" "$(slot_of "$w")"; done
+}
+
+cmd_done() {
+  local slug="${1:-}"; shift || true
+  [ -n "$slug" ] || die "usage: workstream done <slug> [--force]"
+  local force=""; [ "${1:-}" = "--force" ] && force=1
+  local p; p=$(primary)
+  local path; path="$(dirname "$p")/$(prefix "$p")$slug"
+  [ -d "$path" ] || die "no worktree at $path"
+  [ "$(cd "$path" && pwd -P)" != "$p" ] || die "refusing to remove the primary checkout"
+  local branch; branch=$(git -C "$path" symbolic-ref --quiet --short HEAD || echo "")
+  local base; base=$(default_base "$p")
+  local dirty; dirty=$(git -C "$path" status --porcelain | wc -l | tr -d ' ')
+  local ahead=0; [ -n "$branch" ] && ahead=$(git -C "$p" rev-list --count "$base..$branch")
+  if [ -z "$force" ] && { [ "$dirty" -gt 0 ] || [ "$ahead" -gt 0 ]; }; then
+    die "refusing: $branch has $ahead commit(s) not on $base and $dirty modified file(s). Merge the PR first, or: workstream done $slug --force"
+  fi
+  if [ "$(slot_of "$path")" != "-" ] && [ -x "$p/scripts/agent-slots" ]; then
+    (cd "$p" && scripts/agent-slots release --worktree "$path")
+  fi
+  git -C "$p" worktree remove ${force:+--force} "$path"
+  if [ -n "$branch" ]; then git -C "$p" branch "$([ -n "$force" ] && echo -D || echo -d)" "$branch"; fi
+  echo "✓ removed $path${branch:+ and branch $branch}"
+}
+
+cmd_selftest() {  # end-to-end check in a throwaway repository
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  git -C "$tmp" init -q -b main demo && cd "$tmp/demo" && echo a > a && git add a && git -c user.name=t -c user.email=t@t commit -qm init
+  "$SELF" new metro-port --type fix >/dev/null
+  [ -d "$tmp/demo-metro-port" ] || die "selftest: tree not created as a sibling"
+  [ "$(git -C "$tmp/demo-metro-port" symbolic-ref --short HEAD)" = fix/metro-port ] || die "selftest: wrong branch"
+  mkdir -p "$tmp/demo/sub" && (cd "$tmp/demo/sub" && "$SELF" new nested-check >/dev/null)
+  [ -d "$tmp/demo-nested-check" ] || die "selftest: path depends on cwd"
+  "$SELF" ls | grep "demo-metro-port.*fix/metro-port.*slot -" >/dev/null || die "selftest: ls output"
+  echo b > "$tmp/demo-metro-port/b"
+  ! "$SELF" "done" metro-port >/dev/null 2>&1 || die "selftest: done did not refuse a dirty tree"
+  "$SELF" "done" metro-port --force >/dev/null && "$SELF" "done" nested-check >/dev/null
+  [ ! -d "$tmp/demo-metro-port" ] && ! git show-ref --verify --quiet refs/heads/fix/metro-port || die "selftest: cleanup"
+  echo "workstream selftest: PASS"
+}
+
+case "${1:-}" in
+  new) shift; cmd_new "$@";;
+  ls) cmd_ls;;
+  done) shift; cmd_done "$@";;
+  selftest) cmd_selftest;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1;;
+esac

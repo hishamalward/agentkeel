@@ -1,0 +1,729 @@
+<title>Keel Simplification Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* One reading column (1040px); diagrams are SVG boxes whose text lives in foreignObject so it wraps instead of overlapping. */
+:root{
+  --bg:#f5f7fb; --surface:#ffffff; --fg:#1b2230; --muted:#5b6577; --line:#d8dee9; --soft:#eef2f8;
+  --accent:#2f5bd3; --accent-ink:#ffffff;
+  --keep:#1f8a4c; --keep-bg:#e4f4ea; --simp:#b7791f; --simp-bg:#fbf1dc; --repl:#2f5bd3; --repl-bg:#e4ebfb; --rm:#c0392b; --rm-bg:#fbe5e2;
+  --term-bg:#151a23; --term-fg:#dfe5f0; --term-hi:#ffd166; --term-dim:#8a94a8;
+  --display:"IBM Plex Sans Condensed",-apple-system,"Segoe UI",sans-serif;
+  --body:"IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f131a; --surface:#171c25; --fg:#e6eaf2; --muted:#98a2b3; --line:#2a3240; --soft:#1d2330;
+  --accent:#7f9cf5; --accent-ink:#0f131a;
+  --keep:#4cc07a; --keep-bg:#15301f; --simp:#e0a83a; --simp-bg:#33280f; --repl:#7f9cf5; --repl-bg:#1b2745; --rm:#ef6b5c; --rm-bg:#3a1b17;
+  --term-bg:#0b0e13; --term-fg:#dfe5f0; --term-hi:#ffd166; --term-dim:#7d879a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f131a; --surface:#171c25; --fg:#e6eaf2; --muted:#98a2b3; --line:#2a3240; --soft:#1d2330;
+  --accent:#7f9cf5; --accent-ink:#0f131a;
+  --keep:#4cc07a; --keep-bg:#15301f; --simp:#e0a83a; --simp-bg:#33280f; --repl:#7f9cf5; --repl-bg:#1b2745; --rm:#ef6b5c; --rm-bg:#3a1b17;
+  --term-bg:#0b0e13; --term-fg:#dfe5f0; --term-hi:#ffd166; --term-dim:#7d879a; color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55;margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding-block:32px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--display);line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,4.5vw,44px);font-weight:600}
+h2{font-size:26px;font-weight:600;margin-top:64px;padding-top:24px;border-top:1px solid var(--line)}
+h3{font-size:19px;font-weight:600;margin-top:28px}
+p{max-width:72ch;margin:12px 0}
+ul,ol{padding-left:22px;margin:10px 0} li{margin:5px 0;max-width:80ch}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:18px;max-width:72ch}
+code,kbd{font-family:var(--mono);font-size:.88em;background:var(--soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow-x:auto;margin:14px 0}
+pre code{background:none;padding:0;font-size:inherit}
+a{color:var(--accent)}
+.chip{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+.chip.keep,.chip.ok{color:var(--keep);background:var(--keep-bg)} .chip.simp,.chip.unv,.chip.new{color:var(--simp);background:var(--simp-bg)} .chip.repl{color:var(--repl);background:var(--repl-bg)} .chip.rm{color:var(--rm);background:var(--rm-bg)}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:28px 0 8px}
+.strip .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px;min-width:0}
+.card h3{margin:6px 0 8px;font-size:21px}
+.card ul{margin:6px 0;padding-left:18px;font-size:14.5px}
+.card .meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:8px 0 0}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin:28px 0 0;padding:10px 0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
+nav.toc a{text-decoration:none;color:var(--muted)} nav.toc a:hover,nav.toc a:focus{color:var(--accent)}
+/* Tables: cells wrap (including code), fixed column shares so no column collapses. */
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:14px 0;table-layout:fixed}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+th{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:500}
+td code{white-space:normal}
+.tscroll{overflow-x:auto} .tscroll table{min-width:640px}
+.t-ev th:nth-child(1){width:20%} .t-ev th:nth-child(2){width:46%}
+.t-dec th:nth-child(1){width:28%} .t-dec th:nth-child(2){width:12%} .t-dec th:nth-child(3){width:30%}
+.t-files th:nth-child(1){width:38%} .t-files th:nth-child(3){width:9%}
+.t-risk th:nth-child(1){width:42%}
+.t-num th:nth-child(1){width:24%}
+.t-status th:nth-child(1){width:30%} .t-status th:nth-child(2){width:8%}
+.t-num td:nth-child(2){color:var(--muted)} .t-num td:nth-child(3){font-weight:500}
+.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);font-size:13px;line-height:1.55;border-radius:8px;padding:14px 16px;overflow-x:auto;margin:14px 0;border:1px solid #2a3240;white-space:pre}
+.term .t{color:var(--term-dim)} .term .hi{color:var(--term-hi)} .term .cmd{color:#9ad1ff} .term .bad{color:#ff8a7a} .term .good{color:#7ee2a8}
+.term .cap{display:block;color:var(--term-dim);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;white-space:normal}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:18px;align-items:start}
+.two>*{min-width:0}
+@media (max-width:520px){.two{grid-template-columns:1fr}}
+.note{border-left:3px solid var(--accent);padding:4px 14px;margin:16px 0;background:var(--soft);border-radius:0 6px 6px 0}
+.note p{margin:6px 0}
+.cause{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:16px 18px;margin:16px 0}
+.cause h3{margin-top:0}
+.cause .where{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin:4px 0 10px;overflow-wrap:anywhere}
+.cause ul{margin:8px 0}
+.tree{font-family:var(--mono);font-size:13px;line-height:1.5;white-space:pre;overflow-x:auto;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:10px 0}
+.tree .x{color:var(--rm);font-weight:500} .tree .k{color:var(--keep)} .tree .d{color:var(--muted)}
+.qa{display:grid;grid-template-columns:1fr;gap:12px}
+.qa .q{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.qa .q b{display:block;font-family:var(--display);font-size:17px;margin-bottom:4px}
+.qa .q ul{margin:4px 0;font-size:15px}
+ol.stages{list-style:none;padding:0;margin:16px 0;counter-reset:s}
+ol.stages li{position:relative;padding:14px 16px 14px 58px;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin:10px 0;counter-increment:s;max-width:none}
+ol.stages li::before{content:counter(s);position:absolute;left:16px;top:14px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-family:var(--display);font-weight:600;display:flex;align-items:center;justify-content:center}
+ol.stages li b{font-family:var(--display);font-size:17px}
+ol.stages li p{margin:4px 0;font-size:15px}
+.rb{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.small{font-size:14px;color:var(--muted)}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* Diagrams */
+svg{max-width:100%;height:auto;display:block}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;margin:16px 0;overflow-x:auto}
+.diagram svg{min-width:880px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted);margin:8px 4px 0}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--lg);border:1px solid var(--lb,transparent)}
+.legend span.ghost::before{background:none;border:1.5px dashed var(--muted)}
+.node rect{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.node.keel rect{fill:var(--repl-bg);stroke:var(--repl)}
+.node.rm rect{fill:var(--rm-bg);stroke:var(--rm)}
+.node.keep rect{fill:var(--keep-bg);stroke:var(--keep)}
+.node.new rect{fill:var(--simp-bg);stroke:var(--simp)}
+.node.ghost rect{fill:none;stroke:var(--muted);stroke-dasharray:6 5;opacity:.75}
+.nb{box-sizing:border-box;height:100%;padding:10px 12px;font-family:var(--body);font-size:13.5px;line-height:1.35;color:var(--fg);overflow:hidden}
+.nb b{display:block;font-family:var(--display);font-size:15.5px;font-weight:600;margin:0 0 3px}
+.nb .m{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:3px 0}
+.nb .r{display:block;font-family:var(--mono);font-size:12px;padding:2px 7px;border-radius:4px;margin:3px 0;background:var(--surface);border:1px solid var(--line)}
+.nb .cols{display:flex;gap:10px;margin:4px 0} .nb .cols>div{flex:1;min-width:0} .nb .cols>div:last-child{flex:1.3}
+.nb .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:0 6px;border-radius:999px;margin-left:6px;vertical-align:2px;font-weight:500}
+.tag.rm{color:var(--rm);background:var(--rm-bg)} .tag.keep{color:var(--keep);background:var(--keep-bg)} .tag.repl{color:var(--repl);background:var(--repl-bg)} .tag.new{color:var(--simp);background:var(--simp-bg)}
+.ghost .nb{color:var(--muted)} .ghost .nb b{color:var(--muted);text-decoration:line-through;text-decoration-thickness:1.5px}
+.e{stroke:var(--muted);fill:none;stroke-width:1.6;marker-end:url(#arr)}
+.e.bad{stroke:var(--rm);stroke-dasharray:5 4;marker-end:url(#arr-bad)}
+.e.thick{stroke-width:3}
+.el{font-family:var(--mono);font-size:11px;fill:var(--muted);paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.el.bad{fill:var(--rm)}
+#arr path{fill:var(--muted)} #arr-bad path{fill:var(--rm)}
+/* Before/after flip */
+.flip{position:relative;margin:16px 0}
+.flip>input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.flip .tabs{display:flex;gap:6px;margin-bottom:10px}
+.flip .tabs label{cursor:pointer;font-family:var(--display);font-size:15px;font-weight:600;padding:7px 16px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--surface)}
+#flip-b:checked~.tabs label[for="flip-b"],#flip-a:checked~.tabs label[for="flip-a"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#flip-b:focus-visible~.tabs label[for="flip-b"],#flip-a:focus-visible~.tabs label[for="flip-a"]{outline:2px solid var(--accent);outline-offset:2px}
+.flip .pane{display:none} #flip-b:checked~.pane-b,#flip-a:checked~.pane-a{display:block}
+.flip .diagram{margin-top:0}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+  <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+</defs></svg>
+
+<div class="wrap">
+<div class="eyebrow">Review 2026-10-20 · revised and applied 2026-10-21 · AgentKeel 0.11.0 installed, 0.12.0 in repo · AgentSlots 0.3.1 · MCPClerk 0.2.0</div>
+<h1 style="margin-top:10px">AgentKeel, AgentSlots, MCPClerk: what to keep</h1>
+<p class="lede">The friction is designed in, not a bug: <code>start</code> always creates a worktree, each worktree has exactly one owning session, and the guard refuses every write outside that tree. Recommendation: retire AgentKeel's hooks and task machinery, remove MCPClerk, keep AgentSlots as the explicit tool it already is, and carry the two things that earned their place (sibling worktree per stream, HTML pages) as one script plus an <code>AGENTS.md</code> section. The revisions below were applied on 2026-10-21; see the status table at the end.</p>
+
+<div class="strip">
+  <div class="card"><span class="chip repl">Replace</span><h3>AgentKeel</h3>
+    <ul><li>5,244 lines of hooks and CLI, 4 hooks in every session</li><li>31 tasks in 8 days, 11 cancelled</li><li>76 human overrides of its own guards</li></ul>
+    <p class="meta">keep: worktree-per-stream, HTML pages, 2 skills, CI scripts</p></div>
+  <div class="card"><span class="chip keep">Keep, decouple</span><h3>AgentSlots</h3>
+    <ul><li>Ports, database, queue schema and simulator per worktree</li><li>Real need: 3 parallel trees in music_analytics</li><li>Already user-invoked; one Keel call site</li></ul>
+    <p class="meta">optional later: shrink leases and installer</p></div>
+  <div class="card"><span class="chip rm">Remove</span><h3>MCPClerk</h3>
+    <ul><li>No catalog, no shell use, no audit trail</li><li>Only run: the 2026-10-16 migration</li><li>Bridge fails closed on every <code>mcp__*</code> call</li></ul>
+    <p class="meta">replace with native permissions.ask rules</p></div>
+</div>
+
+
+<div class="note" id="revisions">
+<p><strong>Revisions after discussion (2026-10-21), all applied:</strong></p>
+<ul>
+<li><strong>Named <code>workstream</code>, not <code>wt</code>.</strong> <code>scripts/workstream new|ls|done</code>, plus a <code>/workstream</code> skill as the agent's doorway.</li>
+<li><strong>Minimal by default.</strong> <code>new</code> creates a bare tree. Resources are opt-in (<code>--service web|db|queue|mobile</code>, <code>--prepare</code>) and the agent chooses them from the ask using the rule in the skill and AGENTS.md.</li>
+<li><strong>Shareable without a new repo.</strong> The AgentKeel repo is slimmed to the script, three skills, two templates and this page (hook-free; installable as a skills-only plugin if wanted). The last hook release stays tagged. MCPClerk: local install removed, repo kept.</li>
+<li><strong>Sanitised for publishing.</strong> No home paths, session ids or account details on this page.</li>
+</ul>
+</div>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#map">System today</a><a href="#worktrees">Why worktrees multiply</a><a href="#evidence">Evidence</a><a href="#questions">Eight questions</a><a href="#decisions">Decisions</a><a href="#target">Minimal design</a><a href="#compare">Before / after</a><a href="#migration">Migration</a><a href="#files">Files affected</a><a href="#risks">Risks</a><a href="#verified">Verified vs assumed</a><a href="#status">Status</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="map">1. The system today</h2>
+<ul>
+<li>AgentKeel is a Claude Code plugin. Its four hooks run in every session and act in repositories listed in <code>~/.agentkeel/opted-in.json</code>: one real repo (music_analytics) plus four fixtures.</li>
+<li>In that repo every tool call passes through <code>task-guard.py</code>, every Bash call also through <code>secret-guard.py</code>, and every turn end through <code>stop-report.py</code>.</li>
+<li>Measured cost: 0.10–0.14 s per hook, two hooks per Bash call.</li>
+</ul>
+
+<div class="diagram">
+<svg viewBox="0 0 1100 600" role="img" aria-label="Map of AgentKeel, AgentSlots and MCPClerk today, and how they connect to Claude Code, private state, git worktrees, GitHub and AGENTS.md">
+  <!-- Claude Code -->
+  <g class="node" transform="translate(20,20)"><rect width="230" height="215" rx="8"/><foreignObject width="230" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Claude Code session</b><span class="m">sends every hook event to the plugin</span>
+    <span class="r">SessionStart</span><span class="r">PreToolUse · matcher *</span><span class="r">PreToolUse · Bash</span><span class="r">Stop</span>
+    <span class="m">+ its own permission prompts and auto-mode classifier run regardless</span>
+  </div></foreignObject></g>
+
+  <!-- AgentKeel -->
+  <g class="node keel" transform="translate(300,20)"><rect width="360" height="320" rx="8"/><foreignObject width="360" height="320"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentKeel plugin<span class="tag repl">replace</span></b>
+    <span class="m">hooks/run.sh → python3 -I · installed 0.11.0, repo 0.12.0</span>
+    <div class="cols">
+      <div><span class="r">session-start.py</span><span class="r">task-guard.py · 560 lines</span><span class="r">secret-guard.py</span><span class="r">stop-report.py</span></div>
+      <div><span class="r">task.py CLI<br/><span class="m">start · resume · verify · cause · handoff · pr · ship · finish · cancel · status · init · discard · open · import · release</span></span></div>
+    </div>
+    <span class="m">agentkeel_core/: workspace, gitops, shell, shipping, delivery (HTML checks), record, isolation, clerk, host</span>
+    <span class="m">skills: review-page, debugging</span>
+  </div></foreignObject></g>
+
+  <!-- MCPClerk -->
+  <g class="node rm" transform="translate(780,20)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>MCPClerk<span class="tag rm">remove</span></b>
+    <span class="m">uv tool · ~/.local/bin/mcpclerk</span>
+    judge: JSON event on stdin → allowed or blocked
+    <span class="m">~/.mcpclerk: no catalog, no policy</span>
+    <span class="m">missing · 8 s timeout · bad JSON ⇒ block</span>
+  </div></foreignObject></g>
+
+  <!-- AgentSlots -->
+  <g class="node keep" transform="translate(780,200)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentSlots<span class="tag keep">keep</span></b>
+    <span class="m">bash + python · vendored in music_analytics/.agents/agentslots</span>
+    <span class="r">attach · status · release · sim-lock</span>
+    <span class="m">slot N → PORT 3000+100N · db _aN · PGBOSS_SCHEMA · AGENT_SLOT</span>
+  </div></foreignObject></g>
+
+  <!-- Bottom row -->
+  <g class="node keep" transform="translate(20,420)"><rect width="230" height="160" rx="8"/><foreignObject width="230" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Git worktrees<span class="tag keep">keep</span></b>
+    ~/music_analytics (main)<br/>~/ma-android<br/>~/ma-store-creative
+    <span class="m">created by task.py start · one owning session each · removed by force</span>
+  </div></foreignObject></g>
+
+  <g class="node keel" transform="translate(370,420)"><rect width="190" height="160" rx="8"/><foreignObject width="190" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Private state</b>
+    <span class="m">~/.agentkeel/</span>
+    tasks/ · 31 records<br/>overrides.jsonl · 76<br/>stop-reports/ · 63, unread<br/>opted-in, plan-gates, approvals
+  </div></foreignObject></g>
+
+  <g class="node" transform="translate(590,420)"><rect width="240" height="160" rx="8"/><foreignObject width="240" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>GitHub · music_analytics</b>
+    pr / ship: create and merge via gh API
+    <span class="m">CI: agentkeel-checks.yml → .github/agentkeel/*.py (repo-owned)</span>
+    <span class="m">main auto-deploys to Railway · no ruleset verified</span>
+  </div></foreignObject></g>
+
+  <g class="node" transform="translate(860,420)"><rect width="220" height="160" rx="8"/><foreignObject width="220" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AGENTS.md</b>
+    task rules · <span class="m" style="display:inline">--path ../ma-&lt;slug&gt;</span><br/>"Never nest a worktree inside a worktree" (10-04)
+    <span class="m">managed agentkeel block written by init</span>
+  </div></foreignObject></g>
+
+  <!-- Edges -->
+  <path d="M250 128 H300" class="e thick"/>
+  <text x="258" y="120" class="el">hooks</text>
+  <path d="M660 95 H780" class="e bad"/>
+  <text x="664" y="86" class="el bad">every mcp__* call</text><text x="690" y="111" class="el bad">fail-closed</text>
+  <path d="M660 270 H780" class="e"/>
+  <text x="664" y="262" class="el">release on finish</text>
+  <path d="M310 340 V500 H250" class="e"/>
+  <text x="258" y="492" class="el" transform="rotate(-90 258 492)">start creates</text>
+  <path d="M450 340 V420" class="e"/>
+  <text x="458" y="385" class="el">records · reports</text>
+  <path d="M640 340 V365 H710 V420" class="e"/>
+  <text x="718" y="412" class="el">pr / ship via gh</text>
+  <path d="M660 320 H740 V395 H970 V420" class="e"/>
+  <text x="748" y="388" class="el">init writes managed block</text>
+</svg>
+<div class="legend"><span style="--lg:var(--repl-bg);--lb:var(--repl)">AgentKeel (replace)</span><span style="--lg:var(--rm-bg);--lb:var(--rm)">Remove</span><span style="--lg:var(--keep-bg);--lb:var(--keep)">Keep</span><span style="--lg:var(--surface);--lb:var(--line)">Platform / project</span><span>dashed red: fail-closed path</span></div>
+</div>
+
+<h3>One Bash call in music_analytics today</h3>
+<div class="term"><span class="cap">Trace · PreToolUse(Bash) · 0.10–0.14 s per hook</span><span class="t">1</span>  run.sh → python3 -I task-guard.py --plugin
+   <span class="t">reads ~/.agentkeel/tasks/&lt;session&gt;.json · parses the shell line</span>
+   <span class="t">judges every git op, every command class, every mcp__ tool</span>
+<span class="t">2</span>  run.sh → python3 -I secret-guard.py --plugin
+   <span class="t">regex list: cat .env, printenv, echo $KEY …</span>
+<span class="t">3</span>  Claude Code's own permission check runs regardless
+<span class="t">4</span>  turn end: stop-report.py → ~/.agentkeel/stop-reports/&lt;hash&gt;.json   <span class="t">nothing reads these</span></div>
+
+<!-- ============================================================ -->
+<h2 id="worktrees">2. Why worktrees multiply</h2>
+<p>Four mechanisms, all in code. A–C are verified in both the installed 0.11.0 copy and the repo. D is a latent path bug that your <code>AGENTS.md</code> rule from 2026-10-04 papers over.</p>
+
+<div class="cause">
+<h3>A · <code>start</code> always creates. There is no "use the worktree I am in."</h3>
+<div class="where">hooks/task.py:118–128 · workspace.create() · identical in 0.11.0 and 0.12.0</div>
+<pre><code>if resuming or (size != "no-code" and not rec.get("worktrees")):
+    ...
+    else:
+        owned = workspace.create(cwd, args.task, session, path=target, branch=args.branch, base=args.base)</code></pre>
+<ul>
+<li>Any task that is not <code>no-code</code> and has no worktree on its record gets a new branch and tree.</li>
+<li>The session-start text and the guard's refusal text both lead with <code>start</code>.</li>
+<li><code>resume</code> exists but needs an absolute <code>--worktree</code>, a non-primary tree, a non-protected branch, and <code>--from-session</code> for every previous owner.</li>
+</ul>
+<div class="tree">$ cd ~/ma-android && claude       <span class="d"># launched inside an existing worktree</span>
+<span class="d">session-start: "Where you are: ~/ma-android (a linked worktree) …</span>
+<span class="d">               Before your first write, declare the task: task.py start …"</span>
+$ python3 task.py start fix-metro-port --size small --allow implement
+<span class="d">→ workspace.create()</span>
+  ~/music_analytics                  <span class="d">(main)</span>
+  ~/ma-android                       <span class="d">(feat/android)   ← where you were</span>
+  <span class="x">~/music_analytics-fix-metro-port   (feat/fix-metro-port)   ← new, unasked</span></div>
+</div>
+
+<div class="cause">
+<h3>B · One task per session, and a new task id means a new tree. Cancel keeps the old one.</h3>
+<div class="where">hooks/task.py:52–65 (archive previous task) · task.py:295–302 cancel: "worktree, resources and task record retained"</div>
+<ul>
+<li>One session on 2026-10-20 declared three tasks in a row. Each re-declaration archived the previous task and created a tree for the next.</li>
+<li>9 of the 11 cancelled tasks still list a worktree.</li>
+<li>Your overrides log is mostly you deleting these by force.</li>
+</ul>
+<div class="tree">~/.agentkeel/overrides.jsonl   <span class="d">(76 lines, 2026-10-06 → 10-19)</span>
+AGENTKEEL_ALLOW_DESTRUCTIVE=1 git worktree remove --force ~/ma-import-recovery
+AGENTKEEL_ALLOW_DESTRUCTIVE=1 git worktree remove --force ~/ma-marketing-launch-growth
+AGENTKEEL_ALLOW_DESTRUCTIVE=1 git -C ~/music_analytics branch -D codex/slots-release-fix-20261017
+task.py finish --discard-ignored   <span class="d">×6</span>
+task.py discard build31-library-balloon --worktree ~/ma-build31-library-balloon</div>
+</div>
+
+<div class="cause">
+<h3>C · A worktree has exactly one owner. A second agent must take it from the first.</h3>
+<div class="where">workspace.resume() 166–227 · record.ownership_problem() 139–153 · task-guard.decide(): "A transferred record cannot authorize edits"</div>
+<ul>
+<li>The manifest <code>.git/worktrees/&lt;x&gt;/agent-workspace.json</code> stores one <code>session</code>.</li>
+<li><code>resume</code> demands <code>--from-session</code> for every current owner, then rewrites the manifest. The previous session now fails <code>ownership_problem</code> and the guard refuses all its writes.</li>
+<li>Two agents in one tree is impossible by construction. <code>~/ma-android</code>: six tasks in five days, each a handoff.</li>
+</ul>
+<div class="tree">~/ma-android   <span class="d">manifest.session over time</span>
+10-14  android               session A   <span class="k">owns</span>
+10-15  android-codex-plan    session B   --from-session A   <span class="d">A: "ownership was transferred"</span>
+10-17  android-plan-commit   session C   --from-session B
+10-17  android-codex-review  session D   --from-session C
+10-19  android-plan-audit    session E   --from-session D
+10-19  android-rebase-plan   session F   --from-session E</div>
+</div>
+
+<div class="cause">
+<h3>D · <code>--path</code> resolves against the shell's cwd. <code>create</code> only forbids the primary checkout.</h3>
+<div class="where">workspace.destination() 298–302 · workspace.create() 324–325 · AGENTS.md:19 mandates --path ../ma-&lt;slug&gt; · AGENTS.md:158 "Never nest" (2026-10-04)</div>
+<pre><code>def destination(repo, task, path=None):
+    if path:
+        return os.path.realpath(os.path.expanduser(path))      # relative to os.getcwd(), not the repo
+    ...
+if target == primary or target.startswith(primary + os.sep):  # nested in a *linked* tree passes
+    raise WorkspaceError("worktree path must be outside the primary checkout")</code></pre>
+<ul>
+<li>Run from a worktree root, <code>--path ../ma-&lt;slug&gt;</code> is a sibling. Run from <code>apps/web</code> inside a worktree, it lands nested, and <code>create</code> accepts it.</li>
+<li>The guard also refuses a manual <code>git worktree add</code>, so the agent cannot correct course.</li>
+<li><strong>No nested tree exists on disk right now.</strong> The AGENTS.md rule is a symptom patch for a check that belongs in a script computing the path from the repo root.</li>
+</ul>
+<div class="tree">$ cd ~/ma-android/apps/web
+$ python3 task.py start metro-fix --path ../ma-metro-fix …
+  ~/ma-android/
+    apps/
+      web/
+      <span class="x">ma-metro-fix/        ← accepted: not under ~/music_analytics</span></div>
+</div>
+
+<div class="note"><p><strong>Extra confusion:</strong> installed plugin 0.11.0 (cached 2026-10-17) vs repo 0.12.0. <code>task.py</code> differs by 98 lines and opt-in moved from <code>agentkeel.json</code> to private state. The session-start text prints the 0.11.0 path; the AGENTS.md managed block came from an older <code>init</code>.</p></div>
+
+<!-- ============================================================ -->
+<h2 id="evidence">3. Evidence of actual use</h2>
+<p>Sources: <code>~/.agentkeel</code>, <code>~/.mcpclerk</code>, <code>~/.agent-slots</code>, shell history, the three repos, Claude Code transcripts. Transcript counts are upper bounds: sessions that read the source inflate every grep.</p>
+<div class="tscroll"><table class="t-ev">
+<tr><th>Capability</th><th>Evidence</th><th>Reading</th></tr>
+<tr><td>Task declaration (<code>start</code>)</td><td>31 records, 2026-10-13 → 10-20. 26 small, 3 large, 1 no-code. Opted-in: music_analytics only.</td><td>Used constantly, one repo. Sizes carry no information.</td></tr>
+<tr><td>Worktree creation</td><td>22 of 31 records own a tree. 11 cancelled; 9 still list a tree. Live: 2 linked trees plus a stray non-git folder <code>~/ma-provider-refresh-resilience/doc</code> from today's finish.</td><td>Trees per task id, not per stream, then removed by force.</td></tr>
+<tr><td>Guard blocks and overrides</td><td>76 overrides (69 <code>ALLOW_DESTRUCTIVE</code>, 6 <code>finish --discard-ignored</code>, 1 <code>discard</code>) across 19 sessions. Top guard texts: "no task declared" 57, "review task writes only to --write-root" 60.</td><td>Overrides are cleanup of Keel's own trees. The guard fights the workflow it created.</td></tr>
+<tr><td>HTML reports</td><td>78 pages in <code>music_analytics/docs</code>; <code>doc/</code> pages in every live tree; review-page text in AGENTS.md and session-start.</td><td><strong>Valuable, heavily used.</strong> The instruction makes it happen, not the delivery checks or the Stop block.</td></tr>
+<tr><td>verify / handoff / pr / ship / finish</td><td>107 verify entries. 5 records with a shipping block (3 PRs). 5 tasks parked in "handoff". Transcript mentions: ship 41, handoff 28, pr 7, start 1,625.</td><td>Works, used a few times a week. <code>gh pr create</code> + <code>gh pr merge --auto</code> + a ruleset give the same.</td></tr>
+<tr><td>Fix guards (<code>--kind fix</code>)</td><td>8 fix tasks; 5 cancelled.</td><td>Good method, fine as a 37-line skill without a hook.</td></tr>
+<tr><td>Stop report</td><td>63 files. Only reader is a unit test.</td><td>Write-only. Remove.</td></tr>
+<tr><td>Secret guard</td><td>0 override lines (<code>AGENTKEEL_SHOW_SECRETS</code>). Patterns: <code>cat .env</code>, <code>printenv</code>, <code>echo $KEY</code>.</td><td>Cheap, but native <code>permissions.deny</code> covers it.</td></tr>
+<tr><td>Legacy clone mode (<code>open/import/release</code>, 419 lines)</td><td><code>~/.agentkeel/opened/</code>: 4 empty locks, last 10-13. README calls it legacy.</td><td>Dead. Remove.</td></tr>
+<tr><td>MCPClerk judge</td><td><code>~/.mcpclerk</code>: no catalog, no policy; backups from one migration on 10-16. Shell history: 0 uses. Decisions not logged anywhere.</td><td>Not in use, yet <code>host.py:113</code> routes every <code>mcp__*</code> tool through it, fail-closed.</td></tr>
+<tr><td>MCPClerk config editing</td><td>0 uses. Duplicates <code>claude mcp add</code>.</td><td>Remove.</td></tr>
+<tr><td>AgentSlots attach / status</td><td>Transcript mentions: status 125, attach 118, release 19. Shell: 7 lines. One consumer: music_analytics (vendored, 64-line conf, 6 AGENTS.md references).</td><td>Used by agents for a real need: 3 trees share one Postgres and one simulator. Already explicit.</td></tr>
+<tr><td>AgentSlots ↔ Keel coupling</td><td>Two call sites: <code>shipping.py:286–290</code>, <code>task.py:334</code>, both <code>agent-slots release</code>.</td><td>One optional call. Trivial to cut.</td></tr>
+<tr><td>Project CI scripts</td><td><code>.github/agentkeel/{candidate,select_checks,pages}.py</code> via <code>agentkeel-checks.yml</code>. No plugin import.</td><td>Repo-owned. Keep.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="questions">4. The eight questions</h2>
+<div class="qa">
+<div class="q"><b>1 · Which capabilities are valuable and should remain?</b><ul>
+<li>Sibling worktree per stream, slug-derived branch</li><li>HTML spec and progress pages in <code>doc/</code> and <code>docs/</code>; the review-page and debugging method texts</li><li>AgentSlots' slot-to-env mapping and simulator lock</li><li>The CI scripts and a PR-based ship path with a required check on main</li></ul></div>
+<div class="q"><b>2 · Which duplicate the harness?</b><ul>
+<li>Worktree creation and switching: <code>EnterWorktree</code> / <code>ExitWorktree</code>, <code>Agent isolation: worktree</code></li><li>Destructive-command refusal: auto-mode <code>$defaults</code>, <code>permissions.deny</code></li><li>Secret display: deny rules on <code>cat .env</code>, <code>Read(**/.env)</code></li><li>MCP gating: per-tool prompts, <code>permissions.ask</code>, the auto-mode classifier</li><li>Stop report: branch and status already shown in context</li><li>MCPClerk config editing: <code>claude mcp</code></li></ul></div>
+<div class="q"><b>3 · Is task/worktree authorization solving a real safety problem?</b><ul>
+<li>No. Permissions are declared by the agent "from your reading of the human's request". Self-granted permissions are ceremony, not a boundary.</li><li>The one real hazard, main auto-deploying to Railway, belongs on GitHub as a ruleset plus a native deny on <code>git push … main</code>.</li><li>Paid MCP calls belong on <code>permissions.ask</code>. Human-only commands are what the harness permission prompt already is.</li></ul></div>
+<div class="q"><b>4 · Which hooks or policies create more friction than value?</b><ul>
+<li>The write guard: "no task declared", shared-checkout refusal, other-worktree refusal, explicit-path commit rule</li><li>One-owner manifest and <code>--from-session</code> handoff</li><li>Fail-closed MCP bridge</li><li>Stop block on an "incomplete" HTML page</li><li>Destructive-op refusal overridden 69 times; <code>git worktree add</code> refusal that blocks fixing a bad path by hand</li></ul></div>
+<div class="q"><b>5 · Automatic, user-invoked, or removed?</b><ul>
+<li>Automatic: nothing beyond the harness and GitHub</li><li>User-invoked: <code>scripts/workstream new|ls|done</code>, <code>agent-slots attach|release</code>, <code>gh pr create|merge</code>, <code>/review-page</code></li><li>Removed: all four hooks, task records, permissions, sizes, delivery validation, ship/finish logic, MCPClerk</li></ul></div>
+<div class="q"><b>6 · Fewer tools, scripts, or conventions?</b><ul>
+<li>Three tools become one <code>scripts/workstream</code> script, AgentSlots unchanged behind it, an AGENTS.md section, two skill files. No new framework.</li></ul></div>
+<div class="q"><b>7 · What breaks if removed?</b><ul>
+<li>Nothing that runs. Agents can write in the primary checkout when you choose; the ruleset guards main.</li><li><code>finish</code> no longer releases slots or removes trees: <code>workstream done</code> does.</li><li>Task-record history stays on disk; nothing reads it. Five tasks parked in "handoff" need no action.</li><li>The AGENTS.md managed block must be rewritten or sessions keep being told to run <code>task.py</code>.</li></ul></div>
+<div class="q"><b>8 · Smallest design that supports the workflow?</b><ul>
+<li>Section 6: conventions + one script + native permission rules + a GitHub ruleset. Zero hooks.</li></ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="decisions">5. Decisions by component</h2>
+<div class="tscroll"><table class="t-dec">
+<tr><th>Component / capability</th><th>Decision</th><th>Why</th><th>Replacement</th></tr>
+<tr><td>AgentKeel · task records, sizes, permissions</td><td><span class="chip rm">Remove</span></td><td>Self-declared; 26 of 31 "small"; no reader.</td><td>The user's prompt; AGENTS.md says when no tree is needed.</td></tr>
+<tr><td>AgentKeel · worktree creation (<code>start</code>, manifest, resume, ownership)</td><td><span class="chip repl">Replace</span></td><td>Causes A–D.</td><td><code>scripts/workstream new &lt;slug&gt;</code>; launch Claude in the tree or <code>EnterWorktree</code>; any number of agents per tree.</td></tr>
+<tr><td>AgentKeel · task-guard (writes, commits, pushes, command classes)</td><td><span class="chip rm">Remove</span></td><td>Primary friction; 69 forced overrides; blocks collaboration by design.</td><td><code>permissions.deny</code> on push-to-main and force push; GitHub ruleset; auto-mode soft_deny for eas / railway.</td></tr>
+<tr><td>AgentKeel · secret-guard</td><td><span class="chip repl">Replace</span></td><td>Useful intent, trivial patterns.</td><td>Native deny rules: <code>Bash(cat .env*)</code>, <code>Read(**/.env)</code>, <code>Bash(printenv*)</code>.</td></tr>
+<tr><td>AgentKeel · fix guards + debugging skill</td><td><span class="chip simp">Simplify</span></td><td>Method is good; hook is not needed.</td><td>Keep <code>debugging/SKILL.md</code> as a plain skill.</td></tr>
+<tr><td>AgentKeel · HTML delivery checks, handoff, Stop block</td><td><span class="chip rm">Remove</span></td><td>Pages get written because the instruction asks.</td><td>review-page text in AGENTS.md / <code>~/.claude/CLAUDE.md</code>.</td></tr>
+<tr><td>AgentKeel · verify / pr / ship / finish</td><td><span class="chip repl">Replace</span></td><td>Used ~5 times; <code>gh</code> + ruleset give the same guarantee.</td><td><code>gh pr create</code>, <code>gh pr merge --auto --squash</code>; <code>workstream done</code> for cleanup.</td></tr>
+<tr><td>AgentKeel · session-start "where you are"</td><td><span class="chip rm">Remove</span></td><td>Harness shows cwd and branch.</td><td>Optional <code>workstream ls</code>.</td></tr>
+<tr><td>AgentKeel · legacy clone mode, isolation.py</td><td><span class="chip rm">Remove</span></td><td>Unused since 10-13.</td><td>None.</td></tr>
+<tr><td>AgentKeel · CI templates in <code>.github/agentkeel/</code></td><td><span class="chip keep">Keep</span></td><td>Repo-owned, independent.</td><td>Same files; rename folder later.</td></tr>
+<tr><td>MCPClerk · judge bridge</td><td><span class="chip rm">Remove</span></td><td>Unused, fail-closed on every MCP call.</td><td><code>permissions.ask</code> on <code>mcp__dfs-mcp__api_request</code> (paid) and <code>mcp__posthog__exec</code>.</td></tr>
+<tr><td>MCPClerk · config editing, catalog, migrate-keel</td><td><span class="chip rm">Remove</span></td><td>Zero uses; duplicates <code>claude mcp</code>.</td><td>None. Local install removed; the repo stays for later.</td></tr>
+<tr><td>AgentSlots · slot → ports/db/schema/env, sim-lock</td><td><span class="chip keep">Keep</span></td><td>Real need; already explicit.</td><td>Called from <code>workstream new</code> / <code>workstream done</code>.</td></tr>
+<tr><td>AgentSlots · Keel coupling</td><td><span class="chip simp">Simplify</span></td><td>Two call sites; both go away.</td><td>Delete <code>keel-runtime-contract.test.ts</code> and the installer's agentkeel.json step.</td></tr>
+<tr><td>AgentSlots · leases, heartbeat, pin, sweep, installer</td><td><span class="chip simp">Optional later</span></td><td>Not causing friction today.</td><td>Only if it bites: ~30-line slot script with <code>mkdir</code> locks.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="target">6. The minimal design</h2>
+<p>Everything automatic is something the harness or GitHub already does. Everything else is a command you or an agent runs on purpose.</p>
+
+<div class="two">
+<div>
+<h3>Automatic (no new code)</h3>
+<ul>
+<li>Claude Code permission prompts and auto-mode classifier for destructive git, deploys, paid calls.</li>
+<li><code>permissions.deny</code> / <code>ask</code> rules in <code>~/.claude/settings.json</code> (mockup below).</li>
+<li>GitHub ruleset on <code>main</code>: PR required, <code>agentkeel-checks</code> status required, no force push. Must exist before Stage 1 is relied on.</li>
+<li>Branch and cwd shown by the harness.</li>
+</ul>
+</div>
+<div>
+<h3>User-invoked</h3>
+<ul>
+<li><code>scripts/workstream new &lt;slug&gt; [--type feat] [--service web|db|queue|mobile …] [--prepare]</code>: sibling tree, slug branch; a slot only for the services named, chosen by the agent from the ask.</li>
+<li><code>scripts/workstream ls</code>, <code>scripts/workstream done &lt;slug&gt;</code>: list; release slot and remove when merged and clean.</li>
+<li><code>scripts/agent-slots …</code> directly for runtime-only changes.</li>
+<li><code>gh pr create</code>, <code>gh pr merge --auto --squash</code>.</li>
+<li><code>/review-page</code> and the debugging skill, as text.</li>
+</ul>
+</div>
+</div>
+
+<div class="term"><span class="cap">Mockup · scripts/workstream (one bash file, ~130 lines)</span><span class="cmd">$ scripts/workstream new release-notes --type docs</span>
+<span class="good">✓</span> worktree ~/ma-release-notes on docs/release-notes (from main)
+  bare tree: no slot attached <span class="t">(add --service web|db|queue|mobile or --prepare when needed)</span>
+  next: <span class="hi">cd ~/ma-release-notes</span>
+
+<span class="cmd">$ scripts/workstream new metro-port --type fix --service web --service db</span>
+<span class="good">✓</span> worktree ~/ma-metro-port on fix/metro-port (from main)
+<span class="t">agent-slots:</span> attached fix/metro-port to ~/ma-metro-port (slot 2; services: web, db)
+  next: <span class="hi">cd ~/ma-metro-port</span>   <span class="t">(or EnterWorktree path: ~/ma-metro-port)</span>
+
+<span class="cmd">$ scripts/workstream ls</span>
+  ~/music_analytics     main               slot -
+  ~/ma-android          feat/android       slot 1    <span class="t">2 agents here: fine</span>
+  ~/ma-release-notes    docs/release-notes slot -
+  ~/ma-metro-port       fix/metro-port     slot 2
+
+<span class="cmd">$ scripts/workstream done metro-port</span>
+<span class="bad">✗</span> refusing: fix/metro-port has 2 commits not on main and 1 modified file
+  merge the PR first, or: scripts/workstream done metro-port --force</div>
+<p class="small">The path comes from <code>git rev-parse --show-toplevel</code> of the primary checkout, never from the shell cwd, so nesting (cause D) cannot happen.</p>
+
+<div class="two">
+<div class="term"><span class="cap">Mockup · ~/.claude/settings.json additions</span>"permissions": {
+  "deny": [
+    "Bash(git push * main*)",
+    "Bash(git push origin HEAD:main*)",
+    "Bash(git push --force*)", "Bash(git push -f *)",
+    "Bash(cat .env)", "Bash(cat .env.*)",
+    "Bash(cat */.env)", "Bash(printenv)",
+    "Read(**/.env)", "Read(**/.env.local)"
+  ],
+  "ask": [
+    "mcp__dfs-mcp__api_request",    <span class="t">// paid</span>
+    "mcp__posthog__exec",           <span class="t">// may write</span>
+    "Bash(gh pr merge *)"
+  ]
+}</div>
+<div class="term"><span class="cap">Mockup · AGENTS.md replaces the managed AgentKeel block</span>## Worktrees and reports
+- Work where you were launched. Create a worktree
+  only when the user says so, or you are on main
+  with code to change.
+- New stream: <span class="hi">scripts/workstream new &lt;slug&gt;</span>
+  [--service web|db|queue|mobile …] [--prepare]
+  → sibling ../ma-&lt;slug&gt;, branch &lt;type&gt;/&lt;slug&gt;;
+  a slot only for the services the ask needs.
+  Several agents may share a tree; commit with
+  explicit paths.
+- Reviews, audits, questions: no tree, no tracked
+  edits; answer with HTML in the scratchpad or
+  an artifact.
+- Coding work keeps spec + progress HTML in /doc;
+  stream pages live in docs/. Rewrite in place.
+- Ship: gh pr create → CI → gh pr merge --auto.
+  Never push main.
+- Done: scripts/workstream done &lt;slug&gt; after the PR merges.</div>
+</div>
+
+<!-- ============================================================ -->
+<h3 id="compare" style="font-size:22px;margin-top:40px">Before / after on the same grid</h3>
+<p>Same boxes, same places. Struck-through outlines are what disappears; amber is what changes; green stays.</p>
+
+<div class="flip">
+<input type="radio" name="flip" id="flip-b" checked>
+<input type="radio" name="flip" id="flip-a">
+<div class="tabs"><label for="flip-b">Today</label><label for="flip-a">Proposed</label></div>
+
+<div class="pane pane-b"><div class="diagram">
+<svg viewBox="0 0 1100 625" role="img" aria-label="Today: the same map as section 1">
+  <g class="node" transform="translate(20,20)"><rect width="230" height="215" rx="8"/><foreignObject width="230" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Claude Code session</b><span class="m">sends every hook event to the plugin</span>
+    <span class="r">SessionStart</span><span class="r">PreToolUse · matcher *</span><span class="r">PreToolUse · Bash</span><span class="r">Stop</span>
+    <span class="m">+ its own permission prompts and auto-mode classifier run regardless</span>
+  </div></foreignObject></g>
+  <g class="node keel" transform="translate(300,20)"><rect width="360" height="320" rx="8"/><foreignObject width="360" height="320"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentKeel plugin<span class="tag repl">replace</span></b>
+    <span class="m">hooks/run.sh → python3 -I · 5,244 lines</span>
+    <div class="cols">
+      <div><span class="r">session-start.py</span><span class="r">task-guard.py · 560 lines</span><span class="r">secret-guard.py</span><span class="r">stop-report.py</span></div>
+      <div><span class="r">task.py CLI<br/><span class="m">start · resume · verify · cause · handoff · pr · ship · finish · cancel · status · init · discard · open · import · release</span></span></div>
+    </div>
+    <span class="m">agentkeel_core/: workspace, gitops, shell, shipping, delivery (HTML checks), record, isolation, clerk, host</span>
+    <span class="m">skills: review-page, debugging</span>
+    <span class="m">one task per session · one owner per worktree · start always creates</span>
+  </div></foreignObject></g>
+  <g class="node rm" transform="translate(780,20)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>MCPClerk<span class="tag rm">remove</span></b>
+    <span class="m">uv tool · ~/.local/bin/mcpclerk</span>
+    judge: JSON event on stdin → allowed or blocked
+    <span class="m">~/.mcpclerk: no catalog, no policy</span>
+    <span class="m">missing · 8 s timeout · bad JSON ⇒ block</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(780,200)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentSlots<span class="tag keep">keep</span></b>
+    <span class="r">attach · status · release · sim-lock</span>
+    <span class="m">slot N → PORT 3000+100N · db _aN · PGBOSS_SCHEMA · AGENT_SLOT</span>
+    <span class="m">Keel calls release at finish (2 call sites)</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(20,420)"><rect width="230" height="160" rx="8"/><foreignObject width="230" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Git worktrees<span class="tag keep">keep</span></b>
+    ~/music_analytics (main)<br/>~/ma-android<br/>~/ma-store-creative
+    <span class="m">created by task.py start · one owning session each · removed by force</span>
+  </div></foreignObject></g>
+  <g class="node keel" transform="translate(370,420)"><rect width="190" height="160" rx="8"/><foreignObject width="190" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Private state</b>
+    <span class="m">~/.agentkeel/</span>
+    tasks/ · 31 records<br/>overrides.jsonl · 76<br/>stop-reports/ · 63, unread<br/>opted-in, plan-gates, approvals
+  </div></foreignObject></g>
+  <g class="node" transform="translate(590,420)"><rect width="240" height="160" rx="8"/><foreignObject width="240" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>GitHub · music_analytics</b>
+    pr / ship: create and merge via gh API
+    <span class="m">CI: agentkeel-checks.yml → .github/agentkeel/*.py</span>
+    <span class="m">main auto-deploys to Railway · no ruleset verified</span>
+  </div></foreignObject></g>
+  <g class="node" transform="translate(860,420)"><rect width="220" height="160" rx="8"/><foreignObject width="220" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AGENTS.md</b>
+    task rules · <span class="m" style="display:inline">--path ../ma-&lt;slug&gt;</span><br/>"Never nest a worktree inside a worktree"
+    <span class="m">managed agentkeel block written by init</span>
+  </div></foreignObject></g>
+  <path d="M250 128 H300" class="e thick"/><text x="258" y="120" class="el">hooks</text>
+  <path d="M660 95 H780" class="e bad"/><text x="664" y="86" class="el bad">every mcp__* call</text><text x="690" y="111" class="el bad">fail-closed</text>
+  <path d="M660 270 H780" class="e"/><text x="664" y="262" class="el">release on finish</text>
+  <path d="M310 340 V500 H250" class="e"/><text x="258" y="492" class="el" transform="rotate(-90 258 492)">start creates</text>
+  <path d="M450 340 V420" class="e"/><text x="458" y="385" class="el">records · reports</text>
+  <path d="M640 340 V365 H710 V420" class="e"/><text x="718" y="412" class="el">pr / ship via gh</text>
+  <path d="M660 320 H740 V395 H970 V420" class="e"/><text x="748" y="388" class="el">init writes managed block</text>
+</svg>
+<div class="legend"><span style="--lg:var(--repl-bg);--lb:var(--repl)">AgentKeel</span><span style="--lg:var(--rm-bg);--lb:var(--rm)">Remove</span><span style="--lg:var(--keep-bg);--lb:var(--keep)">Keep</span><span style="--lg:var(--surface);--lb:var(--line)">Platform / project</span></div>
+</div></div>
+
+<div class="pane pane-a"><div class="diagram">
+<svg viewBox="0 0 1100 625" role="img" aria-label="Proposed: Claude Code with native permissions, a scripts/workstream helper, AgentSlots, git worktrees, a GitHub ruleset and a rewritten AGENTS.md; AgentKeel, MCPClerk and private state removed">
+  <g class="node new" transform="translate(20,20)"><rect width="230" height="215" rx="8"/><foreignObject width="230" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Claude Code session</b><span class="m">0 plugin hooks · native rules added</span>
+    <span class="r">permissions.deny / ask</span><span class="r">auto-mode classifier</span><span class="r">AGENTS.md conventions</span><span class="r">skills: review-page, debugging</span>
+    <span class="m">cwd and branch shown natively</span>
+  </div></foreignObject></g>
+
+  <g class="node ghost" transform="translate(300,20)"><rect width="360" height="310" rx="8"/><foreignObject width="360" height="310"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentKeel plugin</b>
+    <span class="m">removed: 4 hooks, task.py, task records, guard, delivery checks, stop report, clone mode, sizes and permissions</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(330,120)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>scripts/workstream<span class="tag new">new</span></b>
+    <span class="r">new · ls · done</span>
+    <span class="m">git worktree add / remove</span>
+    <span class="m">agent-slots attach only with --service / --prepare</span>
+    <span class="m">path from repo root, never cwd</span>
+    <span class="m">one bash file, repo-owned</span>
+  </div></foreignObject></g>
+
+  <g class="node ghost" transform="translate(780,20)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>MCPClerk</b>
+    <span class="m">removed. Paid or writing MCP tools go on permissions.ask; read-only ones are allowed once prompted.</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(780,200)"><rect width="300" height="150" rx="8"/><foreignObject width="300" height="150"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentSlots<span class="tag keep">unchanged</span></b>
+    <span class="r">attach · status · release · sim-lock</span>
+    <span class="m">slot N → PORT 3000+100N · db _aN · PGBOSS_SCHEMA · AGENT_SLOT</span>
+    <span class="m">Keel coupling deleted (2 call sites, 1 test)</span>
+  </div></foreignObject></g>
+
+  <g class="node keep" transform="translate(20,420)"><rect width="230" height="160" rx="8"/><foreignObject width="230" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Git worktrees<span class="tag keep">keep</span></b>
+    sibling per stream: ../ma-&lt;slug&gt;<br/>any number of agents per tree
+    <span class="m">created by workstream new or EnterWorktree · removed by workstream done when merged</span>
+  </div></foreignObject></g>
+  <g class="node ghost" transform="translate(370,420)"><rect width="190" height="160" rx="8"/><foreignObject width="190" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Private state</b>
+    <span class="m">~/.agentkeel archived, ~/.mcpclerk removed. No manifests, no task records.</span>
+  </div></foreignObject></g>
+  <g class="node new" transform="translate(590,420)"><rect width="240" height="160" rx="8"/><foreignObject width="240" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>GitHub<span class="tag new">ruleset</span></b>
+    <span class="r">ruleset on main</span>
+    <span class="m">PR required · status check required · no force push</span>
+    <span class="m">CI scripts unchanged</span>
+  </div></foreignObject></g>
+  <g class="node new" transform="translate(860,420)"><rect width="220" height="160" rx="8"/><foreignObject width="220" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AGENTS.md<span class="tag new">rewritten</span></b>
+    "Worktrees and reports" section replaces the managed block
+    <span class="m">agentslots block kept</span>
+  </div></foreignObject></g>
+
+  <path d="M250 195 H330" class="e"/><text x="258" y="187" class="el">user runs</text>
+  <path d="M630 240 H780" class="e"/><text x="640" y="232" class="el">attach / release</text>
+  <path d="M330 240 H285 V500 H250" class="e"/><text x="258" y="492" class="el" transform="rotate(-90 258 492)">workstream add / remove</text>
+  <path d="M135 580 V602 H710 V580" class="e"/><text x="300" y="620" class="el">gh pr create → CI → gh pr merge --auto, from any tree</text>
+</svg>
+<div class="legend"><span style="--lg:var(--keep-bg);--lb:var(--keep)">Keep</span><span style="--lg:var(--simp-bg);--lb:var(--simp)">New or changed</span><span class="ghost">Removed</span></div>
+</div></div>
+</div>
+
+<div class="tscroll"><table class="t-num">
+<tr><th>Measure</th><th>Today</th><th>Proposed</th></tr>
+<tr><td>Hooks per tool call</td><td>1, plus 1 on Bash, plus 1 at Stop</td><td>0</td></tr>
+<tr><td>Code in the loop</td><td>5,244 lines Python + MCPClerk</td><td>one bash file</td></tr>
+<tr><td>Worktree creation</td><td>Automatic on <code>start</code>, one per task id</td><td>Explicit: <code>workstream new</code> or EnterWorktree</td></tr>
+<tr><td>Agents per worktree</td><td>1, handoff via <code>--from-session</code></td><td>Any</td></tr>
+<tr><td>State on disk</td><td>task records, manifests, overrides, stop reports, opted-in, policy, mcpclerk</td><td>None new (git and agent-slots only)</td></tr>
+<tr><td>Where policy lives</td><td>agentkeel-policy.json, opted-in.json, AGENTS.md block, per-task permissions</td><td>settings.json rules, GitHub ruleset, one AGENTS.md section</td></tr>
+<tr><td>Protection of main</td><td>Plugin guard, opted-in repos only</td><td>GitHub ruleset + deny rule, every repo</td></tr>
+<tr><td>MCP calls</td><td>Fail-closed bridge to an empty catalog</td><td>ask on paid / writing tools, allow the rest</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="migration">7. Staged migration, reversible first</h2>
+<ol class="stages">
+<li><b>Switch the hooks off for a week.</b><p>In <code>~/.claude/settings.json</code> set <code>"agentkeel@agentkeel": false</code> under <code>enabledPlugins</code>. All four hooks stop; skills stop too, so paste the review-page text into <code>~/.claude/CLAUDE.md</code> for now. Add the deny and ask rules from the mockup in the same edit.</p><p class="rb">Rollback: flip the boolean back. Nothing on disk changes.</p></li>
+<li><b>Put the real safety control on GitHub.</b><p>Create a ruleset on <code>main</code> in music_analytics: pull request required, <code>agentkeel-checks</code> status required, force pushes blocked. <code>gh</code> is not authenticated here, so current protection is unverified. Do this in the same sitting as Stage 1.</p><p class="rb">Rollback: delete the ruleset.</p></li>
+<li><b>Add <code>scripts/workstream</code> and rewrite AGENTS.md.</b><p>The script lives in the slimmed AgentKeel repo (<code>bin/workstream</code>) and is copied into music_analytics. One PR there. Replace the task-rule bullets, the <code>--path ../ma-&lt;slug&gt;</code> lines, the "Never nest" rule and the whole <code>agentkeel:start … end</code> block with the mockup text. Keep the agentslots block. Align <code>docs/261006-multi-agent-isolation-reference.html</code>.</p><p class="rb">Rollback: revert the PR.</p></li>
+<li><b>Cut the AgentSlots ↔ Keel thread.</b><p>In agent-slots: delete <code>tests/keel-runtime-contract.test.ts</code> and the <code>agentkeel.json</code> step in <code>install.py</code>; drop the "AgentKeel attaches" sentence from README. Re-vendor only if the installed copy changes.</p><p class="rb">Rollback: revert the commit.</p></li>
+<li><b>Clean up state.</b><p><code>git -C ~/music_analytics worktree prune</code>; confirm <code>~/ma-provider-refresh-resilience/doc/*.html</code> is in canonical <code>docs/</code>, then delete that folder; remove <code>~/.agentkeel/stop-reports</code>; zip <code>~/.agentkeel/tasks</code> as history. <code>uv tool uninstall mcpclerk</code>; remove the <code>~/.local/bin/mcpclerk</code> symlink.</p><p class="rb">Rollback: restore from the zip; reinstall mcpclerk from the repo.</p></li>
+<li><b>Retire the plugin, slim the repo.</b><p><code>claude plugin uninstall agentkeel@agentkeel</code>; keep the marketplace entry for the hook-free 1.0. Symlink the three skills into <code>~/.claude/skills/</code>. Tag the last hook release in the agentkeel repo, then replace its contents with the script, skills, templates and this page. Uninstall mcpclerk locally; leave its repo as is. Rename <code>.github/agentkeel/</code> to <code>.github/ci/</code> when convenient (update the ruleset's check name in the same change).</p><p class="rb">Rollback: reinstall from the archived repo; tag 0.11.0 still exists.</p></li>
+<li><b>Only if it bites: shrink AgentSlots.</b><p>Not needed for the goals here. Revisit after a month of <code>workstream</code> use.</p></li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="files">8. Files, hooks, configuration and call sites affected</h2>
+<div class="tscroll"><table class="t-files">
+<tr><th>Location</th><th>What</th><th>Stage</th></tr>
+<tr><td><code>~/.claude/settings.json</code></td><td><code>enabledPlugins."agentkeel@agentkeel"</code> → false; add deny / ask rules; later remove <code>extraKnownMarketplaces.agentkeel</code>.</td><td>1, 6</td></tr>
+<tr><td><code>~/.claude/CLAUDE.md</code></td><td>Visual-HTML preference and review-page text (today only injected by the plugin).</td><td>1</td></tr>
+<tr><td>GitHub · music_analytics</td><td>Ruleset on <code>main</code>.</td><td>2</td></tr>
+<tr><td><code>music_analytics/AGENTS.md</code></td><td>Lines 12–40 (task rules), 130–160 (worktree naming, <code>--path</code>, "Never nest"), 242–298 (managed agentkeel block).</td><td>3</td></tr>
+<tr><td><code>music_analytics/scripts/workstream</code></td><td>New: copy of <code>agentkeel/bin/workstream</code>.</td><td>3</td></tr>
+<tr><td><code>music_analytics/docs/261006-multi-agent-isolation-reference.html</code></td><td>Protocol text references task.py.</td><td>3</td></tr>
+<tr><td><code>music_analytics/.github/workflows/agentkeel-checks.yml</code>, <code>.github/agentkeel/*.py</code></td><td>Keep; rename later.</td><td>6</td></tr>
+<tr><td><code>agent-slots/install.py</code>, <code>tests/keel-runtime-contract.test.ts</code>, <code>README.md</code></td><td>Remove Keel coupling.</td><td>4</td></tr>
+<tr><td><code>agentkeel/hooks/hooks.json</code> (4 registrations), <code>run.sh</code>, <code>task-guard.py</code>, <code>secret-guard.py</code>, <code>session-start.py</code>, <code>stop-report.py</code>, <code>task.py</code>, <code>agentkeel_core/*</code></td><td>Retired with the plugin. Call sites into other tools: <code>shipping.py:286</code>, <code>task.py:334</code> (agent-slots release); <code>clerk.py:19–33</code>, <code>task-guard.py:458–480</code> (mcpclerk judge).</td><td>6</td></tr>
+<tr><td><code>agentkeel/skills/review-page/SKILL.md</code>, <code>skills/debugging/SKILL.md</code></td><td>Move to <code>~/.claude/skills/</code> or AGENTS.md.</td><td>6</td></tr>
+<tr><td><code>~/.agentkeel/</code></td><td>tasks (31), overrides.jsonl, stop-reports (63), opted-in.json, plan-gates, approvals, opened, completed, backups.</td><td>5</td></tr>
+<tr><td><code>~/.mcpclerk/</code>, <code>~/.local/bin/mcpclerk</code>, uv tool install</td><td>Remove.</td><td>5</td></tr>
+<tr><td><code>~/ma-provider-refresh-resilience/</code></td><td>Stray non-git folder left by today's <code>finish</code>.</td><td>5</td></tr>
+<tr><td><code>~/.agent-slots/repos/*.lock</code> (53 empty files)</td><td>Harmless; AgentSlots owns them.</td><td>—</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="risks">9. Genuine risks after simplification</h2>
+<div class="tscroll"><table class="t-risk">
+<tr><th>Risk</th><th>What covers it afterwards</th></tr>
+<tr><td><strong>Direct push to <code>main</code>, which auto-deploys to Railway.</strong> Today the guard blocks it in opted-in repos.</td><td>GitHub ruleset (Stage 2, not optional) plus the deny rule. Until the ruleset exists, a mis-typed rule is the only gap.</td></tr>
+<tr><td><strong>Two agents editing the same file in one tree.</strong> Git has no lock.</td><td>Convention: explicit-path commits, one agent per area; the harness detects external file changes on <code>Edit</code>.</td></tr>
+<tr><td><strong>Paid or writing MCP calls.</strong> MCPClerk would have classified them if it had a catalog; it has none.</td><td><code>permissions.ask</code> prompts on each such call; the auto-mode classifier reads arguments. Slightly more prompts, no silent spend.</td></tr>
+<tr><td><strong>Secrets in transcripts.</strong></td><td>Native deny list covers the same patterns as the secret guard. Neither sees <code>python -c "print(os.environ[…])"</code>.</td></tr>
+<tr><td><strong>Stray worktrees and slots.</strong> No <code>finish</code> to clean up.</td><td><code>workstream done</code>; <code>workstream ls</code> shows leftovers; AgentSlots' lease expiry still frees slots.</td></tr>
+<tr><td><strong>Loss of the verified-candidate SHA check.</strong> Keel's ship compared the verified commit to the PR head.</td><td>A required CI status on the PR head gives the same property. Squash changes the SHA, which is fine for a single-contributor repo.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="verified">10. Verified vs assumed</h2>
+<div class="two">
+<div>
+<h3><span class="chip ok">Verified</span></h3>
+<ul>
+<li>All cited code paths read in both the installed 0.11.0 copy and the 0.12.0 repo. <code>start()</code> and <code>workspace.py</code> are identical in both.</li>
+<li>Drift: <code>task.py</code> 98 differing lines, <code>task-guard.py</code> 17, opt-in mechanism changed.</li>
+<li>Hook latency 0.10–0.14 s, measured with a probe payload. Guard active in music_analytics: a Write probe returned "no task is declared".</li>
+<li>Task records, overrides, stop-reports, opted-in list, plan-gates: read directly.</li>
+<li>No nested worktree on disk; live trees are flat siblings. <code>~/ma-provider-refresh-resilience</code> is not a git tree.</li>
+<li>MCPClerk: no catalog or policy under <code>~/.mcpclerk</code>; bridge routes every <code>mcp__*</code> tool and fails closed.</li>
+<li>AgentSlots ↔ Keel: exactly two call sites, both <code>release</code>.</li>
+<li>Harness: <code>EnterWorktree</code> / <code>ExitWorktree</code> descriptions read this session; auto-mode <code>soft_deny</code> includes <code>$defaults</code> and railway deploy.</li>
+</ul>
+</div>
+<div>
+<h3><span class="chip unv">Assumed or unverified</span></h3>
+<ul>
+<li>Transcript counts are upper bounds inflated by sessions that read the source.</li>
+<li>Whether nesting (cause D) ever happened: the code allows it and your 10-04 rule forbids it, but no nested tree or transcript path was found.</li>
+<li>GitHub branch protection on <code>main</code>: <code>gh</code> is not authenticated here.</li>
+<li>Whether subagents share the parent's <code>session_id</code> in hook payloads. If not, every subagent in an opted-in repo is blocked on its first write today.</li>
+<li>That the auto-mode classifier treats <code>git push … main</code> and force pushes as destructive by default; the deny rules do not depend on it.</li>
+<li>AgentSlots usage share: 314 transcripts mention it, but most frequent commands are agents auditing the tool itself.</li>
+</ul>
+</div>
+</div>
+
+<h2 id="status">11. Status after implementation (2026-10-21)</h2>
+<div class="tscroll"><table class="t-status">
+<tr><th>Item</th><th>Done</th><th>Note</th></tr>
+<tr><td>Plugin off, deny/ask rules, CLAUDE.md</td><td>✓</td><td><code>~/.claude/settings.json</code>; plugin uninstalled; marketplace entry kept.</td></tr>
+<tr><td>GitHub ruleset on main</td><td>✗</td><td><code>gh</code> not logged in on this machine, and the deploy reference says the private repo on GitHub Free has no branch protection. Until then the deny rule is the only guard.</td></tr>
+<tr><td><code>scripts/workstream</code> + AGENTS.md + reference pages</td><td>✓</td><td>Uncommitted in music_analytics; self-test passes; <code>agentkeel.json</code> removed; <code>mcpclerk.json</code> left in place.</td></tr>
+<tr><td>AgentSlots decoupled</td><td>✓</td><td>Uncommitted in agent-slots; 92 tests green. Vendored copy in music_analytics untouched.</td></tr>
+<tr><td>State archived</td><td>✓</td><td><code>~/.agentkeel-retired-2026-10-21/</code> holds the old home, a zip, stop reports, mcpclerk state and the settings backup.</td></tr>
+<tr><td>AgentKeel repo slimmed</td><td>✓</td><td>Uncommitted; old code deleted in the working tree. Tag the previous commit before committing.</td></tr>
+</table></div>
+
+<footer>
+<p>Not checked: AgentSlots' <code>install.py</code> and <code>agent-runtime.py</code> line by line; whether any project has an <code>mcpclerk.json</code>; the GitHub side (unauthenticated). Risk you must own: between Stage 1 and Stage 2 the only thing between an agent and <code>main</code> is a settings deny rule, so do them in the same sitting.</p>
+</footer>
+</div>

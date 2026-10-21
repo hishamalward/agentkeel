@@ -1,52 +1,12 @@
 name: validate
-
 on:
   push:
-    tags: ["v*"]
-  pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
+  pull_request:
 jobs:
-  test:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.10", "3.13"]
-    runs-on: ${{ matrix.os }}
+  selftest:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Require current main in PR head
-        if: github.event_name == 'pull_request'
-        run: git merge-base --is-ancestor origin/main HEAD
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - name: bash version and syntax
-        run: |
-          bash --version | head -1
-          for f in hooks/*.sh; do bash -n "$f"; done
-      - name: hook selftests
-        run: |
-          git config --global user.email ci@example.com
-          git config --global user.name ci
-          for f in hooks/*.py; do python3 "$f" --selftest; done
-          for f in hooks/*.sh; do bash "$f" --selftest; done
-      - name: unit tests
-        run: python3 -m unittest discover -s tests -v
-      - name: product docs links (README.md and docs/*.md)
-        run: python3 -m unittest tests.test_repo_contract.ProductDocs -v
-      - name: release check (one version everywhere; on a tag, the tag too)
-        run: python3 release_check.py ${{ startsWith(github.ref, 'refs/tags/') && format('--tag {0}', github.ref_name) || '' }}
+      - run: sudo apt-get install -y shellcheck && shellcheck -S warning bin/workstream
+      - run: bin/workstream selftest

@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: "Use for any task declared with --kind fix, or any bug: find the root cause, record a failing check first, change one thing at a time."
+description: "Use for any bug: find the root cause, record a failing check first, change one thing at a time."
 ---
 
 # Debugging
@@ -15,23 +15,12 @@ description: "Use for any task declared with --kind fix, or any bug: find the ro
    of the bug).
 5. Three failed fixes mean the design is questioned. Do not try a fourth.
 
-## What the guards enforce
-
-When the task is declared `--kind fix`:
-
-- No code edit until the evidence list holds one `task.py verify` run that failed.
-- No code edit until `task.py cause "<one line>"` is recorded.
-- The fourth edit-then-failed-verify cycle is refused until the human runs
-  `task.py reopen <task>`.
-
 ## What only you can judge
-
-A hook cannot check these two:
 
 - Is the stated cause the real cause? Trace the bad data back to where it starts.
 - Was each boundary instrumented?
 
 ## The cause line
 
-One sentence: "X causes Y because Z". Example: "The retry loop causes duplicate rows because
-it re-sends before the first insert commits."
+Write it down before editing. One sentence: "X causes Y because Z". Example: "The retry loop
+causes duplicate rows because it re-sends before the first insert commits."

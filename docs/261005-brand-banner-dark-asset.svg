@@ -20,7 +20,7 @@
   <path class="keel" d="M10 40.2h4.6l-1.2 7.6h-3.2z"/>
     </g>
     <text class="word" x="380" y="168" font-size="96">Agent<tspan>Keel</tspan></text>
-    <text class="tag" x="384" y="226" font-size="36">Tasks, worktrees, and verified delivery</text>
+    <text class="tag" x="384" y="226" font-size="36">One script, one convention, no hooks</text>
   </g>
   <g class="narrow" transform="translate(0 8.2)">
     <g transform="translate(250 6) scale(2.7)">
@@ -34,6 +34,6 @@
   <path class="keel" d="M10 40.2h4.6l-1.2 7.6h-3.2z"/>
     </g>
     <text class="word" x="440" y="142" font-size="124">Agent<tspan>Keel</tspan></text>
-    <text class="tag" x="640" y="262" font-size="58" text-anchor="middle">Tasks, worktrees, and verified delivery</text>
+    <text class="tag" x="640" y="262" font-size="58" text-anchor="middle">One script, one convention, no hooks</text>
   </g>
 </svg>
