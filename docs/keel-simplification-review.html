@@ -121,9 +121,10 @@ svg{max-width:100%;height:auto;display:block}
 .flip>input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .flip .tabs{display:flex;gap:6px;margin-bottom:10px}
 .flip .tabs label{cursor:pointer;font-family:var(--display);font-size:15px;font-weight:600;padding:7px 16px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--surface)}
-#flip-b:checked~.tabs label[for="flip-b"],#flip-a:checked~.tabs label[for="flip-a"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-#flip-b:focus-visible~.tabs label[for="flip-b"],#flip-a:focus-visible~.tabs label[for="flip-a"]{outline:2px solid var(--accent);outline-offset:2px}
-.flip .pane{display:none} #flip-b:checked~.pane-b,#flip-a:checked~.pane-a{display:block}
+#flip-b:checked~.tabs label[for="flip-b"],#flip-a:checked~.tabs label[for="flip-a"],#flip-c:checked~.tabs label[for="flip-c"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#flip-b:focus-visible~.tabs label[for="flip-b"],#flip-a:focus-visible~.tabs label[for="flip-a"],#flip-c:focus-visible~.tabs label[for="flip-c"]{outline:2px solid var(--accent);outline-offset:2px}
+.flip .pane{display:none} #flip-b:checked~.pane-b,#flip-a:checked~.pane-a,#flip-c:checked~.pane-c{display:block}
+.node.plan rect{fill:var(--surface);stroke:var(--muted);stroke-dasharray:6 5}
 .flip .diagram{margin-top:0}
 </style>
 
@@ -500,7 +501,8 @@ $ python3 task.py start metro-fix --path ../ma-metro-fix …
 <div class="flip">
 <input type="radio" name="flip" id="flip-b" checked>
 <input type="radio" name="flip" id="flip-a">
-<div class="tabs"><label for="flip-b">Today</label><label for="flip-a">Proposed</label></div>
+<input type="radio" name="flip" id="flip-c">
+<div class="tabs"><label for="flip-b">Today</label><label for="flip-a">Proposed</label><label for="flip-c">New</label></div>
 
 <div class="pane pane-b"><div class="diagram">
 <svg viewBox="0 0 1100 625" role="img" aria-label="Today: the same map as section 1">
@@ -624,6 +626,68 @@ $ python3 task.py start metro-fix --path ../ma-metro-fix …
   <path d="M135 580 V602 H710 V580" class="e"/><text x="300" y="620" class="el">gh pr create → CI → gh pr merge --auto, from any tree</text>
 </svg>
 <div class="legend"><span style="--lg:var(--keep-bg);--lb:var(--keep)">Keep</span><span style="--lg:var(--simp-bg);--lb:var(--simp)">New or changed</span><span class="ghost">Removed</span></div>
+</div></div>
+
+<div class="pane pane-c"><div class="diagram">
+<svg viewBox="0 0 1100 585" role="img" aria-label="New: the system as it runs now. A Claude Code session with native rules and four skills, scripts/workstream creating sibling git worktrees and attaching AgentSlots resources on request, AGENTS.md as the convention, GitHub pull requests for shipping, and Langfuse planned for observability and evaluation">
+  <g class="node new" transform="translate(20,20)"><rect width="230" height="215" rx="8"/><foreignObject width="230" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Claude Code session</b><span class="m">no plugin hooks</span>
+    <span class="r">permissions.deny / ask</span><span class="r">auto-mode classifier</span><span class="r">~/.claude/CLAUDE.md preferences</span>
+    <span class="m">works in whatever tree it was launched in</span>
+  </div></foreignObject></g>
+  <g class="node new" transform="translate(290,20)"><rect width="250" height="215" rx="8"/><foreignObject width="250" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Skills and practice</b>
+    <span class="r">/workstream · tree and resources</span><span class="r">/review-page · HTML, not prose</span><span class="r">/debugging · root cause first</span><span class="r">/ponytail · smallest complete change</span>
+    <span class="m">ponytail: lazy senior dev mode, lite / full / ultra</span>
+  </div></foreignObject></g>
+  <g class="node new" transform="translate(580,20)"><rect width="240" height="215" rx="8"/><foreignObject width="240" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>scripts/workstream</b>
+    <span class="r">new · ls · done</span>
+    <span class="m">sibling ../ma-&lt;slug&gt; on &lt;type&gt;/&lt;slug&gt;</span>
+    <span class="m">path from repo root, never cwd</span>
+    <span class="m">bare tree by default; --service / --prepare attach resources</span>
+    <span class="m">one bash file, repo-owned</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(860,20)"><rect width="220" height="215" rx="8"/><foreignObject width="220" height="215"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AgentSlots</b>
+    <span class="r">attach · status · release · sim-lock</span>
+    <span class="m">slot N → PORT 3000+100N · db _aN · PGBOSS_SCHEMA · AGENT_SLOT</span>
+    <span class="m">web · db · queue · mobile, only what the ask needs</span>
+  </div></foreignObject></g>
+
+  <g class="node new" transform="translate(20,400)"><rect width="230" height="160" rx="8"/><foreignObject width="230" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>AGENTS.md</b>
+    <span class="r">Workstreams and reports</span><span class="r">AgentSlots block (managed)</span>
+    <span class="m">the convention, one section</span>
+  </div></foreignObject></g>
+  <g class="node plan" transform="translate(290,400)"><rect width="250" height="160" rx="8"/><foreignObject width="250" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Langfuse<span class="tag">planned</span></b>
+    <span class="r">traces · cost per session</span><span class="r">evals on agent output</span>
+    <span class="m">observability and eval; not connected yet, nothing in the loop depends on it</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(580,400)"><rect width="240" height="160" rx="8"/><foreignObject width="240" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>Git worktrees</b>
+    sibling per stream · any number of agents · explicit-path commits
+    <span class="m">spec and progress pages in doc/</span>
+    <span class="m">removed by workstream done after merge</span>
+  </div></foreignObject></g>
+  <g class="node keep" transform="translate(860,400)"><rect width="220" height="160" rx="8"/><foreignObject width="220" height="160"><div xmlns="http://www.w3.org/1999/xhtml" class="nb">
+    <b>GitHub</b>
+    <span class="r">gh pr create → CI → gh pr merge --auto --squash</span>
+    <span class="m">deny rule on pushes to main; ruleset when the plan allows</span>
+  </div></foreignObject></g>
+
+  <path d="M250 120 H290" class="e"/><text x="254" y="112" class="el">loads</text>
+  <path d="M540 120 H580" class="e"/><text x="544" y="112" class="el">runs</text>
+  <path d="M820 120 H860" class="e"/><text x="824" y="112" class="el">attach</text>
+  <path d="M700 235 V400" class="e"/><text x="708" y="272" class="el">git worktree add / remove</text>
+  <path d="M970 235 V350 H760 V400" class="e"/><text x="770" y="342" class="el">slot marker in .git</text>
+  <path d="M200 235 V300 H620 V400" class="e"/><text x="230" y="292" class="el">works in a tree</text>
+  <path d="M130 235 V360 H420 V400" class="e" stroke-dasharray="5 4"/><text x="150" y="352" class="el">traces · evals, later</text>
+  <path d="M60 235 V400" class="e"/><text x="52" y="330" class="el" transform="rotate(-90 52 330)">reads</text>
+  <path d="M820 480 H860" class="e"/><text x="822" y="472" class="el">ship</text>
+</svg>
+<div class="legend"><span style="--lg:var(--keep-bg);--lb:var(--keep)">Keep</span><span style="--lg:var(--simp-bg);--lb:var(--simp)">New</span><span class="ghost">Planned</span></div>
 </div></div>
 </div>
 
