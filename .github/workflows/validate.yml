@@ -5,14 +5,10 @@ on:
   pull_request:
 jobs:
   selftest:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - if: runner.os == 'Linux'
-        run: sudo apt-get install -y shellcheck && shellcheck -S warning bin/workstream
+      - run: sudo apt-get install -y shellcheck && shellcheck -S warning bin/workstream
       - run: /bin/bash bin/workstream selftest
       - name: Validate plugin metadata
         run: |
@@ -28,3 +24,8 @@ jobs:
           assert 'hooks' not in codex and 'hooks' not in claude
           assert Path(codex['skills']).is_dir()
           PY
+  macos-selftest:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: /bin/bash bin/workstream selftest
