@@ -11,8 +11,9 @@
 - Several agents may share one worktree. There is no owner, no task record and no handoff.
   Commit with explicit paths, never `git commit -a`.
 - `scripts/workstream ls` shows every tree with its branch and slot. `scripts/workstream done
-  <slug>` releases the slot and removes the tree and branch; it refuses dirty trees or commits
-  not on `main` unless `--force`.
+  <slug>` releases the slot and removes the tree and branch. It requires a clean tree and commits
+  already on the local base or exactly matching committed content after a squash merge. Update
+  the local base first. Inspect remaining differences before using `--force`.
 - Reviews, audits and questions: no tree, no tracked edits. Reply with HTML in the scratchpad or
   an artifact.
 - Coding work keeps its spec and progress pages in the tree's root-level `doc/`. Rewrite

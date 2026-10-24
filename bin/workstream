@@ -61,7 +61,8 @@ cmd_new() {
   if [ ${#services[@]} -gt 0 ] || [ -n "$prepare" ]; then
     [ -x "$p/scripts/agent-slots" ] || die "no scripts/agent-slots in $p; tree created without runtime"
     local args=(attach --worktree "$path"); [ -n "$prepare" ] && args+=(--prepare)
-    local s; for s in "${services[@]}"; do args+=(--service "$s"); done
+    # Bash 3.2 treats an empty array as unset under nounset.
+    local s; for s in ${services[@]+"${services[@]}"}; do args+=(--service "$s"); done
     (cd "$p" && scripts/agent-slots "${args[@]}")
   else
     echo "  bare tree: no slot attached (add --service web|db|queue|mobile or --prepare when needed)"
@@ -86,31 +87,79 @@ cmd_done() {
   local branch; branch=$(git -C "$path" symbolic-ref --quiet --short HEAD || echo "")
   local base; base=$(default_base "$p")
   local dirty; dirty=$(git -C "$path" status --porcelain | wc -l | tr -d ' ')
-  local ahead=0; [ -n "$branch" ] && ahead=$(git -C "$p" rev-list --count "$base..$branch")
-  if [ -z "$force" ] && { [ "$dirty" -gt 0 ] || [ "$ahead" -gt 0 ]; }; then
+  local ahead; ahead=$(git -C "$path" rev-list --count "$base..HEAD")
+  local base_tree head_tree
+  base_tree=$(git -C "$path" rev-parse "$base^{tree}"); head_tree=$(git -C "$path" rev-parse 'HEAD^{tree}')
+  if [ -z "$force" ] && { [ "$dirty" -gt 0 ] || { [ "$ahead" -gt 0 ] && [ "$base_tree" != "$head_tree" ]; }; }; then
     die "refusing: $branch has $ahead commit(s) not on $base and $dirty modified file(s). Merge the PR first, or: workstream done $slug --force"
   fi
   if [ "$(slot_of "$path")" != "-" ] && [ -x "$p/scripts/agent-slots" ]; then
     (cd "$p" && scripts/agent-slots release --worktree "$path")
   fi
   git -C "$p" worktree remove ${force:+--force} "$path"
-  if [ -n "$branch" ]; then git -C "$p" branch "$([ -n "$force" ] && echo -D || echo -d)" "$branch"; fi
+  local delete=-d
+  # Squash merges have different commit IDs; content was checked before removing the tree.
+  if [ -n "$force" ] || [ "$ahead" -gt 0 ]; then delete=-D; fi
+  if [ -n "$branch" ]; then git -C "$p" branch "$delete" "$branch"; fi
   echo "✓ removed $path${branch:+ and branch $branch}"
 }
 
 cmd_selftest() {  # end-to-end check in a throwaway repository
-  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  tmp=$(mktemp -d); tmp=$(cd "$tmp" && pwd -P); trap 'rm -rf "$tmp"' EXIT
   git -C "$tmp" init -q -b main demo && cd "$tmp/demo" && echo a > a && git add a && git -c user.name=t -c user.email=t@t commit -qm init
-  "$SELF" new metro-port --type fix >/dev/null
+  "$BASH" "$SELF" new metro-port --type fix >/dev/null
   [ -d "$tmp/demo-metro-port" ] || die "selftest: tree not created as a sibling"
   [ "$(git -C "$tmp/demo-metro-port" symbolic-ref --short HEAD)" = fix/metro-port ] || die "selftest: wrong branch"
-  mkdir -p "$tmp/demo/sub" && (cd "$tmp/demo/sub" && "$SELF" new nested-check >/dev/null)
+  mkdir -p "$tmp/demo/sub" && (cd "$tmp/demo/sub" && "$BASH" "$SELF" new nested-check >/dev/null)
   [ -d "$tmp/demo-nested-check" ] || die "selftest: path depends on cwd"
-  "$SELF" ls | grep "demo-metro-port.*fix/metro-port.*slot -" >/dev/null || die "selftest: ls output"
+  "$BASH" "$SELF" ls | grep "demo-metro-port.*fix/metro-port.*slot -" >/dev/null || die "selftest: ls output"
   echo b > "$tmp/demo-metro-port/b"
-  ! "$SELF" "done" metro-port >/dev/null 2>&1 || die "selftest: done did not refuse a dirty tree"
-  "$SELF" "done" metro-port --force >/dev/null && "$SELF" "done" nested-check >/dev/null
+  ! "$BASH" "$SELF" "done" metro-port >/dev/null 2>&1 || die "selftest: done did not refuse a dirty tree"
+  "$BASH" "$SELF" "done" metro-port --force >/dev/null && "$BASH" "$SELF" "done" nested-check >/dev/null
   [ ! -d "$tmp/demo-metro-port" ] && ! git show-ref --verify --quiet refs/heads/fix/metro-port || die "selftest: cleanup"
+
+  mkdir scripts
+  cat > scripts/agent-slots <<'SLOT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > slot-args
+SLOT
+  chmod +x scripts/agent-slots
+  "$BASH" "$SELF" new prepare-only --prepare >/dev/null
+  printf '%s\n' attach --worktree "$tmp/demo-prepare-only" --prepare > expected-args
+  cmp expected-args slot-args || die "selftest: prepare arguments"
+  "$BASH" "$SELF" "done" prepare-only >/dev/null
+  "$BASH" "$SELF" new services --service web --service db --prepare >/dev/null
+  printf '%s\n' attach --worktree "$tmp/demo-services" --prepare --service web --service db > expected-args
+  cmp expected-args slot-args || die "selftest: service arguments"
+  "$BASH" "$SELF" "done" services >/dev/null
+
+  "$BASH" "$SELF" new squash >/dev/null
+  echo b > "$tmp/demo-squash/a"
+  git -C "$tmp/demo-squash" add a
+  git -C "$tmp/demo-squash" -c user.name=t -c user.email=t@t commit -qm first
+  echo c > "$tmp/demo-squash/a"
+  git -C "$tmp/demo-squash" add a
+  git -C "$tmp/demo-squash" -c user.name=t -c user.email=t@t commit -qm second
+  ! "$BASH" "$SELF" "done" squash >/dev/null 2>&1 || die "selftest: done removed unmerged work"
+  git -C "$tmp/demo-squash" checkout --detach -q
+  ! "$BASH" "$SELF" "done" squash >/dev/null 2>&1 || die "selftest: done removed detached unmerged work"
+  git -C "$tmp/demo-squash" checkout -q feat/squash
+  git merge --squash feat/squash >/dev/null
+  git -c user.name=t -c user.email=t@t commit -qm squash
+  echo dirty > "$tmp/demo-squash/untracked"
+  ! "$BASH" "$SELF" "done" squash >/dev/null 2>&1 || die "selftest: done removed dirty squash tree"
+  rm "$tmp/demo-squash/untracked"
+  "$BASH" "$SELF" "done" squash >/dev/null
+  [ ! -d "$tmp/demo-squash" ] && ! git show-ref --verify --quiet refs/heads/feat/squash || die "selftest: squash cleanup"
+
+  "$BASH" "$SELF" new merged >/dev/null
+  echo d > "$tmp/demo-merged/a"
+  git -C "$tmp/demo-merged" add a
+  git -C "$tmp/demo-merged" -c user.name=t -c user.email=t@t commit -qm merged
+  git merge --ff-only feat/merged >/dev/null
+  echo e > a
+  git add a && git -c user.name=t -c user.email=t@t commit -qm later
+  "$BASH" "$SELF" "done" merged >/dev/null
   echo "workstream selftest: PASS"
 }
 
