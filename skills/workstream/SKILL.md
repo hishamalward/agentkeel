@@ -27,8 +27,10 @@ scripts/workstream done <slug> [--force]
 
 `new` computes the path from the repository root (never from the shell cwd), so trees are never
 nested. It attaches an AgentSlots slot only when you pass `--service` or `--prepare`; the default
-is a bare tree. `done` releases the slot, then removes the tree and branch; it refuses a dirty
-tree or unmerged commits unless `--force`.
+is a bare tree. `done` releases the slot, then removes the tree and branch. It requires a clean
+tree and commits already on the local base or exactly matching committed content after a squash
+merge. Update the local base first. If it has since changed, inspect the remaining differences
+before using `--force`, which also permits deleting uncommitted work.
 
 ## Choose resources from the ask
 

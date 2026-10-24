@@ -5,8 +5,26 @@ on:
   pull_request:
 jobs:
   selftest:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get install -y shellcheck && shellcheck -S warning bin/workstream
-      - run: bin/workstream selftest
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y shellcheck && shellcheck -S warning bin/workstream
+      - run: /bin/bash bin/workstream selftest
+      - name: Validate plugin metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          codex = json.loads(Path('.codex-plugin/plugin.json').read_text())
+          claude = json.loads(Path('.claude-plugin/plugin.json').read_text())
+          marketplace = json.loads(Path('.claude-plugin/marketplace.json').read_text())
+          agents = json.loads(Path('.agents/plugins/marketplace.json').read_text())
+          assert codex['version'] == claude['version'] == marketplace['plugins'][0]['version']
+          assert codex['description'] == claude['description'] == marketplace['plugins'][0]['description'] == agents['plugins'][0]['description']
+          assert 'hooks' not in codex and 'hooks' not in claude
+          assert Path(codex['skills']).is_dir()
+          PY

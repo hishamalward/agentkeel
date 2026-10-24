@@ -19,7 +19,8 @@ Until 0.12 AgentKeel was a Claude Code plugin with four hooks, task declarations
 ownership and a fail-closed MCP bridge. It was retired on 2026-10-21 because it created worktrees
 nobody asked for and made two agents in one tree impossible. The review that led here, with the
 evidence and the before/after architecture, is [docs/keel-simplification-review.html](docs/keel-simplification-review.html).
-The last hook-based release is tagged `v0.12.0`.
+The skills-only release is [v1.0.0](https://github.com/hishamalward/agentkeel/releases/tag/v1.0.0).
+The `v0.12.0` tag preserves the last hook-based release; it does not contain the 1.0 rewrite.
 
 ## What you get
 
@@ -37,7 +38,7 @@ The last hook-based release is tagged `v0.12.0`.
 Copy one file into your repository and make it executable:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hishamalward/agentkeel/main/bin/workstream -o scripts/workstream
+curl -fsSL https://raw.githubusercontent.com/hishamalward/agentkeel/v1.0.0/bin/workstream -o scripts/workstream
 chmod +x scripts/workstream
 scripts/workstream selftest
 ```
@@ -66,8 +67,11 @@ scripts/workstream done weekly-recap                      # after the PR merges
   `.agent-slots.conf` when present, otherwise `<repo-name>-`.
 - `--service` and `--prepare` are passed through to [AgentSlots](https://github.com/hishamalward/agent-slots)
   (`scripts/agent-slots attach`) when the repository has it. Without them the tree is bare.
-- `done` releases the slot, then removes the tree and branch. It refuses a dirty tree or commits
-  that are not on the base branch unless you pass `--force`.
+- `done` releases the slot, then removes the tree and branch. It requires a clean tree and either
+  commits already on the local base branch or exactly matching committed content (a squash merge).
+  Update your local base after merging. If the base has since changed and the content differs,
+  cleanup still refuses; inspect the differences before using `--force`, which also permits
+  deleting uncommitted work.
 
 ## The convention
 
